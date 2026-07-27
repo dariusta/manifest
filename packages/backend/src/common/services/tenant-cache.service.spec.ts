@@ -2,21 +2,33 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { TenantCacheService } from './tenant-cache.service';
 import { Tenant } from '../../entities/tenant.entity';
+import { TenantMember } from '../../entities/tenant-member.entity';
 
 describe('TenantCacheService', () => {
   let service: TenantCacheService;
   let mockFindOne: jest.Mock;
   let mockInsert: jest.Mock;
+  let mockMemberFindOne: jest.Mock;
 
   beforeEach(async () => {
     mockFindOne = jest.fn();
     mockInsert = jest.fn().mockResolvedValue({});
+    mockMemberFindOne = jest.fn().mockResolvedValue(null);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TenantCacheService,
         {
           provide: getRepositoryToken(Tenant),
           useValue: { findOne: mockFindOne, insert: mockInsert },
+        },
+        {
+          provide: getRepositoryToken(TenantMember),
+          useValue: {
+            findOne: mockMemberFindOne,
+            find: jest.fn().mockResolvedValue([]),
+            insert: jest.fn().mockResolvedValue({}),
+            delete: jest.fn().mockResolvedValue({ affected: 1 }),
+          },
         },
       ],
     }).compile();

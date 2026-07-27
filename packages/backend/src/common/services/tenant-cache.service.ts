@@ -3,7 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { Tenant } from '../../entities/tenant.entity';
+import { TenantMember, TenantMemberRole } from '../../entities/tenant-member.entity';
 import { TtlFifoCache } from '../utils/ttl-fifo-cache';
+
+export type WorkspaceRole = 'owner' | TenantMemberRole;
 
 /**
  * The ONE place user→tenant resolution happens. Everything downstream is
@@ -17,9 +20,18 @@ export class TenantCacheService {
     ttlMs: 300_000,
   });
 
+  // userId:tenantId → role ('none' = checked and not a member; cached briefly
+  // so a revoked member loses access within the TTL).
+  private readonly roleCache = new TtlFifoCache<string, WorkspaceRole | 'none'>({
+    maxEntries: 10_000,
+    ttlMs: 60_000,
+  });
+
   constructor(
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
+    @InjectRepository(TenantMember)
+    private readonly memberRepo: Repository<TenantMember>,
   ) {}
 
   async resolve(userId: string): Promise<string | null> {
@@ -35,10 +47,85 @@ export class TenantCacheService {
       userId,
       async (uid) => {
         const tenant = await this.tenantRepo.findOne({ where: { owner_user_id: uid } });
-        return tenant?.id ?? null;
+        if (tenant) return tenant.id;
+        // No owned tenant: fall back to the oldest workspace membership so
+        // invited-only users land somewhere instead of a null tenant.
+        const membership = await this.memberRepo.findOne({
+          where: { user_id: uid },
+          order: { created_at: 'ASC' },
+        });
+        return membership?.tenant_id ?? null;
       },
       (tenantId) => tenantId !== null,
     );
+  }
+
+  /**
+   * The user's role in a specific tenant: 'owner' via tenants.owner_user_id
+   * (implicit — owners have no tenant_members row), else the membership row's
+   * role, else null.
+   */
+  async roleFor(userId: string, tenantId: string): Promise<WorkspaceRole | null> {
+    const cached = await this.roleCache.resolve(`${userId}:${tenantId}`, async () => {
+      const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
+      if (!tenant || !tenant.is_active) return 'none';
+      if (tenant.owner_user_id === userId) return 'owner';
+      const member = await this.memberRepo.findOne({
+        where: { tenant_id: tenantId, user_id: userId },
+      });
+      return member ? member.role : 'none';
+    });
+    return cached === 'none' ? null : cached;
+  }
+
+  /**
+   * Resolve the tenant to scope this request by. When the client requested a
+   * specific workspace (cookie), honor it only if the user actually has
+   * access; otherwise fall back to the default resolution.
+   */
+  async resolveActive(
+    userId: string,
+    requestedTenantId: string | null,
+  ): Promise<{ tenantId: string | null; role: WorkspaceRole | null }> {
+    if (requestedTenantId) {
+      const role = await this.roleFor(userId, requestedTenantId);
+      if (role) return { tenantId: requestedTenantId, role };
+    }
+    const tenantId = await this.resolve(userId);
+    if (!tenantId) return { tenantId: null, role: null };
+    return { tenantId, role: await this.roleFor(userId, tenantId) };
+  }
+
+  /** All workspaces the user can access (owned + memberships). */
+  async listForUser(
+    userId: string,
+  ): Promise<Array<{ id: string; name: string; role: WorkspaceRole }>> {
+    const owned = await this.tenantRepo.find({ where: { owner_user_id: userId } });
+    const memberships = await this.memberRepo.find({
+      where: { user_id: userId },
+      order: { created_at: 'ASC' },
+    });
+    const memberTenants = memberships.length
+      ? await this.tenantRepo
+          .createQueryBuilder('t')
+          .where('t.id IN (:...ids)', { ids: memberships.map((m) => m.tenant_id) })
+          .andWhere('t.is_active = true')
+          .getMany()
+      : [];
+    const roleByTenant = new Map(memberships.map((m) => [m.tenant_id, m.role]));
+    return [
+      ...owned.map((t) => ({ id: t.id, name: t.name, role: 'owner' as WorkspaceRole })),
+      ...memberTenants.map((t) => ({
+        id: t.id,
+        name: t.name,
+        role: (roleByTenant.get(t.id) ?? 'member') as WorkspaceRole,
+      })),
+    ];
+  }
+
+  /** Drop a cached role so grants/revocations apply on the next request. */
+  invalidateRole(userId: string, tenantId: string): void {
+    this.roleCache.invalidate(`${userId}:${tenantId}`);
   }
 
   /**

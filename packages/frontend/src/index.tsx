@@ -1,5 +1,6 @@
 /* @refresh reload */
 import { render } from 'solid-js/web';
+import WorkspaceMembers from './pages/WorkspaceMembers';
 import { Router, Route, Navigate } from '@solidjs/router';
 import { MetaProvider, Title } from '@solidjs/meta';
 import App from './App.jsx';
@@ -73,6 +74,7 @@ render(
           <Route path="/overview" component={GlobalOverview} />
           <Route path="/messages" component={MessageLog} />
           <Route path="/harnesses" component={Workspace} />
+          <Route path="/workspaces" component={WorkspaceMembers} />
           <Route path="/playground" component={Playground} />
           <Route path="/providers/subscriptions" component={Subscriptions} />
           <Route path="/providers/usage-based" component={Byok} />

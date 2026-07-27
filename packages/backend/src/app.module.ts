@@ -29,6 +29,7 @@ import { GithubModule } from './github/github.module';
 import { PublicStatsModule } from './public-stats/public-stats.module';
 import { ErrorPagesModule } from './error-pages/error-pages.module';
 import { SetupModule } from './setup/setup.module';
+import { WorkspacesModule } from './workspaces/workspaces.module';
 import { FreeModelsModule } from './free-models/free-models.module';
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { WaitlistModule } from './waitlist/waitlist.module';
@@ -97,6 +98,7 @@ const sentryDebugControllers =
     PublicStatsModule,
     ErrorPagesModule,
     SetupModule,
+    WorkspacesModule,
     FreeModelsModule,
     TelemetryModule,
     BackfillModule,

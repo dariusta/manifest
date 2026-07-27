@@ -17,6 +17,12 @@ export interface TenantContext {
   tenantId: string | null;
   /** The authenticated user, when one exists. Attribution only — never scope by it. */
   userId: string | null;
+  /**
+   * The user's role in the resolved workspace ('owner' | 'admin' | 'member').
+   * Absent for API-key auth and legacy paths — treat undefined as 'owner'
+   * (the pre-workspaces behavior).
+   */
+  role?: 'owner' | 'admin' | 'member' | null;
 }
 
 export type RequestWithTenantContext = Request & { tenantContext?: TenantContext };
