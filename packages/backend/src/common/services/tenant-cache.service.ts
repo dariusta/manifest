@@ -113,8 +113,12 @@ export class TenantCacheService {
           .getMany()
       : [];
     const roleByTenant = new Map(memberships.map((m) => [m.tenant_id, m.role]));
+    // Auto-created personal tenants mirror the user id as their name — an
+    // opaque string nobody chose. Show those as "Personal" in the UI.
+    const displayName = (t: Tenant) =>
+      t.owner_user_id && t.name === t.owner_user_id ? 'Personal' : t.name;
     return [
-      ...owned.map((t) => ({ id: t.id, name: t.name, role: 'owner' as WorkspaceRole })),
+      ...owned.map((t) => ({ id: t.id, name: displayName(t), role: 'owner' as WorkspaceRole })),
       ...memberTenants.map((t) => ({
         id: t.id,
         name: t.name,

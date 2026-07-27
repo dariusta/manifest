@@ -62,7 +62,7 @@ const WorkspaceSwitcher: Component = () => {
       <div class="workspace-switcher" style="position: relative; margin-right: 12px;">
         <button
           class="header__gear-btn"
-          style="display: flex; align-items: center; gap: 6px; max-width: 220px;"
+          style="display: flex; align-items: center; gap: 6px; max-width: 220px; min-width: 0;"
           onClick={() => setOpen(!open())}
           aria-haspopup="menu"
           aria-expanded={open()}
@@ -84,12 +84,12 @@ const WorkspaceSwitcher: Component = () => {
             <rect x="14" y="14" width="7" height="7" />
             <rect x="3" y="14" width="7" height="7" />
           </svg>
-          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 40px;">
             {active()?.name ?? 'Workspace'}
           </span>
         </button>
         <Show when={open()}>
-          <div class="header__dropdown" role="menu" style="right: auto; left: 0; min-width: 240px;">
+          <div class="header__dropdown" role="menu" style="left: auto; right: 0; min-width: 240px; max-width: 300px;">
             <div class="header__dropdown-header">
               <span class="header__dropdown-name">Workspaces</span>
             </div>
@@ -99,11 +99,11 @@ const WorkspaceSwitcher: Component = () => {
                 <button
                   class="header__dropdown-item"
                   role="menuitem"
-                  style={ws.id === data()?.activeTenantId ? 'font-weight: 600;' : undefined}
+                  style={`display: flex; align-items: center; gap: 8px; white-space: nowrap;${ws.id === data()?.activeTenantId ? ' font-weight: 600;' : ''}`}
                   onClick={() => void handleSwitch(ws.id)}
                 >
-                  {ws.name}
-                  <span style="margin-left: auto; opacity: 0.6; font-size: 11px;">
+                  <span style="overflow: hidden; text-overflow: ellipsis;">{ws.name}</span>
+                  <span style="margin-left: auto; opacity: 0.6; font-size: 11px; flex-shrink: 0;">
                     {ws.id === data()?.activeTenantId ? '✓ ' : ''}
                     {ws.role}
                   </span>
@@ -129,7 +129,7 @@ const WorkspaceSwitcher: Component = () => {
                   placeholder="Workspace name"
                   value={newName()}
                   onInput={(e) => setNewName(e.currentTarget.value)}
-                  style="width: 100%; box-sizing: border-box; padding: 6px 8px;"
+                  style="width: 100%; box-sizing: border-box; padding: 6px 8px; background: transparent; color: inherit; border: 1px solid rgba(128,128,128,0.4); border-radius: 6px; outline: none; font: inherit;"
                   autofocus
                 />
               </form>
