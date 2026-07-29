@@ -683,6 +683,13 @@ tr:hover .connection-label-cell__edit,
   margin: 0;
 }
 
+/* Disconnect sits below the always-visible add-a-connection form when a
+   subscription is already connected; __disconnect zeroes the shared
+   margin-top, so restore breathing room after the paste block. */
+.anthropic-detail__alt + .provider-detail__disconnect {
+  margin-top: 24px;
+}
+
 .provider-detail__disconnect:hover {
   background: hsl(var(--destructive) / 0.08);
 }

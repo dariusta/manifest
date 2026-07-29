@@ -37,12 +37,19 @@ interface Props {
 }
 
 const MAX_LABEL_LENGTH = 50;
+/** Mirrors MAX_KEYS_PER_PROVIDER in the backend's provider.service.ts. */
+const MAX_CONNECTIONS_PER_PROVIDER = 5;
 
 /**
  * Anthropic subscription connect view. Sign in with Claude opens an OAuth
  * popup; the user pastes the resulting `<code>#<state>` payload back into
  * the input. Tokens are stored as refreshable JSON blobs and rotated by
  * the proxy automatically on every request.
+ *
+ * The sign-in button and paste field stay on screen once a subscription is
+ * connected — pasting a fresh code is how a second account gets added, and
+ * gating the field behind an "adding" flag stranded users with a copied code
+ * and nowhere to put it whenever the popup was blocked or authorize failed.
  */
 const AnthropicOAuthDetailView: Component<Props> = (props) => {
   const [state, setState] = createSignal<string | null>(null);
@@ -50,16 +57,18 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
   const [error, setError] = createSignal<string | null>(null);
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
-  const [addingAccount, setAddingAccount] = createSignal(false);
 
-  const isMultiKey = () => (props.activeKeys?.() ?? []).length > 1;
-  const showConnectFlow = () => !props.connected() || addingAccount();
-  const showConnectedFlow = () => props.connected() && !addingAccount();
+  const connectionCount = () => (props.activeKeys?.() ?? []).length;
+  const isMultiKey = () => connectionCount() > 1;
+  // The exchange is rejected past the cap, so stop offering the form there
+  // rather than letting the paste fail server-side.
+  const showConnectForm = () =>
+    !props.connected() || connectionCount() < MAX_CONNECTIONS_PER_PROVIDER;
 
-  // When "Add another key" is clicked in the header, launch a new OAuth popup.
+  // "Add connection" in the header only has to launch the popup — the paste
+  // field below is already rendered.
   createEffect(() => {
     if (props.addKeyOpen?.() && props.connected() && !props.busy()) {
-      setAddingAccount(true);
       props.setAddKeyOpen?.(false);
       void handleSignIn();
     }
@@ -89,10 +98,8 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
           'Popup was blocked by your browser. Allow popups for this site, then try again.',
         );
         setState(null);
-        if (props.connected()) setAddingAccount(false);
       }
     } catch {
-      if (props.connected()) setAddingAccount(false);
       // error toast from fetchMutate
     } finally {
       props.setBusy(false);
@@ -117,13 +124,18 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
       return;
     }
 
+    // Read before the exchange: `connected` flips once onUpdate refreshes.
+    const wasConnected = props.connected();
     props.setBusy(true);
     setError(null);
     try {
       const authState = state() ?? pastedState;
       await submitAnthropicOAuth(props.agentName, raw, authState);
-      toast.success(`${props.provDef.name} subscription connected`);
-      setAddingAccount(false);
+      toast.success(
+        wasConnected
+          ? `${props.provDef.name} connection added`
+          : `${props.provDef.name} subscription connected`,
+      );
       setInput('');
       setState(null);
       props.onUpdate();
@@ -136,13 +148,6 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
     } finally {
       props.setBusy(false);
     }
-  };
-
-  const cancelAddAccount = () => {
-    setAddingAccount(false);
-    setInput('');
-    setError(null);
-    setState(null);
   };
 
   const handleDisconnect = async () => {
@@ -212,71 +217,7 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
 
   return (
     <>
-      <Show when={showConnectFlow()}>
-        <div class="anthropic-detail__primary">
-          <p class="provider-detail__hint">
-            Sign in with your Claude Pro or Max account. Manifest will route through your
-            subscription with auto-refreshing tokens.
-          </p>
-          <button
-            class="btn btn--primary anthropic-detail__btn"
-            disabled={props.busy()}
-            onClick={handleSignIn}
-          >
-            <Show when={!props.busy()} fallback={<span class="spinner" />}>
-              Sign in with Claude
-            </Show>
-          </button>
-        </div>
-
-        <div class="anthropic-detail__alt">
-          <div class="anthropic-detail__alt-divider">
-            <span>Paste the authorization code</span>
-          </div>
-          <p class="anthropic-detail__alt-hint">
-            After signing in, Anthropic's redirect page shows a code. Copy the full string and paste
-            it below.
-          </p>
-          <input
-            class="provider-detail__input provider-detail__input--masked"
-            classList={{ 'provider-detail__input--error': !!error() }}
-            type="text"
-            autocomplete="off"
-            placeholder="Authorization code"
-            aria-label="Anthropic authorization code"
-            value={input()}
-            onInput={(e) => {
-              setInput(e.currentTarget.value);
-              setError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleSubmit();
-            }}
-          />
-          <Show when={error()}>
-            <div class="provider-detail__error">{error()}</div>
-          </Show>
-          <button
-            class="btn btn--primary anthropic-detail__btn"
-            disabled={props.busy() || !input().trim()}
-            onClick={handleSubmit}
-          >
-            <Show when={!props.busy()} fallback={<span class="spinner" />}>
-              Connect
-            </Show>
-          </button>
-        </div>
-        <Show when={addingAccount()}>
-          <button
-            class="btn btn--outline provider-detail__action"
-            disabled={props.busy()}
-            onClick={cancelAddAccount}
-          >
-            Cancel
-          </button>
-        </Show>
-      </Show>
-      <Show when={showConnectedFlow()}>
+      <Show when={props.connected()}>
         {/* Multi-key list */}
         <Show when={isMultiKey()}>
           <div class="provider-detail__field">
@@ -367,15 +308,6 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
               </For>
             </ul>
           </div>
-          <button
-            class="btn btn--outline provider-detail__action provider-detail__disconnect"
-            disabled={props.busy()}
-            onClick={handleDisconnect}
-          >
-            <Show when={!props.busy()} fallback={<span class="spinner" />}>
-              Disconnect all
-            </Show>
-          </button>
         </Show>
         {/* Single key — original view */}
         <Show when={!isMultiKey()}>
@@ -384,16 +316,89 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
               Connected via {props.provDef.subscriptionLabel ?? 'subscription'}
             </span>
           </div>
+        </Show>
+      </Show>
+
+      <Show when={showConnectForm()}>
+        <div class="anthropic-detail__primary">
+          <Show when={props.connected()}>
+            <div class="anthropic-detail__alt-divider">
+              <span>Add another connection</span>
+            </div>
+          </Show>
+          <p class="provider-detail__hint">
+            <Show
+              when={props.connected()}
+              fallback="Sign in with your Claude Pro or Max account. Manifest will route through your subscription with auto-refreshing tokens."
+            >
+              Sign in with a different Claude Pro or Max account to route across more than one
+              subscription.
+            </Show>
+          </p>
           <button
-            class="btn btn--outline provider-detail__action provider-detail__disconnect"
+            class="btn btn--primary anthropic-detail__btn"
             disabled={props.busy()}
-            onClick={handleDisconnect}
+            onClick={handleSignIn}
           >
             <Show when={!props.busy()} fallback={<span class="spinner" />}>
-              Disconnect
+              Sign in with Claude
             </Show>
           </button>
-        </Show>
+        </div>
+
+        <div class="anthropic-detail__alt">
+          <div class="anthropic-detail__alt-divider">
+            <span>Paste the authorization code</span>
+          </div>
+          <p class="anthropic-detail__alt-hint">
+            After signing in, Anthropic's redirect page shows a code. Copy the full string and paste
+            it below.
+          </p>
+          <input
+            class="provider-detail__input provider-detail__input--masked"
+            classList={{ 'provider-detail__input--error': !!error() }}
+            type="text"
+            autocomplete="off"
+            placeholder="Authorization code"
+            aria-label="Anthropic authorization code"
+            value={input()}
+            onInput={(e) => {
+              setInput(e.currentTarget.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSubmit();
+            }}
+          />
+          <Show when={error()}>
+            <div class="provider-detail__error">{error()}</div>
+          </Show>
+          <button
+            class="btn btn--primary anthropic-detail__btn"
+            disabled={props.busy() || !input().trim()}
+            onClick={handleSubmit}
+          >
+            <Show when={!props.busy()} fallback={<span class="spinner" />}>
+              <Show when={props.connected()} fallback="Connect">
+                Add connection
+              </Show>
+            </Show>
+          </button>
+        </div>
+      </Show>
+
+      <Show when={props.connected()}>
+        <button
+          class="btn btn--outline provider-detail__action provider-detail__disconnect"
+          disabled={props.busy()}
+          onClick={handleDisconnect}
+        >
+          <Show when={!props.busy()} fallback={<span class="spinner" />}>
+            <Show when={isMultiKey()} fallback="Disconnect">
+              Disconnect all
+            </Show>
+          </Show>
+        </button>
       </Show>
     </>
   );
