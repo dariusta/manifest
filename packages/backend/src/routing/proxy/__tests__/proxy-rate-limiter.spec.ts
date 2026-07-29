@@ -1,5 +1,11 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { ProxyRateLimiter } from '../proxy-rate-limiter';
+import {
+  DEFAULT_CONCURRENCY_MAX,
+  DEFAULT_IP_RATE_MAX_REQUESTS,
+  DEFAULT_RATE_MAX_REQUESTS,
+  ProxyRateLimiter,
+  parseProxyLimit,
+} from '../proxy-rate-limiter';
 
 describe('ProxyRateLimiter', () => {
   let limiter: ProxyRateLimiter;
@@ -130,6 +136,26 @@ describe('ProxyRateLimiter', () => {
       expect(rates.size).toBeLessThanOrEqual(50_000);
       expect(rates.has('old-user-0')).toBe(false);
       expect(rates.has('new-user')).toBe(true);
+    });
+
+    it('evicts the oldest IP entry when the IP map exceeds 50K entries', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ipRates = (limiter as any).ipRates as Map<
+        string,
+        { count: number; windowStart: number }
+      >;
+
+      for (let i = 0; i < 50_000; i++) {
+        ipRates.set(`10.0.0.${i}`, { count: 1, windowStart: Date.now() });
+      }
+
+      expect(ipRates.size).toBe(50_000);
+
+      limiter.checkIpLimit('192.168.1.1');
+
+      expect(ipRates.size).toBeLessThanOrEqual(50_000);
+      expect(ipRates.has('10.0.0.0')).toBe(false);
+      expect(ipRates.has('192.168.1.1')).toBe(true);
     });
   });
 
@@ -381,5 +407,104 @@ describe('ProxyRateLimiter', () => {
       expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
       clearIntervalSpy.mockRestore();
     });
+  });
+});
+
+describe('parseProxyLimit', () => {
+  it('falls back to the default when unset or blank', () => {
+    expect(parseProxyLimit(undefined, 200)).toBe(200);
+    expect(parseProxyLimit('', 200)).toBe(200);
+    expect(parseProxyLimit('   ', 200)).toBe(200);
+  });
+
+  it('falls back to the default on an unparseable value', () => {
+    // A typo must never silently uncap a public gateway.
+    expect(parseProxyLimit('unlimited', 200)).toBe(200);
+    expect(parseProxyLimit('abc', 10)).toBe(10);
+  });
+
+  it('treats zero and negatives as unlimited', () => {
+    expect(parseProxyLimit('0', 200)).toBe(Infinity);
+    expect(parseProxyLimit('-1', 200)).toBe(Infinity);
+  });
+
+  it('returns an explicit positive limit', () => {
+    expect(parseProxyLimit('42', 200)).toBe(42);
+  });
+});
+
+describe('ProxyRateLimiter env overrides', () => {
+  const ENV_KEYS = [
+    'PROXY_RATE_MAX_REQUESTS',
+    'PROXY_IP_RATE_MAX_REQUESTS',
+    'PROXY_CONCURRENCY_MAX',
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+  let limiter: ProxyRateLimiter | undefined;
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
+  });
+
+  afterEach(() => {
+    limiter?.onModuleDestroy();
+    limiter = undefined;
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  it('uncaps tenant concurrency when PROXY_CONCURRENCY_MAX=0', () => {
+    process.env['PROXY_CONCURRENCY_MAX'] = '0';
+    limiter = new ProxyRateLimiter();
+
+    for (let i = 0; i < DEFAULT_CONCURRENCY_MAX * 100; i++) {
+      expect(() => limiter!.acquireSlot('user-1')).not.toThrow();
+    }
+    // Nothing is counted, so nothing is stored either.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(((limiter as any).concurrency as Map<string, number>).size).toBe(0);
+
+    expect(() => limiter!.releaseSlot('user-1')).not.toThrow();
+  });
+
+  it('uncaps the per-tenant rate when PROXY_RATE_MAX_REQUESTS=0', () => {
+    process.env['PROXY_RATE_MAX_REQUESTS'] = '0';
+    limiter = new ProxyRateLimiter();
+
+    for (let i = 0; i < DEFAULT_RATE_MAX_REQUESTS * 3; i++) {
+      expect(() => limiter!.checkLimit('user-1')).not.toThrow();
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(((limiter as any).rates as Map<string, unknown>).size).toBe(0);
+  });
+
+  it('uncaps the per-IP rate when PROXY_IP_RATE_MAX_REQUESTS=0', () => {
+    process.env['PROXY_IP_RATE_MAX_REQUESTS'] = '0';
+    limiter = new ProxyRateLimiter();
+
+    for (let i = 0; i < DEFAULT_IP_RATE_MAX_REQUESTS * 3; i++) {
+      expect(() => limiter!.checkIpLimit('192.168.1.1')).not.toThrow();
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(((limiter as any).ipRates as Map<string, unknown>).size).toBe(0);
+  });
+
+  it('honors explicit finite overrides', () => {
+    process.env['PROXY_CONCURRENCY_MAX'] = '2';
+    process.env['PROXY_RATE_MAX_REQUESTS'] = '3';
+    process.env['PROXY_IP_RATE_MAX_REQUESTS'] = '4';
+    limiter = new ProxyRateLimiter();
+
+    limiter.acquireSlot('user-1');
+    limiter.acquireSlot('user-1');
+    expect(() => limiter!.acquireSlot('user-1')).toThrow(HttpException);
+
+    for (let i = 0; i < 3; i++) limiter.checkLimit('user-1');
+    expect(() => limiter!.checkLimit('user-1')).toThrow(HttpException);
+
+    for (let i = 0; i < 4; i++) limiter.checkIpLimit('10.0.0.1');
+    expect(() => limiter!.checkIpLimit('10.0.0.1')).toThrow(HttpException);
   });
 });

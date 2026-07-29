@@ -402,7 +402,11 @@ See `packages/backend/.env.example` for all variables. Key ones:
 - `FRONTEND_PORT` — Extra trusted origin port for Better Auth.
 - `API_KEY` — Secret for programmatic API access (X-API-Key header).
 - `THROTTLE_TTL` — Rate limit window in ms. Default: `60000`
-- `THROTTLE_LIMIT` — Max requests per window. Default: `100`
+- `THROTTLE_LIMIT` — Max requests per window. Default: `100`. **Does not apply to the `/v1/*` LLM proxy** — `ProxyController` is `@SkipThrottle()` and enforces its own limits (below) instead.
+- `PROXY_CONCURRENCY_MAX` — Simultaneous in-flight proxy requests per **tenant** (all of a workspace's harnesses share the pool). Default: `10`; over it → `M203`. Set `0` for unlimited.
+- `PROXY_RATE_MAX_REQUESTS` — Proxy requests per tenant per 60s window. Default: `200`; over it → `M201`. Set `0` for unlimited.
+- `PROXY_IP_RATE_MAX_REQUESTS` — Proxy requests per source IP per 60s window. Default: `500`; over it → `M202`. Set `0` for unlimited. Note that harnesses behind one NAT/VPN egress share a single IP bucket.
+  - All three live in `routing/proxy/proxy-rate-limiter.ts`, are read once at construction, and `0` short-circuits the check *and* its bookkeeping (no per-key map growth when uncapped). An unparseable value falls back to the default rather than uncapping — a typo must not silently open a public gateway. Uncapping the tenant concurrency cap means in-flight proxy requests are then bounded only by `DB_POOL_MAX` and the box's memory/sockets.
 - `DB_POOL_MAX` — PostgreSQL connection pool size. Default: `30`
 - `RUN_MIGRATIONS_ON_BOOT` — Whether the app runs pending migrations at startup. Default: `true`; set `false` for multi-replica deploys where only one instance should migrate.
 - `PROVIDER_TIMEOUT_MS` — Per-attempt timeout (ms) for upstream provider requests. Default: `180000`
