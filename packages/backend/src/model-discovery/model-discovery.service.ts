@@ -1,8 +1,9 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { resolveProviderMetadataIdentity, type AuthType } from 'manifest-shared';
 import { TenantProvider } from '../entities/tenant-provider.entity';
+import { TenantCacheService } from '../common/services/tenant-cache.service';
 import { AgentEnabledProvider } from '../entities/agent-enabled-provider.entity';
 import { CustomProvider } from '../entities/custom-provider.entity';
 import {
@@ -126,6 +127,10 @@ export class ModelDiscoveryService {
     @Optional()
     @InjectRepository(AgentEnabledProvider)
     private readonly enabledProviderRepo: Repository<AgentEnabledProvider> | null = null,
+    // Optional + last: enables cross-workspace shared providers in the model
+    // picker. Null in unit tests that don't wire it (sharing simply disabled).
+    @Optional()
+    private readonly tenantCache: TenantCacheService | null = null,
   ) {}
 
   async discoverModels(
@@ -525,12 +530,19 @@ export class ModelDiscoveryService {
     tenantId: string,
     agentId?: string,
   ): Promise<DiscoveredModel[]> {
+    // Include models from providers borrowed from team workspaces this workspace
+    // shares with. With nothing borrowed the query stays an exact tenant_id so
+    // the non-sharing path is unchanged.
+    const borrowedIds = (await this.tenantCache?.sharedProviderTenantIds(tenantId)) ?? [];
     const allProviders = filterProvidersForDeployment(
       await this.providerRepo.find({
-        where: { tenant_id: tenantId, is_active: true },
+        where: {
+          tenant_id: borrowedIds.length ? In([tenantId, ...borrowedIds]) : tenantId,
+          is_active: true,
+        },
       }),
     );
-    const providers = await this.filterProvidersForAgent(allProviders, agentId);
+    const providers = await this.filterProvidersForAgent(allProviders, agentId, tenantId);
 
     const models: DiscoveredModel[] = [];
     const seen = new Map<string, number>();
@@ -607,12 +619,18 @@ export class ModelDiscoveryService {
   private async filterProvidersForAgent(
     providers: TenantProvider[],
     agentId?: string,
+    actingTenantId?: string,
   ): Promise<TenantProvider[]> {
     if (!agentId || !this.enabledProviderRepo) return providers;
+    // Providers borrowed from a team workspace (foreign tenant_id) have no
+    // per-agent enablement row and are always kept; per-agent enablement only
+    // governs the acting tenant's own providers.
+    const isBorrowed = (p: TenantProvider) =>
+      actingTenantId != null && p.tenant_id !== actingTenantId;
     const rows = await this.enabledProviderRepo.find({ where: { agent_id: agentId } });
-    if (rows.length === 0) return [];
+    if (rows.length === 0) return providers.filter(isBorrowed);
     const enabledIds = new Set(rows.map((r) => r.tenant_provider_id));
-    return providers.filter((p) => enabledIds.has(p.id));
+    return providers.filter((p) => isBorrowed(p) || enabledIds.has(p.id));
   }
 
   async getModelForAgent(

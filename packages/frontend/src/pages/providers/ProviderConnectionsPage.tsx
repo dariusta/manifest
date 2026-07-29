@@ -616,16 +616,22 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
               <For each={connectedRows()}>
                 {(row) => (
                   <tr
-                    style="cursor: pointer;"
-                    onClick={() => navigate(`/providers/connections/${row.connection.id}`)}
+                    // Borrowed connections live in another workspace — their detail
+                    // page is out of tenant scope, so the row is not navigable here.
+                    style={row.connection.shared ? 'cursor: default;' : 'cursor: pointer;'}
+                    onClick={() => {
+                      if (!row.connection.shared)
+                        navigate(`/providers/connections/${row.connection.id}`);
+                    }}
                     onKeyDown={(event) => {
                       if (event.target !== event.currentTarget) return;
+                      if (row.connection.shared) return;
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
                         navigate(`/providers/connections/${row.connection.id}`);
                       }
                     }}
-                    tabindex="0"
+                    tabindex={row.connection.shared ? -1 : 0}
                   >
                     <td>
                       <span style="display: flex; align-items: center; gap: 10px;">
@@ -650,20 +656,57 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
                             class="connection-label-cell"
                           >
                             {row.connection.label}
-                            <button
-                              type="button"
-                              class="connection-label-cell__edit"
-                              onClick={(e) =>
-                                startRename(row.connection.id, row.connection.label, e)
+                            <Show
+                              when={row.connection.shared}
+                              fallback={
+                                <button
+                                  type="button"
+                                  class="connection-label-cell__edit"
+                                  onClick={(e) =>
+                                    startRename(row.connection.id, row.connection.label, e)
+                                  }
+                                  aria-label={`Rename ${row.connection.label}`}
+                                  style="background: none; border: none; cursor: pointer; padding: 2px; color: hsl(var(--muted-foreground)); opacity: 0; transition: opacity 0.15s; display: inline-flex; align-items: center; line-height: 1;"
+                                >
+                                  <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="currentColor"
+                                  >
+                                    <path d="M5 21h14c1.1 0 2-.9 2-2v-7h-2v7H5V5h7V3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2" />
+                                    <path d="M7 13v3c0 .55.45 1 1 1h3c.27 0 .52-.11.71-.29l9-9a.996.996 0 0 0 0-1.41l-3-3a.996.996 0 0 0-1.41 0l-9.01 8.99A1 1 0 0 0 7 13m10-7.59L18.59 7 17.5 8.09 15.91 6.5zm-8 8 5.5-5.5 1.59 1.59-5.5 5.5H9z" />
+                                  </svg>
+                                </button>
                               }
-                              aria-label={`Rename ${row.connection.label}`}
-                              style="background: none; border: none; cursor: pointer; padding: 2px; color: hsl(var(--muted-foreground)); opacity: 0; transition: opacity 0.15s; display: inline-flex; align-items: center; line-height: 1;"
                             >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M5 21h14c1.1 0 2-.9 2-2v-7h-2v7H5V5h7V3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2" />
-                                <path d="M7 13v3c0 .55.45 1 1 1h3c.27 0 .52-.11.71-.29l9-9a.996.996 0 0 0 0-1.41l-3-3a.996.996 0 0 0-1.41 0l-9.01 8.99A1 1 0 0 0 7 13m10-7.59L18.59 7 17.5 8.09 15.91 6.5zm-8 8 5.5-5.5 1.59 1.59-5.5 5.5H9z" />
-                              </svg>
-                            </button>
+                              <span
+                                title={
+                                  row.connection.shared_from
+                                    ? `Shared from ${row.connection.shared_from} — read-only here`
+                                    : 'Shared from another workspace — read-only here'
+                                }
+                                style="display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: var(--font-size-xs); background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); white-space: nowrap;"
+                              >
+                                <svg
+                                  width="11"
+                                  height="11"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  stroke-width="2.5"
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                                  <circle cx="12" cy="7" r="4" />
+                                </svg>
+                                {row.connection.shared_from
+                                  ? `Shared · ${row.connection.shared_from}`
+                                  : 'Shared'}
+                              </span>
+                            </Show>
                           </span>
                         }
                       >

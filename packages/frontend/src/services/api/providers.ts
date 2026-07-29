@@ -10,6 +10,13 @@ export interface TenantProviderConnection {
   models_fetched_at: string | null;
   cached_model_count: number;
   is_active: boolean;
+  /**
+   * Cross-workspace sharing: true when this connection is borrowed from a team
+   * workspace (read-only here — mutations are rejected server-side).
+   * `shared_from` is that workspace's display name. Absent on older responses.
+   */
+  shared?: boolean;
+  shared_from?: string | null;
 }
 
 /**

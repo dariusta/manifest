@@ -27,6 +27,14 @@ export class TenantCacheService {
     ttlMs: 60_000,
   });
 
+  // actingTenantId → team tenant ids whose providers it may borrow. Cached
+  // briefly so a membership grant/revoke reflects in shared-provider access
+  // within the TTL (mirrors roleCache; both are membership-derived).
+  private readonly sharedTenantsCache = new TtlFifoCache<string, string[]>({
+    maxEntries: 10_000,
+    ttlMs: 60_000,
+  });
+
   constructor(
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
@@ -127,9 +135,45 @@ export class TenantCacheService {
     ];
   }
 
+  /**
+   * Team workspaces whose providers the given acting tenant may borrow.
+   *
+   * Implements "team shares all → members": a personal workspace (one with an
+   * `owner_user_id`) may use the providers of every team workspace its owner is
+   * a member of. Returns ONLY the borrowed (foreign) tenant ids — the acting
+   * tenant is unioned in by the caller. Team/shared workspaces (no owner) borrow
+   * from no one, so members can't leak one team's keys into another team.
+   */
+  async sharedProviderTenantIds(actingTenantId: string): Promise<string[]> {
+    return this.sharedTenantsCache.resolve(actingTenantId, async (id) => {
+      const tenant = await this.tenantRepo.findOne({ where: { id } });
+      const ownerUserId = tenant?.owner_user_id;
+      if (!ownerUserId) return [];
+      const memberships = await this.memberRepo.find({ where: { user_id: ownerUserId } });
+      const ids = memberships.map((m) => m.tenant_id).filter((tid) => tid !== id);
+      if (ids.length === 0) return [];
+      const active = await this.tenantRepo
+        .createQueryBuilder('t')
+        .select('t.id', 'id')
+        .where('t.id IN (:...ids)', { ids })
+        .andWhere('t.is_active = true')
+        .getRawMany<{ id: string }>();
+      return active.map((r) => r.id);
+    });
+  }
+
   /** Drop a cached role so grants/revocations apply on the next request. */
   invalidateRole(userId: string, tenantId: string): void {
     this.roleCache.invalidate(`${userId}:${tenantId}`);
+  }
+
+  /**
+   * Drop cached shared-provider resolution for a tenant so a membership change
+   * reflects immediately. Membership grants/revokes affect the OWNER's personal
+   * workspace, so callers pass that tenant id.
+   */
+  invalidateSharedProviders(actingTenantId: string): void {
+    this.sharedTenantsCache.invalidate(actingTenantId);
   }
 
   /**

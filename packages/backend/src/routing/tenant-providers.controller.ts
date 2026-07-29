@@ -1,7 +1,8 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { TenantCtx, TenantContext } from '../common/decorators/tenant-context.decorator';
+import { TenantCacheService } from '../common/services/tenant-cache.service';
 import { TenantProvider } from '../entities/tenant-provider.entity';
 import { ModelPricingCacheService } from '../model-prices/model-pricing-cache.service';
 import { CustomProviderService } from './custom-provider/custom-provider.service';
@@ -26,6 +27,9 @@ export class TenantProvidersController {
     private readonly providerRepo: Repository<TenantProvider>,
     private readonly pricingCache: ModelPricingCacheService,
     private readonly customProviderService: CustomProviderService,
+    // Optional + last so positional test constructions keep working; Nest
+    // injects the global TenantCacheService in production.
+    @Optional() private readonly tenantCache: TenantCacheService | null = null,
   ) {}
 
   /**
@@ -36,9 +40,41 @@ export class TenantProvidersController {
   @Get()
   async listProviders(@TenantCtx() ctx: TenantContext) {
     const tenantId = ctx.tenantId;
+    // Include providers borrowed from team workspaces this workspace shares with,
+    // tagged read-only for the UI (mutations reject foreign tenant_ids anyway).
+    const borrowedTenantIds =
+      tenantId && this.tenantCache ? await this.tenantCache.sharedProviderTenantIds(tenantId) : [];
     const providers = filterProvidersForDeployment(
-      tenantId ? await this.providerRepo.find({ where: { tenant_id: tenantId } }) : [],
+      !tenantId
+        ? []
+        : borrowedTenantIds.length
+          ? await this.providerRepo.find({
+              where: { tenant_id: In([tenantId, ...borrowedTenantIds]) },
+            })
+          : await this.providerRepo.find({ where: { tenant_id: tenantId } }),
     );
+    // Display names for borrowed workspaces (only ones the caller belongs to).
+    const workspaceNames = new Map<string, string>();
+    if (borrowedTenantIds.length && ctx.userId && this.tenantCache) {
+      for (const ws of await this.tenantCache.listForUser(ctx.userId)) {
+        workspaceNames.set(ws.id, ws.name);
+      }
+    }
+    const connectionOf = (p: TenantProvider) => {
+      const shared = tenantId != null && p.tenant_id !== tenantId;
+      return {
+        id: p.id,
+        label: p.label,
+        key_prefix: p.key_prefix,
+        priority: p.priority,
+        connected_at: p.connected_at,
+        models_fetched_at: p.models_fetched_at,
+        cached_model_count: Array.isArray(p.cached_models) ? p.cached_models.length : 0,
+        is_active: p.is_active,
+        shared,
+        shared_from: shared ? (workspaceNames.get(p.tenant_id) ?? null) : null,
+      };
+    };
 
     // Group providers and build response
     const grouped = new Map<
@@ -55,6 +91,8 @@ export class TenantProvidersController {
           models_fetched_at: string | null;
           cached_model_count: number;
           is_active: boolean;
+          shared: boolean;
+          shared_from: string | null;
         }>;
         total_models: number;
       }
@@ -66,33 +104,13 @@ export class TenantProvidersController {
       const modelCount = Array.isArray(p.cached_models) ? p.cached_models.length : 0;
 
       if (existing) {
-        existing.connections.push({
-          id: p.id,
-          label: p.label,
-          key_prefix: p.key_prefix,
-          priority: p.priority,
-          connected_at: p.connected_at,
-          models_fetched_at: p.models_fetched_at,
-          cached_model_count: modelCount,
-          is_active: p.is_active,
-        });
+        existing.connections.push(connectionOf(p));
         existing.total_models = Math.max(existing.total_models, modelCount);
       } else {
         grouped.set(key, {
           provider: p.provider,
           auth_type: p.auth_type,
-          connections: [
-            {
-              id: p.id,
-              label: p.label,
-              key_prefix: p.key_prefix,
-              priority: p.priority,
-              connected_at: p.connected_at,
-              models_fetched_at: p.models_fetched_at,
-              cached_model_count: modelCount,
-              is_active: p.is_active,
-            },
-          ],
+          connections: [connectionOf(p)],
           total_models: modelCount,
         });
       }

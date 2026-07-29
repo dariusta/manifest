@@ -135,4 +135,88 @@ describe('TenantCacheService', () => {
       await expect(service.ensureForUser('user-4')).rejects.toThrow('connection terminated');
     });
   });
+
+  describe('sharedProviderTenantIds', () => {
+    // Own setup: sharedProviderTenantIds needs tenantRepo.findOne + createQueryBuilder
+    // and memberRepo.find, which the top-level mocks above don't all provide.
+    let svc: TenantCacheService;
+    let tenantFindOne: jest.Mock;
+    let memberFind: jest.Mock;
+    let activeTeamIds: string[];
+
+    beforeEach(async () => {
+      tenantFindOne = jest.fn();
+      memberFind = jest.fn().mockResolvedValue([]);
+      activeTeamIds = [];
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn(() => Promise.resolve(activeTeamIds.map((id) => ({ id })))),
+      };
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          TenantCacheService,
+          {
+            provide: getRepositoryToken(Tenant),
+            useValue: { findOne: tenantFindOne, createQueryBuilder: jest.fn(() => qb) },
+          },
+          {
+            provide: getRepositoryToken(TenantMember),
+            useValue: { find: memberFind },
+          },
+        ],
+      }).compile();
+      svc = module.get<TenantCacheService>(TenantCacheService);
+    });
+
+    it('personal workspace borrows from every active team its owner belongs to', async () => {
+      tenantFindOne.mockResolvedValueOnce({ id: 'personal-1', owner_user_id: 'user-1' });
+      memberFind.mockResolvedValueOnce([
+        { tenant_id: 'team-a', user_id: 'user-1' },
+        { tenant_id: 'team-b', user_id: 'user-1' },
+      ]);
+      activeTeamIds = ['team-a', 'team-b'];
+
+      expect(await svc.sharedProviderTenantIds('personal-1')).toEqual(['team-a', 'team-b']);
+      expect(memberFind).toHaveBeenCalledWith({ where: { user_id: 'user-1' } });
+    });
+
+    it('excludes inactive teams (only active team ids come back from the query)', async () => {
+      tenantFindOne.mockResolvedValueOnce({ id: 'personal-1', owner_user_id: 'user-1' });
+      memberFind.mockResolvedValueOnce([
+        { tenant_id: 'team-a', user_id: 'user-1' },
+        { tenant_id: 'team-dead', user_id: 'user-1' },
+      ]);
+      activeTeamIds = ['team-a']; // team-dead filtered out by t.is_active = true
+
+      expect(await svc.sharedProviderTenantIds('personal-1')).toEqual(['team-a']);
+    });
+
+    it('a team workspace (no owner) borrows from nobody', async () => {
+      tenantFindOne.mockResolvedValueOnce({ id: 'team-a', owner_user_id: null });
+
+      expect(await svc.sharedProviderTenantIds('team-a')).toEqual([]);
+      expect(memberFind).not.toHaveBeenCalled();
+    });
+
+    it('returns [] when the owner belongs to no teams', async () => {
+      tenantFindOne.mockResolvedValueOnce({ id: 'personal-1', owner_user_id: 'user-1' });
+      memberFind.mockResolvedValueOnce([]);
+
+      expect(await svc.sharedProviderTenantIds('personal-1')).toEqual([]);
+    });
+
+    it('never borrows from the acting tenant itself', async () => {
+      tenantFindOne.mockResolvedValueOnce({ id: 'personal-1', owner_user_id: 'user-1' });
+      // A stray self-membership row must not turn into a self-borrow.
+      memberFind.mockResolvedValueOnce([
+        { tenant_id: 'personal-1', user_id: 'user-1' },
+        { tenant_id: 'team-a', user_id: 'user-1' },
+      ]);
+      activeTeamIds = ['team-a'];
+
+      expect(await svc.sharedProviderTenantIds('personal-1')).toEqual(['team-a']);
+    });
+  });
 });
