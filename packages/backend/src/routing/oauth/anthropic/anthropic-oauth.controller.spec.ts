@@ -11,12 +11,14 @@ function build() {
     generateAuthorizationUrl: jest.fn(),
     exchangeCode: jest.fn(),
     findPendingForAgent: jest.fn(),
+    unwrapToken: jest.fn(),
   } as unknown as AnthropicOauthService;
   const resolveAgent = {
     resolve: jest.fn().mockResolvedValue({ id: 'agent-1', tenant_id: 'tenant-1' }),
   } as unknown as ResolveAgentService;
   const providerService = {
     removeProvider: jest.fn().mockResolvedValue({ notifications: [] }),
+    getFreshSubscriptionCredential: jest.fn(),
   } as unknown as ProviderService;
   return {
     ctrl: new AnthropicOauthController(oauth, resolveAgent, providerService),
@@ -120,6 +122,65 @@ describe('AnthropicOauthController', () => {
       const { ctrl, oauth } = build();
       (oauth.findPendingForAgent as jest.Mock).mockResolvedValue(null);
       await expect(ctrl.pending('agent', ctx)).resolves.toEqual({ state: null });
+    });
+  });
+
+  describe('credential', () => {
+    it('rejects missing agentName', async () => {
+      const { ctrl } = build();
+      await expect(ctrl.credential('', 'Work', ctx)).rejects.toBeInstanceOf(HttpException);
+    });
+
+    it('reveals the current token for the tenant-scoped account', async () => {
+      const { ctrl, oauth, providerService } = build();
+      (providerService.getFreshSubscriptionCredential as jest.Mock).mockResolvedValue(
+        '{"t":"access","r":"refresh","e":9999999999999}',
+      );
+      (oauth.unwrapToken as jest.Mock).mockResolvedValue('sk-ant-oat-current');
+
+      await expect(ctrl.credential('agent', 'Work', ctx)).resolves.toEqual({
+        authorizationCode: 'sk-ant-oat-current',
+      });
+      expect(providerService.getFreshSubscriptionCredential).toHaveBeenCalledWith(
+        'tenant-1',
+        'anthropic',
+        'Work',
+      );
+      expect(oauth.unwrapToken).toHaveBeenCalledWith(
+        '{"t":"access","r":"refresh","e":9999999999999}',
+        'agent-1',
+        'tenant-1',
+        'Work',
+      );
+    });
+
+    it('returns 404 when the selected account has no stored credential', async () => {
+      const { ctrl, providerService } = build();
+      (providerService.getFreshSubscriptionCredential as jest.Mock).mockResolvedValue(null);
+
+      await expect(ctrl.credential('agent', 'Missing', ctx)).rejects.toMatchObject({
+        status: HttpStatus.NOT_FOUND,
+      });
+    });
+
+    it('returns 502 when the stored credential cannot be unwrapped', async () => {
+      const { ctrl, oauth, providerService } = build();
+      (providerService.getFreshSubscriptionCredential as jest.Mock).mockResolvedValue('broken');
+      (oauth.unwrapToken as jest.Mock).mockResolvedValue(null);
+
+      await expect(ctrl.credential('agent', 'Work', ctx)).rejects.toMatchObject({
+        status: HttpStatus.BAD_GATEWAY,
+      });
+    });
+
+    it('rejects repeated label query parameters', async () => {
+      const { ctrl, resolveAgent, providerService } = build();
+      await expect(ctrl.credential('agent', ['Work', 'Other'], ctx)).rejects.toMatchObject({
+        message: 'label query parameter must be a string',
+        status: HttpStatus.BAD_REQUEST,
+      });
+      expect(resolveAgent.resolve).not.toHaveBeenCalled();
+      expect(providerService.getFreshSubscriptionCredential).not.toHaveBeenCalled();
     });
   });
 

@@ -5,6 +5,7 @@ import { createSignal } from 'solid-js';
 const mockStartAnthropicOAuth = vi.fn();
 const mockSubmitAnthropicOAuth = vi.fn();
 const mockRevokeAnthropicOAuth = vi.fn();
+const mockGetAnthropicAuthorizationCode = vi.fn();
 const mockGetAnthropicOAuthPending = vi.fn();
 const mockDisconnectProvider = vi.fn();
 const mockRenameProviderKey = vi.fn();
@@ -15,6 +16,7 @@ vi.mock('../../src/services/api.js', () => ({
   startAnthropicOAuth: (...args: unknown[]) => mockStartAnthropicOAuth(...args),
   submitAnthropicOAuth: (...args: unknown[]) => mockSubmitAnthropicOAuth(...args),
   revokeAnthropicOAuth: (...args: unknown[]) => mockRevokeAnthropicOAuth(...args),
+  getAnthropicAuthorizationCode: (...args: unknown[]) => mockGetAnthropicAuthorizationCode(...args),
   getAnthropicOAuthPending: (...args: unknown[]) => mockGetAnthropicOAuthPending(...args),
   disconnectProvider: (...args: unknown[]) => mockDisconnectProvider(...args),
   renameProviderKey: (...args: unknown[]) => mockRenameProviderKey(...args),
@@ -438,6 +440,53 @@ describe('AnthropicOAuthDetailView — multi-key', () => {
     expect(screen.getByText('Accounts')).toBeDefined();
     expect(screen.getByText('Work')).toBeDefined();
     expect(screen.getByText('Personal')).toBeDefined();
+  });
+
+  it('reveals the current authorization code when an account row is clicked', async () => {
+    mockGetAnthropicAuthorizationCode.mockResolvedValue({
+      authorizationCode: 'sk-ant-oat-current',
+    });
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderMultiKeyView(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View authorization code for Work' }));
+
+    await waitFor(() => {
+      expect(mockGetAnthropicAuthorizationCode).toHaveBeenCalledWith('test-agent', 'Work');
+      expect(screen.getByText('sk-ant-oat-current')).toBeDefined();
+    });
+    expect(screen.getByText('Authorization code')).toBeDefined();
+    expect(screen.getByLabelText('Copy to clipboard')).toBeDefined();
+  });
+
+  it('collapses an account and clears its revealed authorization code', async () => {
+    mockGetAnthropicAuthorizationCode.mockResolvedValue({
+      authorizationCode: 'sk-ant-oat-current',
+    });
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderMultiKeyView(keys);
+    const accountButton = screen.getByRole('button', {
+      name: 'View authorization code for Work',
+    });
+
+    fireEvent.click(accountButton);
+    await waitFor(() => expect(screen.getByText('sk-ant-oat-current')).toBeDefined());
+    fireEvent.click(accountButton);
+
+    expect(screen.queryByText('sk-ant-oat-current')).toBeNull();
+    expect(accountButton.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('shows a recoverable inline error when a credential cannot be revealed', async () => {
+    mockGetAnthropicAuthorizationCode.mockRejectedValue(new Error('Credential unavailable'));
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderMultiKeyView(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View authorization code for Work' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('Credential unavailable');
+    });
   });
 
   it('rename flow: clicking Rename shows input and saving calls renameProviderKey', async () => {

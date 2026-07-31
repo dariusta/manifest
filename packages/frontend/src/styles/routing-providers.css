@@ -683,6 +683,184 @@ tr:hover .connection-label-cell__edit,
   margin: 0;
 }
 
+.anthropic-account-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.anthropic-account {
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--muted) / 0.3);
+  overflow: hidden;
+}
+
+.anthropic-account__row,
+.anthropic-account__rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.anthropic-account__trigger {
+  min-width: 0;
+  min-height: 44px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+.anthropic-account__trigger:hover .anthropic-account__name {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.anthropic-account__trigger:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.anthropic-account__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.anthropic-account__summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.anthropic-account__name {
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.anthropic-account__subtitle {
+  font-size: var(--font-size-xs);
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.anthropic-account__chevron {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+  transition: transform var(--transition-fast);
+}
+
+.anthropic-account__chevron--expanded {
+  transform: rotate(90deg);
+}
+
+.anthropic-account__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.anthropic-account__rename .provider-detail__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.anthropic-account__credential {
+  padding: 12px;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--background) / 0.45);
+}
+
+.anthropic-account__credential-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.anthropic-account__credential-header .provider-detail__label {
+  margin-bottom: 2px;
+}
+
+.anthropic-account__credential-hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground));
+}
+
+.anthropic-account__credential-value {
+  display: block;
+  width: 100%;
+  max-height: 112px;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--muted) / 0.45);
+  color: hsl(var(--foreground));
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.anthropic-account__credential-loading {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-xs);
+}
+
+@media (max-width: 520px) {
+  .anthropic-account__row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .anthropic-account__trigger {
+    flex-basis: 100%;
+  }
+
+  .anthropic-account__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .anthropic-account__rename {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .anthropic-account__rename .provider-detail__input {
+    flex-basis: 100%;
+  }
+}
+
 /* Disconnect sits below the always-visible add-a-connection form when a
    subscription is already connected; __disconnect zeroes the shared
    margin-top, so restore breathing room after the paste block. */

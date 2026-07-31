@@ -13,12 +13,14 @@ import {
   startAnthropicOAuth,
   submitAnthropicOAuth,
   revokeAnthropicOAuth,
+  getAnthropicAuthorizationCode,
   getAnthropicOAuthPending,
   renameProviderKey,
   type AuthType,
   type RoutingProvider,
 } from '../services/api.js';
 import { toast } from '../services/toast-store.js';
+import CopyButton from './CopyButton.js';
 
 interface Props {
   provDef: ProviderDef;
@@ -57,9 +59,14 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
   const [error, setError] = createSignal<string | null>(null);
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
+  const [expandedAccountId, setExpandedAccountId] = createSignal<string | null>(null);
+  const [authorizationCode, setAuthorizationCode] = createSignal('');
+  const [credentialLoading, setCredentialLoading] = createSignal(false);
+  const [credentialError, setCredentialError] = createSignal<string | null>(null);
 
   const connectionCount = () => (props.activeKeys?.() ?? []).length;
   const isMultiKey = () => connectionCount() > 1;
+  const hasAccountRows = () => connectionCount() > 0;
   // The exchange is rejected past the cap, so stop offering the form there
   // rather than letting the paste fail server-side.
   const showConnectForm = () =>
@@ -190,6 +197,37 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
     setRenameValue(k.label);
   };
 
+  const toggleAccountCredential = async (k: RoutingProvider) => {
+    if (expandedAccountId() === k.id) {
+      setExpandedAccountId(null);
+      setAuthorizationCode('');
+      setCredentialError(null);
+      return;
+    }
+
+    setExpandedAccountId(k.id);
+    setAuthorizationCode('');
+    setCredentialError(null);
+    setCredentialLoading(true);
+    try {
+      const result = await getAnthropicAuthorizationCode(props.agentName, k.label);
+      // Ignore a response from a row the user collapsed while the request was in flight.
+      if (expandedAccountId() === k.id) {
+        setAuthorizationCode(result.authorizationCode);
+      }
+    } catch (err) {
+      if (expandedAccountId() === k.id) {
+        setCredentialError(
+          err instanceof Error ? err.message : 'Unable to reveal this account credential.',
+        );
+      }
+    } finally {
+      if (expandedAccountId() === k.id) {
+        setCredentialLoading(false);
+      }
+    }
+  };
+
   const commitRename = async (k: RoutingProvider) => {
     const newLabel = renameValue().trim();
     if (!newLabel || newLabel === k.label) {
@@ -218,46 +256,43 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
   return (
     <>
       <Show when={props.connected()}>
-        {/* Multi-key list */}
-        <Show when={isMultiKey()}>
+        {/* Connected account list. Credentials load only after an explicit row click. */}
+        <Show when={hasAccountRows()}>
           <div class="provider-detail__field">
             <label class="provider-detail__label">Accounts</label>
             <ul
+              class="anthropic-account-list"
               role="list"
               aria-label={`OAuth accounts for ${props.provDef.name}`}
-              style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px;"
             >
               <For each={props.activeKeys!()}>
                 {(k) => (
-                  <li style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--muted) / 0.3);">
+                  <li class="anthropic-account">
                     <Show
                       when={renamingId() === k.id}
                       fallback={
-                        <>
-                          <div style="flex: 1; min-width: 0;">
-                            <div style="font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                              {k.label}
-                            </div>
-                            <div style="font-size: var(--font-size-xs); color: hsl(var(--muted-foreground));">
-                              Connected via {props.provDef.subscriptionLabel ?? 'subscription'}
-                            </div>
-                          </div>
+                        <div class="anthropic-account__row">
                           <button
-                            class="btn btn--outline btn--sm"
-                            style="flex-shrink: 0;"
+                            type="button"
+                            class="anthropic-account__trigger"
+                            aria-label={`View authorization code for ${k.label}`}
+                            aria-expanded={expandedAccountId() === k.id}
+                            aria-controls={`anthropic-account-credential-${k.id}`}
                             disabled={props.busy()}
-                            onClick={() => startRename(k)}
+                            onClick={() => void toggleAccountCredential(k)}
                           >
-                            Rename
-                          </button>
-                          <button
-                            class="provider-detail__disconnect-icon"
-                            disabled={props.busy()}
-                            onClick={() => handleDeleteKey(k.label)}
-                            aria-label={`Delete account ${k.label}`}
-                            title="Delete account"
-                          >
+                            <span class="anthropic-account__summary">
+                              <span class="anthropic-account__name">{k.label}</span>
+                              <span class="anthropic-account__subtitle">
+                                Connected via {props.provDef.subscriptionLabel ?? 'subscription'}
+                              </span>
+                            </span>
                             <svg
+                              class="anthropic-account__chevron"
+                              classList={{
+                                'anthropic-account__chevron--expanded':
+                                  expandedAccountId() === k.id,
+                              }}
                               width="16"
                               height="16"
                               viewBox="0 0 24 24"
@@ -268,40 +303,115 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
                               stroke-linejoin="round"
                               aria-hidden="true"
                             >
-                              <path d="M3 6h18" />
-                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                              <path d="m9 18 6-6-6-6" />
                             </svg>
                           </button>
-                        </>
+                          <div class="anthropic-account__actions">
+                            <button
+                              class="btn btn--outline btn--sm"
+                              disabled={props.busy()}
+                              onClick={() => startRename(k)}
+                            >
+                              Rename
+                            </button>
+                            <button
+                              class="provider-detail__disconnect-icon"
+                              disabled={props.busy()}
+                              onClick={() => handleDeleteKey(k.label)}
+                              aria-label={`Delete account ${k.label}`}
+                              title="Delete account"
+                            >
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                aria-hidden="true"
+                              >
+                                <path d="M3 6h18" />
+                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
                       }
                     >
-                      <input
-                        class="provider-detail__input"
-                        type="text"
-                        maxlength={MAX_LABEL_LENGTH}
-                        aria-label={`Rename ${k.label}`}
-                        value={renameValue()}
-                        onInput={(e) => setRenameValue(e.currentTarget.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') commitRename(k);
-                          if (e.key === 'Escape') setRenamingId(null);
-                        }}
-                      />
-                      <button
-                        class="btn btn--primary btn--sm"
-                        disabled={props.busy()}
-                        onClick={() => commitRename(k)}
+                      <div class="anthropic-account__rename">
+                        <input
+                          class="provider-detail__input"
+                          type="text"
+                          maxlength={MAX_LABEL_LENGTH}
+                          aria-label={`Rename ${k.label}`}
+                          value={renameValue()}
+                          onInput={(e) => setRenameValue(e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitRename(k);
+                            if (e.key === 'Escape') setRenamingId(null);
+                          }}
+                        />
+                        <button
+                          class="btn btn--primary btn--sm"
+                          disabled={props.busy()}
+                          onClick={() => commitRename(k)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          class="btn btn--outline btn--sm"
+                          disabled={props.busy()}
+                          onClick={() => setRenamingId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </Show>
+                    <Show when={expandedAccountId() === k.id && renamingId() !== k.id}>
+                      <div
+                        id={`anthropic-account-credential-${k.id}`}
+                        class="anthropic-account__credential"
                       >
-                        Save
-                      </button>
-                      <button
-                        class="btn btn--outline btn--sm"
-                        disabled={props.busy()}
-                        onClick={() => setRenamingId(null)}
-                      >
-                        Cancel
-                      </button>
+                        <div class="anthropic-account__credential-header">
+                          <div>
+                            <div class="provider-detail__label">Authorization code</div>
+                            <p class="anthropic-account__credential-hint">
+                              Current access token for this account. Treat it like a password.
+                            </p>
+                          </div>
+                          <Show when={authorizationCode()}>
+                            <CopyButton text={authorizationCode()} />
+                          </Show>
+                        </div>
+                        <Show
+                          when={!credentialLoading()}
+                          fallback={
+                            <div
+                              class="anthropic-account__credential-loading"
+                              role="status"
+                              aria-live="polite"
+                            >
+                              <span class="spinner" /> Revealing credential…
+                            </div>
+                          }
+                        >
+                          <Show
+                            when={!credentialError()}
+                            fallback={
+                              <div class="provider-detail__error" role="alert">
+                                {credentialError()}
+                              </div>
+                            }
+                          >
+                            <code class="anthropic-account__credential-value">
+                              {authorizationCode()}
+                            </code>
+                          </Show>
+                        </Show>
+                      </div>
                     </Show>
                   </li>
                 )}
@@ -309,8 +419,8 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
             </ul>
           </div>
         </Show>
-        {/* Single key — original view */}
-        <Show when={!isMultiKey()}>
+        {/* Legacy connected state when the caller did not hydrate account rows. */}
+        <Show when={!hasAccountRows()}>
           <div class="provider-detail__field">
             <span class="provider-detail__no-key">
               Connected via {props.provDef.subscriptionLabel ?? 'subscription'}
