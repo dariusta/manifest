@@ -334,6 +334,23 @@ User (Better Auth) ──→ Tenant ──→ Agent ──→ AgentApiKey (mnfst
 
 Every resource belongs to a tenant; users only authenticate and (optionally) appear as `created_by_user_id` audit metadata. Guards (SessionGuard/ApiKeyGuard) resolve the tenant once per request and attach a `TenantContext` (`{ tenantId, userId }`), injected in controllers via `@TenantCtx()`. All analytics queries filter by tenant via `addTenantFilter(qb, tenantId)` from `query-helpers.ts`. Never scope, key, cache, or authorize by user id.
 
+### Instance superadmins
+
+`MANIFEST_SUPERADMIN_EMAILS` (comma-separated, case-insensitive) names accounts that may see and act in **every active workspace** on the instance. Unset by default.
+
+The list lives in the deploy environment, never the database, because superadmin is an instance-operator privilege rather than an in-app role: no UI, no API, and no amount of workspace-admin access can mint one. It resolves by **email**, not user id, so an operator can configure it before the account exists.
+
+The whole feature hangs off **one hook**: `TenantCacheService.roleFor()` returns `'owner'` for a superadmin in any active tenant. That is deliberate — `roleFor()` is the only membership gate the `manifest_active_tenant` cookie passes through (`SessionGuard.attachTenantContext` → `resolveActive` → `roleFor`), and it is the only thing `WorkspacesService.requireRole()` consults. Granting the existing top role rather than adding a fourth value to `WorkspaceRole` means every downstream permission check keeps its current allow-list and simply passes.
+
+Consequences worth knowing before extending this:
+
+- **Inactive tenants stay closed.** `is_active` is checked *before* the superadmin branch, so a superadmin cannot switch into a disabled workspace.
+- **It is full access, not read-only.** Once switched in, a superadmin can decrypt that workspace's provider keys and manage its members — same as any owner. There is no "see metadata but not credentials" tier; splitting that would mean gating `provider-key.service.ts` separately.
+- **Billing follows the workspace.** `PlanService` keys Stripe off `tenant.owner_user_id`, so a switched-in superadmin sees that workspace's billing, not their own.
+- **Key-authenticated paths are unaffected.** `ApiKeyGuard` and `AgentKeyAuthGuard` ignore the cookie entirely — proxy and OTLP ingest stay pinned to the key's tenant.
+- **Audit rows record the acting user.** `agent_messages.user_id` will hold the superadmin's id; scope audit queries by `tenant_id`, never `user_id`.
+- **`listForUser()` is unchanged** — it still returns real memberships only, because provider sharing (`sharedProviderTenantIds`) is membership-derived and must not widen. The "show everything" merge lives in `WorkspacesService.list()`, which flags borrowed rows with `viaSuperadmin` so the UI can label them.
+
 ## API Endpoints
 
 | Method | Route | Auth | Purpose |
@@ -422,6 +439,7 @@ See `packages/backend/.env.example` for all variables. Key ones:
 - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` — Discord OAuth (optional)
 - `SEED_DATA` — Set `true` to seed demo data on startup. Dev/test only — ignored when `NODE_ENV=production` (use the first-run setup wizard instead).
 - `MANIFEST_MODE` — `selfhosted` or `cloud` (default: `cloud`; auto-detected as `selfhosted` inside Docker via `/.dockerenv` or Podman via `/run/.containerenv`). Self-hosted mode enables loopback auth shortcuts and allows custom-provider URLs with `http://` / private IPs. `local` is accepted as a legacy alias for `selfhosted`.
+- `MANIFEST_SUPERADMIN_EMAILS` — Comma-separated, case-insensitive account emails granted **instance superadmin**: they see every active workspace in the switcher and resolve to `owner` in each one, so every `requireRole()` check passes. Unset by default (feature off). Env-only on purpose — superadmin is an operator privilege that must not be grantable from inside the product. See [Instance superadmins](#instance-superadmins).
 - `MANIFEST_TELEMETRY_DISABLED` — Set `1` to opt out of anonymous telemetry (self-hosted only).
 - `MANIFEST_PUBLIC_STATS` — Set `true` to expose `/api/v1/public/*` aggregate stats without auth (cloud-only marketing use).
 - `TELEMETRY_ENDPOINT` — Where self-hosted installs POST the anonymous usage report. Default: `https://telemetry.manifest.build/v1/report`. See [Telemetry](#anonymous-usage-telemetry-self-hosted).

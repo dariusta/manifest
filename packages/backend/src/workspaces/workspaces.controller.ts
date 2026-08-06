@@ -21,8 +21,13 @@ export class WorkspacesController {
 
   @Get()
   async list(@TenantCtx() ctx: TenantContext) {
-    const workspaces = await this.workspaces.list(this.userId(ctx));
-    return { workspaces, activeTenantId: ctx.tenantId, activeRole: ctx.role ?? 'owner' };
+    const { workspaces, isSuperadmin } = await this.workspaces.list(this.userId(ctx));
+    return {
+      workspaces,
+      activeTenantId: ctx.tenantId,
+      activeRole: ctx.role ?? 'owner',
+      isSuperadmin,
+    };
   }
 
   @Post()

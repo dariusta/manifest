@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { Tenant } from '../../entities/tenant.entity';
 import { TenantMember, TenantMemberRole } from '../../entities/tenant-member.entity';
 import { TtlFifoCache } from '../utils/ttl-fifo-cache';
+import { SuperadminService } from './superadmin.service';
 
 export type WorkspaceRole = 'owner' | TenantMemberRole;
 
@@ -21,8 +22,9 @@ export class TenantCacheService {
   });
 
   // userId:tenantId → role ('none' = checked and not a member; cached briefly
-  // so a revoked member loses access within the TTL).
-  private readonly roleCache = new TtlFifoCache<string, WorkspaceRole | 'none'>({
+  // so a revoked member loses access within the TTL). 'unknown' = the lookup
+  // failed and must NOT be memoized.
+  private readonly roleCache = new TtlFifoCache<string, WorkspaceRole | 'none' | 'unknown'>({
     maxEntries: 10_000,
     ttlMs: 60_000,
   });
@@ -40,6 +42,7 @@ export class TenantCacheService {
     private readonly tenantRepo: Repository<Tenant>,
     @InjectRepository(TenantMember)
     private readonly memberRepo: Repository<TenantMember>,
+    private readonly superadmin: SuperadminService,
   ) {}
 
   async resolve(userId: string): Promise<string | null> {
@@ -72,18 +75,36 @@ export class TenantCacheService {
    * The user's role in a specific tenant: 'owner' via tenants.owner_user_id
    * (implicit — owners have no tenant_members row), else the membership row's
    * role, else null.
+   *
+   * Instance superadmins resolve to 'owner' in every ACTIVE workspace. Granting
+   * the existing top role here — rather than adding a fourth role to
+   * WorkspaceRole — is what makes this change small: every requireRole() check
+   * downstream keeps its current allow-list and simply passes. Inactive tenants
+   * still resolve to null, so superadmin cannot resurrect a disabled workspace.
    */
   async roleFor(userId: string, tenantId: string): Promise<WorkspaceRole | null> {
-    const cached = await this.roleCache.resolve(`${userId}:${tenantId}`, async () => {
-      const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
-      if (!tenant || !tenant.is_active) return 'none';
-      if (tenant.owner_user_id === userId) return 'owner';
-      const member = await this.memberRepo.findOne({
-        where: { tenant_id: tenantId, user_id: userId },
-      });
-      return member ? member.role : 'none';
-    });
-    return cached === 'none' ? null : cached;
+    const cached = await this.roleCache.resolve(
+      `${userId}:${tenantId}`,
+      async () => {
+        const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
+        if (!tenant || !tenant.is_active) return 'none';
+        if (tenant.owner_user_id === userId) return 'owner';
+        const superadmin = await this.superadmin.check(userId);
+        // A failed superadmin lookup must not fall through to 'none': that
+        // answer would be cached for the full TTL, locking a real superadmin
+        // out of every foreign workspace long after the database recovered.
+        // Propagate the uncertainty instead — this request fails closed, and
+        // the next one re-checks.
+        if (superadmin === 'unknown') return 'unknown';
+        if (superadmin) return 'owner';
+        const member = await this.memberRepo.findOne({
+          where: { tenant_id: tenantId, user_id: userId },
+        });
+        return member ? member.role : 'none';
+      },
+      (value) => value !== 'unknown',
+    );
+    return cached === 'none' || cached === 'unknown' ? null : cached;
   }
 
   /**

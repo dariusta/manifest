@@ -6,12 +6,19 @@ export interface Workspace {
   id: string;
   name: string;
   role: WorkspaceRole;
+  /**
+   * Present only for workspaces the caller sees because they are an instance
+   * superadmin — they neither own nor belong to it.
+   */
+  viaSuperadmin?: boolean;
 }
 
 export interface WorkspacesResponse {
   workspaces: Workspace[];
   activeTenantId: string | null;
   activeRole: WorkspaceRole;
+  /** Optional: older backends omit it. */
+  isSuperadmin?: boolean;
 }
 
 export interface WorkspaceMember {
