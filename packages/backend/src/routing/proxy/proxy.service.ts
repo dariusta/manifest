@@ -60,6 +60,7 @@ import { ManifestError } from '../../common/errors/manifest-error';
 import { peekStream, STREAM_WARMUP_MS } from './stream-warmup';
 import { toChatCompletionsRequest } from './responses-adapter';
 import { messagesToChatCompletionsRequest } from './anthropic-messages-adapter';
+import { isResponsesShapedChatBody } from './cursor-compat';
 import { effectiveRoutesForResponseMode } from '../routing-core/response-mode-guard';
 import { OPENAI_MODEL_ID_AUTO, routeForOpenAiModelId } from './openai-model-id';
 import { AutofixService } from '../autofix/autofix.service';
@@ -635,7 +636,7 @@ export class ProxyService {
   /**
    * Convert a native Responses / Anthropic-Messages body into the internal
    * chat-completions shape used for routing and forwarding. Returns undefined
-   * for `chat_completions` mode (the body is already in the target shape).
+   * when the body is already in the target shape.
    */
   private toChatBody(
     apiMode: ProxyApiMode,
@@ -643,6 +644,11 @@ export class ProxyService {
   ): Record<string, unknown> | undefined {
     if (apiMode === 'responses') return toChatCompletionsRequest(body);
     if (apiMode === 'messages') return messagesToChatCompletionsRequest(body);
+    // Cursor's Agent and Plan modes POST a Responses-shaped body to
+    // /chat/completions (see cursor-compat.ts). Translating it here gives the
+    // scorer real `messages` to route on and hands the provider a body it
+    // understands; `apiMode` is untouched, so the reply stays chat-shaped.
+    if (isResponsesShapedChatBody(body)) return toChatCompletionsRequest(body);
     return undefined;
   }
 

@@ -271,8 +271,7 @@ export class ProviderClient {
 
     const bareModel = stripModelPrefix(model, endpointKey);
     if (endpoint.format === 'kiro') {
-      const requestSource =
-        opts.apiMode && opts.apiMode !== 'chat_completions' ? (opts.chatBody ?? body) : body;
+      const requestSource = opts.chatBody ?? body;
       const response = await forwardKiroChat({
         apiKey,
         model: bareModel,
@@ -526,12 +525,12 @@ export class ProviderClient {
     sessionKey?: string;
   }): BuiltProviderRequest {
     const { endpoint, endpointKey, bareModel, apiKey, authType, body, chatBody, stream } = ctx;
-    // For non-chat_completions inbound modes ('responses', 'messages'), the
-    // routing layer pre-translated the request into chat_completions form
-    // (`chatBody`). Provider adapters all consume chat_completions, so prefer
-    // `chatBody` when present.
-    const requestSource =
-      ctx.apiMode && ctx.apiMode !== 'chat_completions' ? (chatBody ?? body) : body;
+    // Provider adapters all consume chat_completions, so prefer `chatBody`
+    // whenever the routing layer produced one. It is set for the 'responses'
+    // and 'messages' inbound modes, and for a Responses-shaped body posted to
+    // /chat/completions by Cursor (see cursor-compat.ts). When it is absent
+    // the inbound body is already chat-shaped and is used as-is.
+    const requestSource = chatBody ?? body;
 
     if (endpoint.format === 'google') {
       // Google accepts the API key via header (set by buildHeaders below) so
