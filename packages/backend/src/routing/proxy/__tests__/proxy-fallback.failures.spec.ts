@@ -222,15 +222,80 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
     expect(providerClient.forward).toHaveBeenCalledTimes(1);
   });
 
+  // A 529 is Anthropic shedding load service-wide. It previously armed no
+  // cooldown at all, so the route the provider had just asked us to back off
+  // from was re-dialled on every subsequent request.
+  it('cooldowns an upstream 529 and reports it back as 529, not 429', async () => {
+    providerClient.forward.mockResolvedValueOnce({
+      response: new Response('overloaded', { status: 529 }),
+      isGoogle: false,
+      isAnthropic: true,
+      isChatGpt: false,
+    });
+
+    const opts = {
+      provider: 'anthropic',
+      apiKey: 'sk-ant-oat-token',
+      model: 'claude-opus-5',
+      body,
+      stream: false,
+      sessionKey: 'sess-1',
+      agentId: 'agent-1',
+      providerKeyLabel: 'Claude Code',
+      authType: 'subscription',
+    };
+
+    const first = await service.tryForwardToProvider(opts);
+    const second = await service.tryForwardToProvider(opts);
+
+    expect(first.response.status).toBe(529);
+    expect(first.providerCallStarted).toBe(true);
+    // Sidelined: the second call is answered locally and never reaches upstream.
+    expect(second.response.status).toBe(529);
+    expect(second.providerCallStarted).toBe(false);
+    expect(await second.response.text()).toContain('upstream 529');
+    expect(providerClient.forward).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves statuses outside the cooldown set free to retry immediately', async () => {
+    providerClient.forward.mockResolvedValue({
+      response: new Response('bad request', { status: 400 }),
+      isGoogle: false,
+      isAnthropic: true,
+      isChatGpt: false,
+    });
+
+    const opts = {
+      provider: 'anthropic',
+      apiKey: 'sk-ant-oat-token',
+      model: 'claude-opus-5',
+      body,
+      stream: false,
+      sessionKey: 'sess-1',
+      agentId: 'agent-1',
+      providerKeyLabel: 'Claude Code',
+      authType: 'subscription',
+    };
+
+    await service.tryForwardToProvider(opts);
+    const second = await service.tryForwardToProvider(opts);
+
+    expect(second.providerCallStarted).toBe(true);
+    expect(providerClient.forward).toHaveBeenCalledTimes(2);
+  });
+
   it('evicts an active cooldown when the cooldown cache is full', async () => {
-    const cooldowns = (service as unknown as { rateLimitCooldowns: Map<string, number> })
-      .rateLimitCooldowns;
+    const cooldowns = (
+      service as unknown as {
+        rateLimitCooldowns: Map<string, { expiresAt: number; status: number }>;
+      }
+    ).rateLimitCooldowns;
     const farFuture = Date.now() + 60_000;
     for (let i = 0; i < 2_000; i += 1) {
-      cooldowns.set(
-        `agent-1\u0000anthropic\u0000subscription\u0000Key ${i}\u0000model-${i}`,
-        farFuture + i,
-      );
+      cooldowns.set(`agent-1\u0000anthropic\u0000subscription\u0000Key ${i}\u0000model-${i}`, {
+        expiresAt: farFuture + i,
+        status: 429,
+      });
     }
 
     providerClient.forward.mockResolvedValueOnce({
@@ -295,11 +360,14 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
         authType: 'subscription',
       });
 
-      const cooldowns = (service as unknown as { rateLimitCooldowns: Map<string, number> })
-        .rateLimitCooldowns;
+      const cooldowns = (
+        service as unknown as {
+          rateLimitCooldowns: Map<string, { expiresAt: number; status: number }>;
+        }
+      ).rateLimitCooldowns;
       expect(cooldowns.size).toBe(1);
-      const [expiresAt] = [...cooldowns.values()];
-      return expiresAt - before;
+      const [cooldown] = [...cooldowns.values()];
+      return cooldown.expiresAt - before;
     };
 
     it('uses the short 15s default when the 429 carries no Retry-After', async () => {

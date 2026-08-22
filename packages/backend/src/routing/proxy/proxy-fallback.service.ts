@@ -87,14 +87,32 @@ import {
   resolveApiKey,
 } from './oauth-credentials';
 
-// Fallback cooldown applied when an upstream 429 carries no usable Retry-After.
-// Kept short (15s) on purpose: many providers rate-limit on brief RPM/burst
-// windows and omit Retry-After entirely, so a long blackout would sideline a
-// route that recovered seconds later. Explicit Retry-After values are always
-// honored (capped at MAX) regardless of this default.
+// Fallback cooldown applied when an upstream rejection carries no usable
+// Retry-After. Kept short (15s) on purpose: many providers rate-limit on brief
+// RPM/burst windows and omit Retry-After entirely, so a long blackout would
+// sideline a route that recovered seconds later. Explicit Retry-After values are
+// always honored (capped at MAX) regardless of this default.
 const RATE_LIMIT_COOLDOWN_DEFAULT_MS = 15_000;
 const RATE_LIMIT_COOLDOWN_MAX_MS = 5 * 60_000;
 const MAX_RATE_LIMIT_COOLDOWNS = 2_000;
+
+// Upstream statuses that put a route into cooldown. 429 is the provider
+// rejecting us on our own quota; 529 is Anthropic shedding load service-wide.
+// A 529 is the provider explicitly asking us to come back later, so re-dialling
+// the route on the very next request is the one response guaranteed not to
+// help — it was previously the only rejection that earned no backoff at all.
+const COOLDOWN_TRIGGER_STATUSES = new Set([429, 529]);
+
+interface RateLimitCooldown {
+  expiresAt: number;
+  /**
+   * The upstream status that armed this cooldown. Echoed back to the caller so
+   * a route sidelined by a 529 does not report itself as a 429 — the two mean
+   * different things to a client deciding whether to retry.
+   */
+  status: number;
+}
+
 const PROVIDER_ATTEMPT_REF = Symbol('providerAttemptRef');
 
 type AttemptTaggedError = Error & { [PROVIDER_ATTEMPT_REF]?: ProviderAttemptRef };
@@ -125,7 +143,7 @@ export interface FailedFallback {
 @Injectable()
 export class ProxyFallbackService {
   private readonly logger = new Logger(ProxyFallbackService.name);
-  private readonly rateLimitCooldowns = new Map<string, number>();
+  private readonly rateLimitCooldowns = new Map<string, RateLimitCooldown>();
 
   constructor(
     private readonly providerKeyService: ProviderKeyService,
@@ -323,8 +341,14 @@ export class ProxyFallbackService {
       }
       const providerRegion = key.region;
 
+      // key= is load-bearing, not decoration: several slots in a chain routinely
+      // share model+provider+auth_type and differ only by which account they
+      // draw on. Without the label a second-account fallback is indistinguishable
+      // from a pointless self-retry, and the only way to tell them apart is a
+      // separate /routing/resolve call after the incident is over.
       this.logger.log(
-        `Fallback ${i}: trying model=${model} provider=${provider} auth_type=${authType} (primary=${primaryModel})`,
+        `Fallback ${i}: trying model=${model} provider=${provider} auth_type=${authType} ` +
+          `key=${providerKeyLabel ?? '-'} (primary=${primaryModel})`,
       );
 
       const forward = await this.tryForwardToProvider({
@@ -471,29 +495,29 @@ export class ProxyFallbackService {
     }
   }
 
-  private getActiveRateLimitCooldown(opts: ForwardProviderOptions): number | null {
+  private getActiveRateLimitCooldown(opts: ForwardProviderOptions): RateLimitCooldown | null {
     const key = this.rateLimitCooldownKey(opts);
     if (!key) return null;
-    const expiresAt = this.rateLimitCooldowns.get(key);
-    if (!expiresAt) return null;
-    if (expiresAt <= Date.now()) {
+    const cooldown = this.rateLimitCooldowns.get(key);
+    if (!cooldown) return null;
+    if (cooldown.expiresAt <= Date.now()) {
       this.rateLimitCooldowns.delete(key);
       return null;
     }
-    return expiresAt;
+    return cooldown;
   }
 
   private buildRateLimitCooldownForward(
     opts: ForwardProviderOptions,
-    expiresAt: number,
+    cooldown: RateLimitCooldown,
   ): ForwardResult {
-    const retryAfterSeconds = Math.max(1, Math.ceil((expiresAt - Date.now()) / 1000));
+    const retryAfterSeconds = Math.max(1, Math.ceil((cooldown.expiresAt - Date.now()) / 1000));
     const message =
-      `Provider route temporarily cooling down after an upstream 429: ` +
+      `Provider route temporarily cooling down after an upstream ${cooldown.status}: ` +
       `${opts.provider}/${opts.model}`;
     return {
       response: new Response(JSON.stringify({ error: { message } }), {
-        status: 429,
+        status: cooldown.status,
         headers: {
           'content-type': 'application/json',
           'retry-after': String(retryAfterSeconds),
@@ -507,7 +531,7 @@ export class ProxyFallbackService {
   }
 
   private recordRateLimitCooldown(opts: ForwardProviderOptions, response: Response): void {
-    if (response.status !== 429) return;
+    if (!COOLDOWN_TRIGGER_STATUSES.has(response.status)) return;
     const key = this.rateLimitCooldownKey(opts);
     if (!key) return;
     if (this.rateLimitCooldowns.size >= MAX_RATE_LIMIT_COOLDOWNS) {
@@ -517,22 +541,25 @@ export class ProxyFallbackService {
       }
     }
     const ttlMs = this.parseRetryAfterMs(response.headers.get('retry-after'));
-    this.rateLimitCooldowns.set(key, Date.now() + ttlMs);
+    this.rateLimitCooldowns.set(key, {
+      expiresAt: Date.now() + ttlMs,
+      status: response.status,
+    });
   }
 
   private evictExpiredRateLimitCooldowns(now = Date.now()): void {
-    for (const [key, expiresAt] of this.rateLimitCooldowns) {
-      if (expiresAt <= now) this.rateLimitCooldowns.delete(key);
+    for (const [key, cooldown] of this.rateLimitCooldowns) {
+      if (cooldown.expiresAt <= now) this.rateLimitCooldowns.delete(key);
     }
   }
 
   private evictOldestRateLimitCooldown(): void {
     let oldestKey: string | null = null;
     let oldestExpiresAt = Number.POSITIVE_INFINITY;
-    for (const [key, expiresAt] of this.rateLimitCooldowns) {
-      if (expiresAt >= oldestExpiresAt) continue;
+    for (const [key, cooldown] of this.rateLimitCooldowns) {
+      if (cooldown.expiresAt >= oldestExpiresAt) continue;
       oldestKey = key;
-      oldestExpiresAt = expiresAt;
+      oldestExpiresAt = cooldown.expiresAt;
     }
     if (oldestKey) this.rateLimitCooldowns.delete(oldestKey);
   }
