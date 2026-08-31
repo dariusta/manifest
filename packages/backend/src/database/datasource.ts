@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
 import { entities, migrations } from './data-source-definitions';
+import { databaseTlsOptions } from '../common/utils/database-tls';
 
 function createDataSource(): DataSource {
   // Prefer a direct (non-pooled) connection for migrations: the advisory lock in
@@ -14,9 +15,11 @@ function createDataSource(): DataSource {
     process.env['DATABASE_URL'] ??
     'postgresql://myuser:mypassword@localhost:5432/mydatabase';
 
+  const database = databaseTlsOptions(databaseUrl);
   return new DataSource({
     type: 'postgres',
-    url: databaseUrl,
+    url: database.connectionString,
+    ssl: database.ssl,
     // Explicit arrays (not globs): the pre-deploy `node dist/database/migrate.js`
     // must run exactly the committed migration set. A dist glob would also pick up
     // stale compiled .js from deleted migrations (deleteOutDir is off), so this

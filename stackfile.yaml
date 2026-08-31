@@ -14,15 +14,15 @@ resources:
         public: true
         subdomain: manifest
     env:
-      PORT: "2099"
+      PORT: '2099'
       BIND_ADDRESS: 0.0.0.0
-      BETTER_AUTH_URL: "{{ self.public_url }}"
+      BETTER_AUTH_URL: '{{ self.public_url }}'
       MANIFEST_MODE: selfhosted
       NODE_ENV: production
-      RUN_MIGRATIONS_ON_BOOT: "true"
+      RUN_MIGRATIONS_ON_BOOT: 'true'
       REQUEST_RECORDING_STORAGE: filesystem
       REQUEST_RECORDING_FILESYSTEM_PATH: /data/request-recordings
-      SHUTDOWN_DRAIN_MS: "10000"
+      SHUTDOWN_DRAIN_MS: '10000'
     secrets:
       manifest-runtime:
         BETTER_AUTH_SECRET: better_auth_secret
@@ -32,7 +32,8 @@ resources:
         type: postgres
         database: manifest
         env:
-          DATABASE_URL: "postgresql://{{ username }}:{{ password }}@{{ host }}:{{ port }}/{{ database }}"
+          DATABASE_URL: '{{ url }}'
+          DATABASE_CA_CERT: '{{ ca_certificate }}'
     volumes:
       - name: recordings
         path: /data/request-recordings
