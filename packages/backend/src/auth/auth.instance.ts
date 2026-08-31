@@ -110,6 +110,7 @@ export const auth = betterAuth({
   telemetry: { enabled: false },
   plugins: buildPlugins(),
   account: {
+    identityStrategy: 'provider-id',
     accountLinking: {
       enabled: true,
       trustedProviders: ['google', 'github', 'discord'],

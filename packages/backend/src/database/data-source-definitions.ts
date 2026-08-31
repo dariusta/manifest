@@ -160,6 +160,7 @@ import { MakeAutofixEnabledNullable1799000300000 } from './migrations/1799000300
 import { AddAutofixAccessGrant1799000400000 } from './migrations/1799000400000-AddAutofixAccessGrant';
 import { AddRequestsAndProviderAttempts1801000000000 } from './migrations/1801000000000-AddRequestsAndProviderAttempts';
 import { AddProviderAttemptOrdering1801100000000 } from './migrations/1801100000000-AddProviderAttemptOrdering';
+import { AddBetterAuthAccountIssuer1802200000000 } from './migrations/1802200000000-AddBetterAuthAccountIssuer';
 
 export const entities = [
   AgentMessage,
@@ -322,4 +323,5 @@ export const migrations = [
   AddAutofixConsentToInstallMetadata1801900000000,
   SlimTenantAgentModelIndex1802000000000,
   AddTenantMembers1802100000000,
+  AddBetterAuthAccountIssuer1802200000000,
 ];
