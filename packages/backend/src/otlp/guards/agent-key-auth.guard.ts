@@ -227,7 +227,16 @@ export class AgentKeyAuthGuard implements CanActivate, OnModuleInit, OnModuleDes
         'k.tenant_id',
         'k.agent_id',
         'k.expires_at',
+        // Select each joined entity's PRIMARY KEY, not just the one column we
+        // read. TypeORM only hydrates a left-joined relation when its PK is
+        // present in the result set; without it, a matched row whose selected
+        // column is NULL is indistinguishable from "no matched row" and the
+        // relation comes back undefined. A multi-workspace tenant can have a
+        // NULL owner_user_id, so selecting only `t.owner_user_id` left
+        // `keyRecord.tenant` unhydrated and rejected a valid key as M005.
+        'a.id',
         'a.name',
+        't.id',
         't.owner_user_id',
       ])
       .leftJoin('k.agent', 'a')

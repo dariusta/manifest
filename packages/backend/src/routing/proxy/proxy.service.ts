@@ -61,6 +61,7 @@ import {
 import { peekStream, STREAM_WARMUP_MS } from './stream-warmup';
 import { toChatCompletionsRequest } from './responses-adapter';
 import { messagesToChatCompletionsRequest } from './anthropic-messages-adapter';
+import { isResponsesShapedChatBody } from './cursor-compat';
 import { effectiveRoutesForResponseMode } from '../routing-core/response-mode-guard';
 import {
   explicitModelRouteCandidate,
@@ -691,7 +692,7 @@ export class ProxyService {
   /**
    * Convert a native Responses / Anthropic-Messages body into the internal
    * chat-completions shape used for routing and forwarding. Returns undefined
-   * for `chat_completions` mode (the body is already in the target shape).
+   * when the body is already in the target shape.
    */
   private toChatBody(
     apiMode: ProxyApiMode,
@@ -699,6 +700,11 @@ export class ProxyService {
   ): Record<string, unknown> | undefined {
     if (apiMode === 'responses') return toChatCompletionsRequest(body);
     if (apiMode === 'messages') return messagesToChatCompletionsRequest(body);
+    // Cursor's Agent and Plan modes POST a Responses-shaped body to
+    // /chat/completions (see cursor-compat.ts). Translating it here gives the
+    // scorer real `messages` to route on and hands the provider a body it
+    // understands; `apiMode` is untouched, so the reply stays chat-shaped.
+    if (isResponsesShapedChatBody(body)) return toChatCompletionsRequest(body);
     return undefined;
   }
 
@@ -847,7 +853,7 @@ export class ProxyService {
   }
 
   private validatePayload(body: ProxyRequestOptions['body'], apiMode: ProxyApiMode): void {
-    if (apiMode === 'responses') {
+    if (apiMode === 'responses' || isResponsesShapedChatBody(body)) {
       const hasInstructions =
         typeof body.instructions === 'string' && body.instructions.trim().length > 0;
       const hasInput =
@@ -878,7 +884,7 @@ export class ProxyService {
     apiMode: ProxyApiMode,
     body: ProxyRequestOptions['body'],
   ): ResolveChatBody | undefined {
-    if (apiMode === 'chat_completions') return undefined;
+    if (apiMode === 'chat_completions' && !isResponsesShapedChatBody(body)) return undefined;
     let resolved: Promise<Record<string, unknown>> | undefined;
     return () => {
       resolved ??= Promise.resolve(this.toChatBody(apiMode, body)!);

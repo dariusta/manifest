@@ -5,6 +5,7 @@ import { createSignal } from 'solid-js';
 const mockStartAnthropicOAuth = vi.fn();
 const mockSubmitAnthropicOAuth = vi.fn();
 const mockRevokeAnthropicOAuth = vi.fn();
+const mockGetAnthropicAuthorizationCode = vi.fn();
 const mockGetAnthropicOAuthPending = vi.fn();
 const mockDisconnectProvider = vi.fn();
 const mockRenameProviderKey = vi.fn();
@@ -15,6 +16,7 @@ vi.mock('../../src/services/api.js', () => ({
   startAnthropicOAuth: (...args: unknown[]) => mockStartAnthropicOAuth(...args),
   submitAnthropicOAuth: (...args: unknown[]) => mockSubmitAnthropicOAuth(...args),
   revokeAnthropicOAuth: (...args: unknown[]) => mockRevokeAnthropicOAuth(...args),
+  getAnthropicAuthorizationCode: (...args: unknown[]) => mockGetAnthropicAuthorizationCode(...args),
   getAnthropicOAuthPending: (...args: unknown[]) => mockGetAnthropicOAuthPending(...args),
   disconnectProvider: (...args: unknown[]) => mockDisconnectProvider(...args),
   renameProviderKey: (...args: unknown[]) => mockRenameProviderKey(...args),
@@ -282,6 +284,32 @@ describe('AnthropicOAuthDetailView', () => {
     expect(mockGetAnthropicOAuthPending).not.toHaveBeenCalled();
   });
 
+  it('keeps the paste-code field on screen while connected', () => {
+    renderView(true);
+    expect(screen.getByLabelText('Anthropic authorization code')).toBeDefined();
+    expect(screen.getByText('Add another connection')).toBeDefined();
+    expect(screen.getByText('Add connection')).toBeDefined();
+  });
+
+  it('adds a second connection from a code pasted while connected', async () => {
+    mockSubmitAnthropicOAuth.mockResolvedValue({ ok: true });
+
+    const { onUpdate } = renderView(true);
+    const codeInput = screen.getByLabelText('Anthropic authorization code');
+    fireEvent.input(codeInput, { target: { value: OAUTH_PAYLOAD } });
+    fireEvent.click(screen.getByText('Add connection'));
+
+    await waitFor(() => {
+      expect(mockSubmitAnthropicOAuth).toHaveBeenCalledWith(
+        'test-agent',
+        OAUTH_PAYLOAD,
+        'state-xyz',
+      );
+    });
+    expect(mockToastSuccess).toHaveBeenCalledWith('Anthropic connection added');
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
   it('does not need a submit-time pending lookup when the pasted payload contains state', async () => {
     mockGetAnthropicOAuthPending.mockResolvedValue({ state: null });
     mockSubmitAnthropicOAuth.mockResolvedValue({ ok: true });
@@ -425,6 +453,53 @@ describe('AnthropicOAuthDetailView — multi-key', () => {
     expect(screen.getByText('Personal')).toBeDefined();
   });
 
+  it('reveals the current authorization code when an account row is clicked', async () => {
+    mockGetAnthropicAuthorizationCode.mockResolvedValue({
+      authorizationCode: 'sk-ant-oat-current',
+    });
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderMultiKeyView(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View authorization code for Work' }));
+
+    await waitFor(() => {
+      expect(mockGetAnthropicAuthorizationCode).toHaveBeenCalledWith('test-agent', 'Work');
+      expect(screen.getByText('sk-ant-oat-current')).toBeDefined();
+    });
+    expect(screen.getByText('Authorization code')).toBeDefined();
+    expect(screen.getByLabelText('Copy to clipboard')).toBeDefined();
+  });
+
+  it('collapses an account and clears its revealed authorization code', async () => {
+    mockGetAnthropicAuthorizationCode.mockResolvedValue({
+      authorizationCode: 'sk-ant-oat-current',
+    });
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderMultiKeyView(keys);
+    const accountButton = screen.getByRole('button', {
+      name: 'View authorization code for Work',
+    });
+
+    fireEvent.click(accountButton);
+    await waitFor(() => expect(screen.getByText('sk-ant-oat-current')).toBeDefined());
+    fireEvent.click(accountButton);
+
+    expect(screen.queryByText('sk-ant-oat-current')).toBeNull();
+    expect(accountButton.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('shows a recoverable inline error when a credential cannot be revealed', async () => {
+    mockGetAnthropicAuthorizationCode.mockRejectedValue(new Error('Credential unavailable'));
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderMultiKeyView(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View authorization code for Work' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('Credential unavailable');
+    });
+  });
+
   it('rename flow: clicking Rename shows input and saving calls renameProviderKey', async () => {
     mockRenameProviderKey.mockResolvedValue({ id: 'k1', label: 'New', priority: 1 });
     const keys = [makeKey({ id: 'k1', label: 'Old' }), makeKey({ id: 'k2', label: 'Other' })];
@@ -470,6 +545,22 @@ describe('AnthropicOAuthDetailView — multi-key', () => {
   it('shows "Disconnect all" button in multi-key mode', () => {
     const keys = [makeKey({ id: 'k1', label: 'A' }), makeKey({ id: 'k2', label: 'B' })];
     renderMultiKeyView(keys);
+    expect(screen.getByText('Disconnect all')).toBeDefined();
+  });
+
+  it('still offers the paste-code field below an existing multi-key list', () => {
+    const keys = [makeKey({ id: 'k1', label: 'A' }), makeKey({ id: 'k2', label: 'B' })];
+    renderMultiKeyView(keys);
+    expect(screen.getByLabelText('Anthropic authorization code')).toBeDefined();
+  });
+
+  it('hides the connect form once the per-provider connection cap is reached', () => {
+    const keys = Array.from({ length: 5 }, (_, i) =>
+      makeKey({ id: `k${i}`, label: `Account ${i}` }),
+    );
+    renderMultiKeyView(keys);
+    expect(screen.queryByLabelText('Anthropic authorization code')).toBeNull();
+    expect(screen.queryByText('Sign in with Claude')).toBeNull();
     expect(screen.getByText('Disconnect all')).toBeDefined();
   });
 
@@ -633,21 +724,29 @@ describe('AnthropicOAuthDetailView — addKeyOpen effect', () => {
     expect(screen.getByLabelText('Anthropic authorization code')).toBeDefined();
   });
 
-  it('cancels a connected add-account Claude OAuth flow', async () => {
+  it('keeps the paste field and the connected view visible when the popup is blocked', async () => {
     mockStartAnthropicOAuth.mockResolvedValue({ url: 'https://x', state: 'abc' });
-    mockOpenPopup();
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
 
     renderViewWithAddKeyOpen();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Anthropic authorization code')).toBeDefined();
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/Popup was blocked/));
     });
-    fireEvent.input(screen.getByLabelText('Anthropic authorization code'), {
-      target: { value: 'code#abc' },
-    });
-    fireEvent.click(screen.getByText('Cancel'));
-
-    expect(screen.queryByLabelText('Anthropic authorization code')).toBeNull();
+    // The blocked popup used to reset the add-account flag, which took the
+    // paste field away from a user who already had a code in hand.
+    expect(screen.getByLabelText('Anthropic authorization code')).toBeDefined();
     expect(screen.getByText('Disconnect')).toBeDefined();
+    openSpy.mockRestore();
+  });
+
+  it('keeps the paste field visible when authorize fails outright', async () => {
+    mockStartAnthropicOAuth.mockRejectedValue(new Error('network'));
+    mockOpenPopup();
+
+    renderViewWithAddKeyOpen();
+
+    await waitFor(() => expect(mockStartAnthropicOAuth).toHaveBeenCalled());
+    expect(screen.getByLabelText('Anthropic authorization code')).toBeDefined();
   });
 });

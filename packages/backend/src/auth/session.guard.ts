@@ -121,8 +121,9 @@ export class SessionGuard implements CanActivate, OnModuleDestroy {
     const userId = (user as { id?: unknown } | null)?.id;
     if (typeof userId !== 'string' || userId.length === 0) return;
     try {
-      const tenantId = await this.tenantCache.resolve(userId);
-      (request as RequestWithTenantContext).tenantContext = { tenantId, userId };
+      const requested = this.readActiveWorkspaceCookie(request);
+      const { tenantId, role } = await this.tenantCache.resolveActive(userId, requested);
+      (request as RequestWithTenantContext).tenantContext = { tenantId, userId, role };
     } catch (err) {
       // Fail soft: a transient resolution failure (e.g. DB hiccup) must not
       // crash every authenticated request — especially the cached-session
@@ -131,6 +132,22 @@ export class SessionGuard implements CanActivate, OnModuleDestroy {
       this.logger.warn(`Tenant resolution failed for session user: ${(err as Error).message}`);
       (request as RequestWithTenantContext).tenantContext = { tenantId: null, userId };
     }
+  }
+
+  /**
+   * The workspace the client asked to act in. A plain cookie (not a session
+   * field) so switching never touches better-auth; resolveActive() validates
+   * membership, so a forged value cannot grant access. Note the session cache
+   * above is keyed on the full Cookie header, so entries partition naturally
+   * per workspace.
+   */
+  private readActiveWorkspaceCookie(request: Request): string | null {
+    const header = request.headers['cookie'];
+    if (typeof header !== 'string') return null;
+    const match = /(?:^|;\s*)manifest_active_tenant=([^;]+)/.exec(header);
+    if (!match) return null;
+    const value = decodeURIComponent(match[1]);
+    return /^[\w-]{1,64}$/.test(value) ? value : null;
   }
 
   invalidateCache(cookieHeader?: string): void {

@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, FindOptionsWhere, EntityManager } from 'typeorm';
@@ -16,6 +17,7 @@ import { HeaderTier } from '../../entities/header-tier.entity';
 import { AgentMessage } from '../../entities/agent-message.entity';
 import { ModelPricingCacheService } from '../../model-prices/model-pricing-cache.service';
 import { RoutingCacheService } from './routing-cache.service';
+import { TenantCacheService } from '../../common/services/tenant-cache.service';
 import { randomUUID } from 'crypto';
 import { encrypt, decrypt, getEncryptionSecret } from '../../common/utils/crypto.util';
 import {
@@ -86,6 +88,11 @@ export class ProviderService {
     private readonly routingCache: RoutingCacheService,
     @InjectRepository(AgentEnabledProvider)
     private readonly enabledProviderRepo: Repository<AgentEnabledProvider> | null = null,
+    // Optional + last so existing positional test constructions keep working;
+    // Nest still injects the global TenantCacheService in production. When null
+    // (unit tests that don't wire it) cross-workspace sharing is simply disabled.
+    @Optional()
+    private readonly tenantCache: TenantCacheService | null = null,
   ) {}
 
   /**
@@ -146,6 +153,23 @@ export class ProviderService {
     );
     this.routingCache.setProviders(tenantId, providers);
     return providers;
+  }
+
+  /**
+   * The acting tenant's own providers PLUS any it may borrow from team
+   * workspaces (see TenantCacheService.sharedProviderTenantIds). Each source
+   * tenant's list is fetched through getProviders() so its per-tenant cache is
+   * reused; borrowed rows keep their own (foreign) tenant_id, which is how the
+   * USE path tells them apart from owned rows. Used everywhere routing needs the
+   * full set of usable providers for a request; getProviders() alone stays the
+   * owner-scoped list for mutation/management paths.
+   */
+  async getProvidersWithShared(tenantId: string): Promise<TenantProvider[]> {
+    const own = await this.getProviders(tenantId);
+    const sharedTenantIds = (await this.tenantCache?.sharedProviderTenantIds(tenantId)) ?? [];
+    if (sharedTenantIds.length === 0) return own;
+    const borrowed = (await Promise.all(sharedTenantIds.map((id) => this.getProviders(id)))).flat();
+    return borrowed.length === 0 ? own : [...own, ...borrowed];
   }
 
   async enableProviderForAgent(

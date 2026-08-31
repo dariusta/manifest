@@ -18,6 +18,7 @@ describe('agent-type', () => {
       'nanobot',
       'craft',
       'claude-code',
+      'cursor',
       'opencode',
       'openai-sdk',
       'anthropic-sdk',
@@ -59,10 +60,13 @@ describe('agent-type', () => {
 
   it('places coding assistants under coding only, not personal or app', () => {
     expect(PLATFORMS_BY_CATEGORY.coding).toContain('claude-code');
+    expect(PLATFORMS_BY_CATEGORY.coding).toContain('cursor');
     expect(PLATFORMS_BY_CATEGORY.coding).toContain('opencode');
     expect(PLATFORMS_BY_CATEGORY.personal).not.toContain('claude-code');
+    expect(PLATFORMS_BY_CATEGORY.personal).not.toContain('cursor');
     expect(PLATFORMS_BY_CATEGORY.personal).not.toContain('opencode');
     expect(PLATFORMS_BY_CATEGORY.app).not.toContain('claude-code');
+    expect(PLATFORMS_BY_CATEGORY.app).not.toContain('cursor');
     expect(PLATFORMS_BY_CATEGORY.app).not.toContain('opencode');
   });
 
@@ -150,6 +154,10 @@ describe('agent-type', () => {
 
     it('opencode resolves to the providers/opencode.svg mark', () => {
       expect(platformIcon('opencode', 'coding')).toBe('/icons/providers/opencode.svg');
+    });
+
+    it('cursor resolves to the providers/cursor.svg mark', () => {
+      expect(platformIcon('cursor', 'coding')).toBe('/icons/providers/cursor.svg');
     });
 
     it('returns the platform icon regardless of the category passed (icon is keyed by platform)', () => {

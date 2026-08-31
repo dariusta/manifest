@@ -37,6 +37,11 @@ describe('ProviderController', () => {
       recalculateTiers: jest.fn().mockResolvedValue(undefined),
       recalculateTiersForTenant: jest.fn().mockResolvedValue(undefined),
     };
+    // The :agentName/providers endpoint reads through getProvidersWithShared;
+    // delegate to getProviders so existing per-test mockResolvedValue() flows.
+    mockProviderService.getProvidersWithShared = jest.fn((tid: string) =>
+      mockProviderService.getProviders(tid),
+    );
     mockDiscoveryService = {
       discoverModels: jest.fn().mockResolvedValue([]),
     };

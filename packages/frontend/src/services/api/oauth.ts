@@ -140,6 +140,14 @@ export function getAnthropicOAuthPending(agentName: string) {
   return fetchJson<{ state: string | null }>(`/oauth/anthropic/pending`, { agentName });
 }
 
+export function getAnthropicAuthorizationCode(agentName: string, label: string) {
+  return fetchJson<{ authorizationCode: string }>(
+    `/oauth/anthropic/credential`,
+    { agentName, label },
+    { cache: false },
+  );
+}
+
 export function revokeAnthropicOAuth(agentName: string, label?: string) {
   const params = new URLSearchParams({ agentName });
   if (label) params.set('label', label);

@@ -1,4 +1,5 @@
 import { A, useLocation, useNavigate } from '@solidjs/router';
+import WorkspaceSwitcher from './WorkspaceSwitcher';
 import {
   Show,
   createSignal,
@@ -354,6 +355,7 @@ const Header: Component<HeaderProps> = (props) => {
           </div>
           <div class="header__star-separator" />
         </Show>
+        <WorkspaceSwitcher />
         <div class="header__user" style="position: relative;">
           <button
             class="header__avatar-btn"

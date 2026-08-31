@@ -21,6 +21,7 @@ import { AgentMessage } from '../src/entities/agent-message.entity';
 import { ManifestRequest } from '../src/entities/request.entity';
 import { ApiKey } from '../src/entities/api-key.entity';
 import { Tenant } from '../src/entities/tenant.entity';
+import { TenantMember } from '../src/entities/tenant-member.entity';
 import { Agent } from '../src/entities/agent.entity';
 import { AgentApiKey } from '../src/entities/agent-api-key.entity';
 import { NotificationRule } from '../src/entities/notification-rule.entity';

@@ -1,6 +1,7 @@
 import { ProviderClient } from '../provider-client';
 import { ManifestError } from '../../../common/errors/manifest-error';
 import { buildCustomEndpoint, buildEndpointOverride } from '../provider-endpoints';
+import { toChatCompletionsRequest } from '../responses-adapter';
 import { ThinkingBlockCache, type ThinkingBlockRouteContext } from '../thinking-block-cache';
 import type { ProviderModelRegistryService } from '../../../model-discovery/provider-model-registry.service';
 
@@ -1097,6 +1098,43 @@ describe('ProviderClient', () => {
       expect(sentBody.instructions).toBe('be brief');
       expect(sentBody.system).toBeUndefined();
       expect(resolveChatBody).toHaveBeenCalledTimes(1);
+    });
+
+    it('forwards the translated chatBody when Cursor posts a Responses-shaped body to /chat/completions', async () => {
+      // Cursor's Agent and Plan modes send `input` / `instructions` / flat tool
+      // definitions to the chat path (see cursor-compat.ts). apiMode stays
+      // 'chat_completions', so this pins that chatBody is still preferred —
+      // forwarding the raw body would send a provider `input` it cannot read.
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      const cursorBody = {
+        model: 'gpt-4o',
+        instructions: 'be brief',
+        input: [{ role: 'user', content: 'hi' }],
+        tools: [{ type: 'function', name: 'read_file', parameters: { type: 'object' } }],
+      };
+
+      await client.forward({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+        body: cursorBody,
+        resolveChatBody: async () => toChatCompletionsRequest(cursorBody),
+        stream: false,
+        apiMode: 'chat_completions',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.messages).toEqual([
+        { role: 'system', content: 'be brief' },
+        { role: 'user', content: 'hi' },
+      ]);
+      expect(sentBody.input).toBeUndefined();
+      expect(sentBody.instructions).toBeUndefined();
+      // Flat Responses tool defs become nested OpenAI function tools.
+      expect(sentBody.tools).toEqual([
+        { type: 'function', function: { name: 'read_file', parameters: { type: 'object' } } },
+      ]);
     });
 
     it('forwards Anthropic-Messages inbound to an Anthropic upstream without OpenAI translation (issue #1886)', async () => {

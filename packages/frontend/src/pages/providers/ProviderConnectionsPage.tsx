@@ -639,16 +639,24 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
                   <For each={connectedRows()}>
                     {(row) => (
                       <tr
-                        style="cursor: pointer;"
-                        onClick={() => navigate(`/providers/connections/${row.connection.id}`)}
+                        // Borrowed connections live in another workspace. Their
+                        // detail page is outside this tenant's scope, so the row
+                        // remains visible but read-only here.
+                        style={row.connection.shared ? 'cursor: default;' : 'cursor: pointer;'}
+                        onClick={() => {
+                          if (!row.connection.shared) {
+                            navigate(`/providers/connections/${row.connection.id}`);
+                          }
+                        }}
                         onKeyDown={(event) => {
                           if (event.target !== event.currentTarget) return;
+                          if (row.connection.shared) return;
                           if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault();
                             navigate(`/providers/connections/${row.connection.id}`);
                           }
                         }}
-                        tabindex="0"
+                        tabindex={row.connection.shared ? -1 : 0}
                       >
                         <td>
                           <span style="display: flex; align-items: center; gap: 10px;">
@@ -673,25 +681,43 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
                                 class="connection-label-cell"
                               >
                                 {row.connection.label}
-                                <button
-                                  type="button"
-                                  class="connection-label-cell__edit"
-                                  onClick={(e) =>
-                                    startRename(row.connection.id, row.connection.label, e)
+                                <Show
+                                  when={row.connection.shared}
+                                  fallback={
+                                    <button
+                                      type="button"
+                                      class="connection-label-cell__edit"
+                                      onClick={(e) =>
+                                        startRename(row.connection.id, row.connection.label, e)
+                                      }
+                                      aria-label={`Rename ${row.connection.label}`}
+                                      style="background: none; border: none; cursor: pointer; padding: 2px; color: hsl(var(--muted-foreground)); opacity: 0; transition: opacity 0.15s; display: inline-flex; align-items: center; line-height: 1;"
+                                    >
+                                      <svg
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                      >
+                                        <path d="M5 21h14c1.1 0 2-.9 2-2v-7h-2v7H5V5h7V3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2" />
+                                        <path d="M7 13v3c0 .55.45 1 1 1h3c.27 0 .52-.11.71-.29l9-9a.996.996 0 0 0 0-1.41l-3-3a.996.996 0 0 0-1.41 0l-9.01 8.99A1 1 0 0 0 7 13m10-7.59L18.59 7 17.5 8.09 15.91 6.5zm-8 8 5.5-5.5 1.59 1.59-5.5 5.5H9z" />
+                                      </svg>
+                                    </button>
                                   }
-                                  aria-label={`Rename ${row.connection.label}`}
-                                  style="background: none; border: none; cursor: pointer; padding: 2px; color: hsl(var(--muted-foreground)); opacity: 0; transition: opacity 0.15s; display: inline-flex; align-items: center; line-height: 1;"
                                 >
-                                  <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
+                                  <span
+                                    title={
+                                      row.connection.shared_from
+                                        ? `Shared from ${row.connection.shared_from} — read-only here`
+                                        : 'Shared from another workspace — read-only here'
+                                    }
+                                    style="display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: var(--font-size-xs); background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); white-space: nowrap;"
                                   >
-                                    <path d="M5 21h14c1.1 0 2-.9 2-2v-7h-2v7H5V5h7V3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2" />
-                                    <path d="M7 13v3c0 .55.45 1 1 1h3c.27 0 .52-.11.71-.29l9-9a.996.996 0 0 0 0-1.41l-3-3a.996.996 0 0 0-1.41 0l-9.01 8.99A1 1 0 0 0 7 13m10-7.59L18.59 7 17.5 8.09 15.91 6.5zm-8 8 5.5-5.5 1.59 1.59-5.5 5.5H9z" />
-                                  </svg>
-                                </button>
+                                    {row.connection.shared_from
+                                      ? `Shared · ${row.connection.shared_from}`
+                                      : 'Shared'}
+                                  </span>
+                                </Show>
                               </span>
                             }
                           >
@@ -814,16 +840,18 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
                           </Show>
                         </td>
                         <td style="text-align: right;">
-                          <button
-                            class="btn btn--outline btn--sm"
-                            style="font-size: var(--font-size-xs); white-space: nowrap;"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              navigate(`/providers/connections/${row.connection.id}`);
-                            }}
-                          >
-                            View details
-                          </button>
+                          <Show when={!row.connection.shared}>
+                            <button
+                              class="btn btn--outline btn--sm"
+                              style="font-size: var(--font-size-xs); white-space: nowrap;"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                navigate(`/providers/connections/${row.connection.id}`);
+                              }}
+                            >
+                              View details
+                            </button>
+                          </Show>
                         </td>
                       </tr>
                     )}

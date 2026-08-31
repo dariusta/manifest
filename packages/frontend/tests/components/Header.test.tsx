@@ -59,6 +59,13 @@ vi.mock("../../src/components/NotificationBell.jsx", () => ({
   default: () => null,
 }));
 
+// Header behavior is isolated from the workspace API. WorkspaceSwitcher has
+// its own contract tests, and allowing it to share global fetch mocks here
+// would consume responses intended for the GitHub star-count request.
+vi.mock("../../src/components/WorkspaceSwitcher", () => ({
+  default: () => null,
+}));
+
 import Header from "../../src/components/Header";
 import { setConnectionBreadcrumb } from "../../src/services/connection-breadcrumb-store";
 

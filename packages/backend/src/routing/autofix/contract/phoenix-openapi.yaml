@@ -351,6 +351,7 @@ components:
             nanobot,
             craft,
             claude-code,
+            cursor,
             opencode,
             openai-sdk,
             anthropic-sdk,

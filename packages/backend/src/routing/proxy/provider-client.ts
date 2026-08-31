@@ -322,11 +322,15 @@ export class ProviderClient {
     const textFormat = responsesTextFormat(body, opts.apiMode);
     const resolvedWireApiMode = wireApiMode(endpoint);
     const resolvedWireFormat = wireFormat(endpoint);
+    // A resolver is also supplied when Cursor posts a Responses-shaped body to
+    // /chat/completions. Normal chat requests have no resolver, so resolving it
+    // here remains lazy while allowing that compatibility translation through.
+    const resolveChatBody = opts.resolveChatBody;
     const needsChatBody =
-      opts.apiMode !== undefined &&
-      opts.apiMode !== 'chat_completions' &&
-      INPUT_WIRE_FORMATS[opts.apiMode] !== resolvedWireFormat;
-    const chatBody = needsChatBody ? await opts.resolveChatBody?.() : undefined;
+      resolveChatBody !== undefined &&
+      (opts.apiMode === 'chat_completions' ||
+        (opts.apiMode !== undefined && INPUT_WIRE_FORMATS[opts.apiMode] !== resolvedWireFormat));
+    const chatBody = needsChatBody ? await resolveChatBody() : undefined;
 
     const bareModel = stripModelPrefix(model, endpointKey);
     if (endpoint.format === 'kiro') {
@@ -614,7 +618,8 @@ export class ProviderClient {
   }): BuiltProviderRequest {
     const { endpoint, endpointKey, bareModel, apiKey, authType, body, chatBody, stream } = ctx;
     // Native matching targets read `body` directly. Cross-protocol targets
-    // receive the lazily resolved Chat Completions view as `chatBody`.
+    // receive the lazily resolved Chat Completions view as `chatBody`, including
+    // Responses-shaped requests Cursor posts to `/chat/completions`.
     const requestSource = chatBody ?? body;
 
     if (endpoint.format === 'google') {

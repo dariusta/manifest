@@ -199,6 +199,38 @@ describe('AgentKeyAuthGuard', () => {
     });
   });
 
+  it('authenticates a key whose tenant has a null owner_user_id (multi-workspace)', async () => {
+    const token = 'mnfst_null-owner-workspace';
+    mockGetMany.mockResolvedValue([
+      {
+        id: 'key-nw',
+        tenant_id: 'tenant-nw',
+        agent_id: 'agent-nw',
+        key_hash: hashKey(token),
+        expires_at: null,
+        agent: { id: 'agent-nw', name: 'workspace-agent' },
+        tenant: { id: 'tenant-nw', owner_user_id: null },
+      },
+    ]);
+
+    const { ctx, req } = makeContext({ authorization: `Bearer ${token}` });
+    const result = await guard.canActivate(ctx);
+
+    expect(result).toBe(true);
+    expect(req.ingestionContext).toEqual({
+      tenantId: 'tenant-nw',
+      agentId: 'agent-nw',
+      agentName: 'workspace-agent',
+      userId: null,
+    });
+    // Regression: the candidate query must select each joined relation's PK so
+    // TypeORM hydrates the tenant even when owner_user_id is NULL. Without
+    // a.id / t.id the tenant comes back undefined and a valid key is rejected
+    // as M005 ("unhydrated relations").
+    const selectCols = mockCreateQueryBuilder('k').select.mock.calls[0][0] as string[];
+    expect(selectCols).toEqual(expect.arrayContaining(['a.id', 't.id']));
+  });
+
   it('returns true when raw token (no Bearer prefix) matches', async () => {
     const token = 'mnfst_raw-key-test';
     mockGetMany.mockResolvedValue([

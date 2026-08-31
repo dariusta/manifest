@@ -1847,6 +1847,72 @@ describe('ProxyService — orchestration', () => {
       ]);
     });
 
+    it('converts a Responses-shaped body posted to /chat/completions (Cursor Agent mode)', async () => {
+      // Cursor points every mode at one base URL and only ever POSTs to
+      // /chat/completions, so its Agent/Plan bodies arrive here in Responses
+      // shape. Without conversion the scorer sees no messages and the provider
+      // gets an `input` it cannot read.
+      const body = {
+        instructions: 'be brief',
+        input: [{ role: 'user', content: 'refactor this' }],
+        tools: [{ type: 'function', name: 'read_file', parameters: { type: 'object' } }],
+        stream: false,
+      };
+      resolveService.resolve.mockResolvedValue({
+        tier: 'standard',
+        route: route('openai', 'api_key', 'gpt-4o'),
+        fallback_routes: null,
+        confidence: 0.9,
+        score: 5,
+        reason: 'scored',
+      });
+      fallbackService.tryForwardToProvider.mockResolvedValue({
+        response: okResponse(200),
+        isGoogle: false,
+        isAnthropic: false,
+        isChatGpt: false,
+      });
+
+      await svc.proxyRequest(baseOpts({ body, apiMode: 'chat_completions' } as never));
+
+      const resolveChatBody = fallbackService.tryForwardToProvider.mock.calls[0][0].resolveChatBody;
+      expect(resolveChatBody).toBeDefined();
+      const chatBody = await resolveChatBody!();
+      expect(chatBody?.messages).toEqual([
+        { role: 'system', content: 'be brief' },
+        { role: 'user', content: 'refactor this' },
+      ]);
+      // The scorer sees real turns rather than an empty body. It drops the
+      // system turn, as it does for any converted request.
+      const [, , scoringMessages] = resolveService.resolve.mock.calls[0];
+      expect(scoringMessages).toEqual([{ role: 'user', content: 'refactor this' }]);
+    });
+
+    it('leaves an ordinary chat-completions body untranslated', async () => {
+      // Guards the conversion above from widening: a normal body must still
+      // reach the provider byte-for-byte, with no chatBody produced.
+      const body = { messages: [{ role: 'user', content: 'hello' }], stream: false };
+      resolveService.resolve.mockResolvedValue({
+        tier: 'standard',
+        route: route('openai', 'api_key', 'gpt-4o'),
+        fallback_routes: null,
+        confidence: 0.9,
+        score: 5,
+        reason: 'scored',
+      });
+      fallbackService.tryForwardToProvider.mockResolvedValue({
+        response: okResponse(200),
+        isGoogle: false,
+        isAnthropic: false,
+        isChatGpt: false,
+      });
+
+      await svc.proxyRequest(baseOpts({ body, apiMode: 'chat_completions' } as never));
+
+      expect(fallbackService.tryForwardToProvider.mock.calls[0][0].body).toBe(body);
+      expect(fallbackService.tryForwardToProvider.mock.calls[0][0].resolveChatBody).toBeUndefined();
+    });
+
     it('returns the forward result and records tier momentum on a 200 non-stream response', async () => {
       resolveService.resolve.mockResolvedValue({
         tier: 'standard',

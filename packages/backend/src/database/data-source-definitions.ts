@@ -7,6 +7,7 @@ import { AgentMessage } from '../entities/agent-message.entity';
 import { ManifestRequest } from '../entities/request.entity';
 import { ApiKey } from '../entities/api-key.entity';
 import { Tenant } from '../entities/tenant.entity';
+import { TenantMember } from '../entities/tenant-member.entity';
 import { Agent } from '../entities/agent.entity';
 import { AgentApiKey } from '../entities/agent-api-key.entity';
 import { NotificationRule } from '../entities/notification-rule.entity';
@@ -32,7 +33,6 @@ import { ReclassifyPlanRequestLimitMessages1800100000000 } from './migrations/18
 import { AddMessageErrorCode1800200000000 } from './migrations/1800200000000-AddMessageErrorCode';
 import { DropUnusedAgentMessageIndexes1800300000000 } from './migrations/1800300000000-DropUnusedAgentMessageIndexes';
 import { ExtendDashboardCoveringIndex1801200000000 } from './migrations/1801200000000-ExtendDashboardCoveringIndex';
-
 import { AddTenantRequestUsage1801300000000 } from './migrations/1801300000000-AddTenantRequestUsage';
 import { AddRequestRecordings1801300000000 } from './migrations/1801300000000-AddRequestRecordings';
 import { MoveRecordingsToProviderAttempts1801400000000 } from './migrations/1801400000000-MoveRecordingsToProviderAttempts';
@@ -41,6 +41,7 @@ import { DropLegacyAutofixRolloutColumns1801600000000 } from './migrations/18016
 import { AddRequestApiMode1801720000000 } from './migrations/1801720000000-AddRequestApiMode';
 import { AddAutofixConsentToInstallMetadata1801900000000 } from './migrations/1801900000000-AddAutofixConsentToInstallMetadata';
 import { SlimTenantAgentModelIndex1802000000000 } from './migrations/1802000000000-SlimTenantAgentModelIndex';
+import { AddTenantMembers1802100000000 } from './migrations/1802100000000-AddTenantMembers';
 import { InitialSchema1771464895790 } from './migrations/1771464895790-InitialSchema';
 import { HashApiKeys1771500000000 } from './migrations/1771500000000-HashApiKeys';
 import { ModelPricingImprovements1771600000000 } from './migrations/1771600000000-ModelPricingImprovements';
@@ -165,6 +166,7 @@ export const entities = [
   ManifestRequest,
   ApiKey,
   Tenant,
+  TenantMember,
   Agent,
   AgentApiKey,
   NotificationRule,
@@ -311,7 +313,6 @@ export const migrations = [
   AddRequestsAndProviderAttempts1801000000000,
   AddProviderAttemptOrdering1801100000000,
   ExtendDashboardCoveringIndex1801200000000,
-
   AddTenantRequestUsage1801300000000,
   AddRequestRecordings1801300000000,
   MoveRecordingsToProviderAttempts1801400000000,
@@ -320,4 +321,5 @@ export const migrations = [
   AddRequestApiMode1801720000000,
   AddAutofixConsentToInstallMetadata1801900000000,
   SlimTenantAgentModelIndex1802000000000,
+  AddTenantMembers1802100000000,
 ];

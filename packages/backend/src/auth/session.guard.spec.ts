@@ -45,18 +45,30 @@ function createMockContext(overrides: { ip?: string; headers?: Record<string, st
 describe('SessionGuard', () => {
   let guard: SessionGuard;
   let reflector: Reflector;
-  let tenantCache: { resolve: jest.Mock; ensureForUser: jest.Mock; invalidate: jest.Mock };
+  let tenantCache: {
+    resolve: jest.Mock;
+    resolveActive: jest.Mock;
+    ensureForUser: jest.Mock;
+    invalidate: jest.Mock;
+  };
 
   beforeEach(() => {
     reflector = new Reflector();
     tenantCache = {
       resolve: jest.fn().mockResolvedValue('tenant-1'),
+      resolveActive: jest.fn(),
+      // Delegate so existing assertions on resolve() keep observing the lookup.
+      // (set after object literal below)
       ensureForUser: jest.fn(),
       invalidate: jest.fn(),
     };
     guard = new SessionGuard(reflector, tenantCache as never);
     jest.clearAllMocks();
     tenantCache.resolve.mockResolvedValue('tenant-1');
+    tenantCache.resolveActive.mockImplementation(async (userId: string) => ({
+      tenantId: await tenantCache.resolve(userId),
+      role: 'owner',
+    }));
   });
 
   afterEach(() => {
@@ -114,7 +126,11 @@ describe('SessionGuard', () => {
     await guard.canActivate(context);
 
     expect(tenantCache.resolve).toHaveBeenCalledWith('user-1');
-    expect(request['tenantContext']).toEqual({ tenantId: 'tenant-42', userId: 'user-1' });
+    expect(request['tenantContext']).toEqual({
+      tenantId: 'tenant-42',
+      userId: 'user-1',
+      role: 'owner',
+    });
   });
 
   it('attaches tenantContext with a null tenantId for a fresh user without a tenant', async () => {
@@ -128,7 +144,11 @@ describe('SessionGuard', () => {
 
     await guard.canActivate(context);
 
-    expect(request['tenantContext']).toEqual({ tenantId: null, userId: 'fresh-user' });
+    expect(request['tenantContext']).toEqual({
+      tenantId: null,
+      userId: 'fresh-user',
+      role: 'owner',
+    });
   });
 
   it('fails soft with a null tenantId when tenant resolution throws (no request crash)', async () => {
@@ -273,7 +293,11 @@ describe('SessionGuard', () => {
       });
       expect(request['authMethod']).toBe('session');
       expect(tenantCache.resolve).toHaveBeenCalledWith('local');
-      expect(request['tenantContext']).toEqual({ tenantId: 'tenant-1', userId: 'local' });
+      expect(request['tenantContext']).toEqual({
+        tenantId: 'tenant-1',
+        userId: 'local',
+        role: 'owner',
+      });
     });
 
     it('falls back to synthetic user when getSession throws on loopback', async () => {

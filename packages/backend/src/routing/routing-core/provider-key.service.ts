@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import type { AuthType, ModelRoute } from 'manifest-shared';
 import { TenantProvider } from '../../entities/tenant-provider.entity';
 import { AgentEnabledProvider } from '../../entities/agent-enabled-provider.entity';
@@ -8,6 +8,7 @@ import { ModelPricingCacheService } from '../../model-prices/model-pricing-cache
 import { ModelDiscoveryService } from '../../model-discovery/model-discovery.service';
 import { CachedProviderKey, RoutingCacheService } from './routing-cache.service';
 import { ProviderService } from './provider.service';
+import { TenantCacheService } from '../../common/services/tenant-cache.service';
 import { decrypt, getEncryptionSecret } from '../../common/utils/crypto.util';
 import {
   expandProviderNames,
@@ -60,7 +61,32 @@ export class ProviderKeyService {
     @Optional()
     @InjectRepository(AgentEnabledProvider)
     private readonly enabledProviderRepo: Repository<AgentEnabledProvider> | null = null,
+    // Optional + last so positional test constructions keep working; Nest
+    // injects the global TenantCacheService in production. When null (unit
+    // tests) cross-workspace sharing is disabled and behavior is unchanged.
+    @Optional()
+    private readonly tenantCache: TenantCacheService | null = null,
   ) {}
+
+  /** Team workspaces the acting tenant borrows providers from ([] when none). */
+  private async sharedTenantIds(tenantId: string): Promise<string[]> {
+    return (await this.tenantCache?.sharedProviderTenantIds(tenantId)) ?? [];
+  }
+
+  /**
+   * The acting tenant's own providers plus any borrowed from team workspaces.
+   * Falls back to exactly getProviders(tenantId) when nothing is borrowed, so
+   * the non-sharing path is byte-identical to the pre-sharing behavior.
+   */
+  private async providersWithShared(tenantId: string): Promise<TenantProvider[]> {
+    const own = await this.providerService.getProviders(tenantId);
+    const borrowedIds = await this.sharedTenantIds(tenantId);
+    if (borrowedIds.length === 0) return own;
+    const borrowed = (
+      await Promise.all(borrowedIds.map((id) => this.providerService.getProviders(id)))
+    ).flat();
+    return borrowed.length === 0 ? own : [...own, ...borrowed];
+  }
 
   /**
    * Returns the ordered list of API keys for (tenant, provider, authType),
@@ -208,8 +234,9 @@ export class ProviderKeyService {
   ): Promise<AuthType> {
     const names = expandProviderNames([provider]);
     const records = await this.filterProvidersForAgent(
-      await this.providerService.getProviders(tenantId),
+      await this.providersWithShared(tenantId),
       agentId,
+      tenantId,
     );
     let matches = records.filter((r) => r.is_active && names.has(r.provider.toLowerCase()));
     // When the caller knows certain auth types already failed (e.g. during
@@ -235,8 +262,9 @@ export class ProviderKeyService {
   async hasActiveProvider(tenantId: string, provider: string, agentId?: string): Promise<boolean> {
     const names = expandProviderNames([provider]);
     const records = await this.filterProvidersForAgent(
-      await this.providerService.getProviders(tenantId),
+      await this.providersWithShared(tenantId),
       agentId,
+      tenantId,
     );
     return records.some((r) => r.is_active && names.has(r.provider.toLowerCase()));
   }
@@ -258,8 +286,9 @@ export class ProviderKeyService {
     agentId?: string,
   ): Promise<string | undefined> {
     const providers = await this.filterProvidersForAgent(
-      await this.providerService.getProviders(tenantId),
+      await this.providersWithShared(tenantId),
       agentId,
+      tenantId,
     );
     for (const p of providers) {
       if (!p.cached_models) continue;
@@ -274,38 +303,51 @@ export class ProviderKeyService {
     preferredAuthType?: AuthType,
     agentId?: string,
   ): Promise<CachedProviderKey[]> {
+    // Widen the row set to the acting tenant plus any team workspaces it borrows
+    // providers from; filterProvidersForAgent keeps the borrowed (foreign) rows
+    // regardless of per-agent enablement. With nothing borrowed the match stays
+    // an exact tenant_id so the non-sharing query is unchanged.
+    const borrowedIds = await this.sharedTenantIds(tenantId);
+    const tenantMatch = borrowedIds.length ? In([tenantId, ...borrowedIds]) : tenantId;
     // Custom providers: exact match on provider key, allow empty key for local endpoints
     if (provider.startsWith('custom:')) {
       const records = await this.providerRepo.find({
-        where: { tenant_id: tenantId, provider, is_active: true },
+        where: { tenant_id: tenantMatch, provider, is_active: true },
         // id tiebreaker keeps selection deterministic when keys share a priority,
         // so the key forwarded and the id stamped never resolve to different rows.
         order: { priority: 'ASC', id: 'ASC' },
       });
-      return (await this.filterProvidersForAgent(records, agentId)).flatMap((record) =>
+      return (await this.filterProvidersForAgent(records, agentId, tenantId)).flatMap((record) =>
         this.decryptOne(record),
       );
     }
 
     const names = expandProviderNames([provider]);
     const records = await this.providerRepo.find({
-      where: { tenant_id: tenantId, is_active: true },
+      where: { tenant_id: tenantMatch, is_active: true },
       // id tiebreaker keeps selection deterministic when keys share a priority,
       // so the key forwarded and the id stamped never resolve to different rows.
       order: { priority: 'ASC', id: 'ASC' },
     });
 
-    const scopedRecords = await this.filterProvidersForAgent(records, agentId);
+    const scopedRecords = await this.filterProvidersForAgent(records, agentId, tenantId);
     const matches = scopedRecords.filter(
       (r) => isManifestUsableProvider(r) && names.has(r.provider.toLowerCase()),
     );
     if (matches.length === 0) return [];
 
+    // Prefer the acting tenant's own connections over ones borrowed from a
+    // team workspace: only fall back to a borrowed credential (spending the
+    // team's key/subscription) when the user has nothing of their own that fits.
+    const ownFirst = (r: TenantProvider) => (r.tenant_id === tenantId ? 0 : 1);
     // When a caller explicitly requests an auth type, do not fall through
     // to a different auth type record.
     const candidates = preferredAuthType
-      ? matches.filter((m) => m.auth_type === preferredAuthType)
+      ? matches
+          .filter((m) => m.auth_type === preferredAuthType)
+          .sort((a, b) => ownFirst(a) - ownFirst(b))
       : [...matches].sort((a, b) => {
+          if (ownFirst(a) !== ownFirst(b)) return ownFirst(a) - ownFirst(b);
           const aPref = a.auth_type === 'api_key' ? 0 : 1;
           const bPref = b.auth_type === 'api_key' ? 0 : 1;
           if (aPref !== bPref) return aPref - bPref;
@@ -379,12 +421,17 @@ export class ProviderKeyService {
       return false;
     }
 
+    const borrowedIds = await this.sharedTenantIds(tenantId);
     const records = (
       await this.filterProvidersForAgent(
         await this.providerRepo.find({
-          where: { tenant_id: tenantId, is_active: true },
+          where: {
+            tenant_id: borrowedIds.length ? In([tenantId, ...borrowedIds]) : tenantId,
+            is_active: true,
+          },
         }),
         agentId,
+        tenantId,
       )
     ).filter(isManifestUsableProvider);
     if (pricing) {
@@ -435,12 +482,17 @@ export class ProviderKeyService {
     // Discovery can be cold for a connection; fall back to "an active, usable
     // record for the pinned provider exists" only when discovery returned no
     // model evidence for that pinned provider/authType.
+    const borrowedIds = await this.sharedTenantIds(tenantId);
     const records = (
       await this.filterProvidersForAgent(
         await this.providerRepo.find({
-          where: { tenant_id: tenantId, is_active: true },
+          where: {
+            tenant_id: borrowedIds.length ? In([tenantId, ...borrowedIds]) : tenantId,
+            is_active: true,
+          },
         }),
         agentId,
+        tenantId,
       )
     ).filter(isManifestUsableProvider);
     return records.some(
@@ -451,18 +503,28 @@ export class ProviderKeyService {
   }
 
   /**
-   * Filters a list of global tenant providers down to only those the given
-   * agent has enabled. If no agentId is provided, or if the
-   * enabled-provider repo is not available, returns the full list unchanged.
+   * Filters a list of tenant providers down to only those the given agent has
+   * enabled. If no agentId is provided, or if the enabled-provider repo is not
+   * available, returns the full list unchanged.
+   *
+   * Per-agent enablement (agent_enabled_providers) only governs the acting
+   * tenant's OWN providers. Providers borrowed from a team workspace (a
+   * different tenant_id than `actingTenantId`) have no enablement row here — and
+   * couldn't, since that table is tenant-scoped — so they are always kept. This
+   * is the "borrowed providers are always available in the consuming workspace"
+   * rule; per-agent toggling of borrowed providers is intentionally out of scope.
    */
   private async filterProvidersForAgent(
     providers: TenantProvider[],
     agentId?: string,
+    actingTenantId?: string,
   ): Promise<TenantProvider[]> {
     if (!agentId || !this.enabledProviderRepo) return providers;
+    const isBorrowed = (p: TenantProvider) =>
+      actingTenantId != null && p.tenant_id !== actingTenantId;
     const rows = await this.enabledProviderRepo.find({ where: { agent_id: agentId } });
-    if (rows.length === 0) return [];
+    if (rows.length === 0) return providers.filter(isBorrowed);
     const enabledIds = new Set(rows.map((r) => r.tenant_provider_id));
-    return providers.filter((p) => enabledIds.has(p.id));
+    return providers.filter((p) => isBorrowed(p) || enabledIds.has(p.id));
   }
 }

@@ -83,7 +83,11 @@ export class ProviderController {
     const agent = await this.resolveAgentService.resolve(ctx.tenantId, params.agentName, {
       allowPlayground: true,
     });
-    const providers = await this.providerService.getProviders(agent.tenant_id);
+    // getProvidersWithShared widens the list to include providers borrowed from
+    // team workspaces this workspace shares with, so the model picker offers
+    // them. Borrowed rows can't be mutated here — provider mutation endpoints
+    // reject foreign tenant_ids server-side.
+    const providers = await this.providerService.getProvidersWithShared(agent.tenant_id);
     return providers.map((p) => ({
       id: p.id,
       provider: p.provider,

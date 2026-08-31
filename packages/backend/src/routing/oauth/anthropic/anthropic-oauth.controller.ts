@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpException,
   HttpStatus,
   Logger,
@@ -84,6 +85,49 @@ export class AnthropicOauthController {
     return (
       (await this.oauthService.findPendingForAgent(agent.id, agent.tenant_id)) ?? { state: null }
     );
+  }
+
+  /**
+   * Reveal the current bearer credential for one connected account.
+   *
+   * Anthropic's pasted OAuth authorization code is single-use and is not
+   * retained after exchange. The account detail UI calls this endpoint to
+   * show the useful equivalent: the current access token, refreshed first
+   * when necessary. Keep this response out of every intermediary cache.
+   */
+  @Get('credential')
+  @Header('Cache-Control', 'no-store')
+  async credential(
+    @Query('agentName') agentName: string,
+    @Query('label') label: string | string[] | undefined,
+    @TenantCtx() ctx: TenantContext,
+  ) {
+    if (!agentName) {
+      throw new HttpException('agentName query parameter is required', HttpStatus.BAD_REQUEST);
+    }
+    const keyLabel = optionalTrimmedStringQuery(label, 'label');
+    const agent = await this.resolveAgent.resolve(ctx.tenantId, agentName);
+    const rawCredential = await this.providerService.getFreshSubscriptionCredential(
+      agent.tenant_id,
+      'anthropic',
+      keyLabel,
+    );
+    if (!rawCredential) {
+      throw new HttpException('Anthropic account credential not found', HttpStatus.NOT_FOUND);
+    }
+    const authorizationCode = await this.oauthService.unwrapToken(
+      rawCredential,
+      agent.id,
+      agent.tenant_id,
+      keyLabel,
+    );
+    if (!authorizationCode) {
+      throw new HttpException(
+        'Anthropic account credential is unavailable. Reconnect the account and try again.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+    return { authorizationCode };
   }
 
   /** Disconnect the Anthropic subscription provider for an agent. */
