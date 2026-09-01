@@ -576,19 +576,3 @@ describe("Sidebar — usage card", () => {
     expect(container.querySelector(".sidebar-usage__fill--danger")).toBeNull();
   });
 });
-
-describe("Sidebar — pivot announcement", () => {
-  it("always renders the pivot card in place of the retired Autofix card", async () => {
-    const { container } = render(() => <Sidebar />);
-    await screen.findByText("Manifest is becoming the self-healing layer for APIs");
-    expect(container.querySelector(".sidebar-pivot")).not.toBeNull();
-    expect(container.querySelector(".sidebar-autofix")).toBeNull();
-  });
-
-  it("renders the pivot card in cloud too", async () => {
-    mockIsSelfHosted = false;
-    const { container } = render(() => <Sidebar />);
-    await screen.findByText("Manifest is becoming the self-healing layer for APIs");
-    expect(container.querySelector(".sidebar-pivot")).not.toBeNull();
-  });
-});

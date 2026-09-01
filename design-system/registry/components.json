@@ -499,6 +499,36 @@
         "agents.css"
       ]
     },
+    "anthropic-account": {
+      "classes": [
+        "anthropic-account",
+        "anthropic-account__actions",
+        "anthropic-account__chevron",
+        "anthropic-account__chevron--expanded",
+        "anthropic-account__credential",
+        "anthropic-account__credential-header",
+        "anthropic-account__credential-hint",
+        "anthropic-account__credential-loading",
+        "anthropic-account__credential-value",
+        "anthropic-account__name",
+        "anthropic-account__rename",
+        "anthropic-account__row",
+        "anthropic-account__subtitle",
+        "anthropic-account__summary",
+        "anthropic-account__trigger"
+      ],
+      "files": [
+        "routing-providers.css"
+      ]
+    },
+    "anthropic-account-list": {
+      "classes": [
+        "anthropic-account-list"
+      ],
+      "files": [
+        "routing-providers.css"
+      ]
+    },
     "anthropic-detail": {
       "classes": [
         "anthropic-detail__alt",
@@ -5099,8 +5129,8 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 314,
-    "classes": 1701,
+    "blocks": 316,
+    "classes": 1717,
     "canonicalRules": 47,
     "ghostRules": 47
   }

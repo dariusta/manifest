@@ -8,8 +8,6 @@ import { checkIsSelfHosted } from '../services/setup-status.js';
 import { agentPing } from '../services/sse.js';
 import { platformIcon } from 'manifest-shared';
 import AddAgentModal from './AddAgentModal.jsx';
-import PivotAnnouncement from './PivotAnnouncement.jsx';
-
 interface SidebarProps {
   mobileOpen?: boolean;
   onNavigate?: () => void;
@@ -223,11 +221,6 @@ const Sidebar: Component<SidebarProps> = (props) => {
       </A>
 
       <div class="sidebar__spacer" />
-
-      {/* Pivot announcement: shows for everyone in every deployment mode,
-          with a per-session dismiss. Replaces the retired Autofix card,
-          which duplicated the notifications. */}
-      <PivotAnnouncement />
 
       <Show when={!selfHosted() && showUpgrade()}>
         <div class="sidebar-usage">

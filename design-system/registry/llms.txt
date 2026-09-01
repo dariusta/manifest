@@ -96,7 +96,7 @@
 --z-toast: 8000
 --z-tooltip: 9999
 
-## Blocks (314 BEM blocks, 1701 classes)
+## Blocks (316 BEM blocks, 1717 classes)
 account-back-btn (agents.css): account-back-btn
 account-email-footer (agents.css): account-email-footer
 account-email-toggle (agents.css): account-email-toggle--disabled
@@ -115,6 +115,8 @@ agent-filter-select (filter-select.css): agent-filter-select agent-filter-select
 agent-type-select (agent-type-select.css): agent-type-select agent-type-select__caret agent-type-select__column agent-type-select__dropdown agent-type-select__dropdown--inline agent-type-select__group-label agent-type-select__option agent-type-select__option--selected agent-type-select__option-icon agent-type-select__trigger agent-type-select__trigger--open agent-type-select__trigger-icon agent-type-select__trigger-label
 agent-type-select-row (agent-type-select.css): agent-type-select-row
 agents-grid (agents.css): agents-grid
+anthropic-account (routing-providers.css): anthropic-account anthropic-account__actions anthropic-account__chevron anthropic-account__chevron--expanded anthropic-account__credential anthropic-account__credential-header anthropic-account__credential-hint anthropic-account__credential-loading anthropic-account__credential-value anthropic-account__name anthropic-account__rename anthropic-account__row anthropic-account__subtitle anthropic-account__summary anthropic-account__trigger
+anthropic-account-list (routing-providers.css): anthropic-account-list
 anthropic-detail (routing-providers.css): anthropic-detail__alt anthropic-detail__alt-divider anthropic-detail__alt-hint anthropic-detail__btn anthropic-detail__primary
 api-key-display (wizard.css): api-key-display__code api-key-display__prefix api-key-display__value api-key-display__warning
 app-body (layout.css): app-body

@@ -74,6 +74,15 @@ describe('getSubscriptionProviderConfig', () => {
     );
   });
 
+  it('lists claude-fable-5-1 explicitly — it is a distinct model, not a fable-5 variant', () => {
+    const config = getSubscriptionProviderConfig('anthropic');
+    const knownModels = config?.knownModels ?? [];
+    expect(knownModels).toContain('claude-fable-5-1');
+    expect(config?.subscriptionCapabilities?.modelContextWindows).toMatchObject({
+      'claude-fable-5-1': 1000000,
+    });
+  });
+
   it('returns config for openai', () => {
     const config = getSubscriptionProviderConfig('openai');
     expect(config).toMatchObject({

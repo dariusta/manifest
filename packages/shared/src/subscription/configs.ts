@@ -12,6 +12,10 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     subscriptionTokenPrefix: 'sk-ant-oat',
     knownModels: Object.freeze([
       'claude-fable-5',
+      // claude-fable-5-1 is a distinct model from claude-fable-5 — prefix
+      // matching would let it ride on 'claude-fable-5', but listing it
+      // explicitly keeps the catalog honest for the subscription UI.
+      'claude-fable-5-1',
       'claude-opus-4',
       'claude-sonnet-4',
       'claude-haiku-4',
@@ -24,6 +28,7 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     subscriptionCapabilities: Object.freeze({
       maxContextWindow: 200000,
       modelContextWindows: Object.freeze({
+        'claude-fable-5-1': 1000000,
         'claude-opus-4-8': 1000000,
         'claude-opus-5': 1000000,
         'claude-sonnet-5': 1000000,
