@@ -80,8 +80,8 @@ export class AgentKeyAuthGuard implements CanActivate, OnModuleInit, OnModuleDes
     // Pre-migration API keys were hashed with a static salt
     // ("manifest-api-key-salt"). The verifyKey path still accepts them for
     // backward compatibility, but a leaked DB backup gives an attacker a
-    // rainbow-table head start. Surface a one-shot warning so operators
-    // know to rotate them via the dashboard.
+    // rainbow-table head start. Surface a one-shot warning explaining that
+    // the next successful request upgrades them without rotation.
     try {
       const legacyCount = await this.keyRepo
         .createQueryBuilder('k')
