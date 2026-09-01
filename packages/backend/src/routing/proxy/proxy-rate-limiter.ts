@@ -1,5 +1,6 @@
 import { Injectable, OnModuleDestroy, HttpStatus } from '@nestjs/common';
 import { ManifestError } from '../../common/errors/manifest-error';
+import { optionalPositiveInteger } from '../../config/env.util';
 
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_ENTRIES = 50_000;
@@ -54,10 +55,12 @@ export class ProxyRateLimiter implements OnModuleDestroy {
       process.env['PROXY_IP_RATE_MAX_REQUESTS'],
       DEFAULT_IP_RATE_MAX_REQUESTS,
     );
-    this.concurrencyMax = parseProxyLimit(
-      process.env['PROXY_CONCURRENCY_MAX'],
-      DEFAULT_CONCURRENCY_MAX,
-    );
+    const proxyConcurrencyMax = process.env['PROXY_CONCURRENCY_MAX'];
+    this.concurrencyMax =
+      proxyConcurrencyMax !== undefined
+        ? parseProxyLimit(proxyConcurrencyMax, DEFAULT_CONCURRENCY_MAX)
+        : (optionalPositiveInteger(process.env['MANIFEST_CONCURRENCY_MAX']) ??
+          DEFAULT_CONCURRENCY_MAX);
     this.cleanupTimer = setInterval(() => this.evictExpired(), CLEANUP_INTERVAL_MS);
     if (typeof this.cleanupTimer === 'object' && 'unref' in this.cleanupTimer) {
       this.cleanupTimer.unref();
