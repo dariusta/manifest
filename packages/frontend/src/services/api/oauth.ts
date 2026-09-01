@@ -157,9 +157,10 @@ export function revokeAnthropicOAuth(agentName: string, label?: string) {
   );
 }
 
-export function getGeminiOAuthUrl(agentName: string) {
+export function getGeminiOAuthUrl(agentName: string, projectId?: string) {
   return fetchJson<{ url: string }>(`/oauth/gemini/authorize`, {
     agentName,
+    projectId,
   });
 }
 
@@ -185,24 +186,24 @@ export function revokeGeminiOAuth(agentName: string, label?: string) {
  * right getUrl/submitCallback/revoke triplet based on the provider id.
  */
 export interface PopupOauthApi {
-  getUrl: (agentName: string) => Promise<{ url: string }>;
+  getUrl: (agentName: string, options?: { projectId?: string }) => Promise<{ url: string }>;
   submitCallback: (code: string, state: string) => Promise<{ ok: boolean }>;
   revoke: (agentName: string, label?: string) => Promise<{ ok: boolean; notifications?: string[] }>;
 }
 
 const POPUP_OAUTH_PROVIDERS: Record<string, PopupOauthApi> = {
   openai: {
-    getUrl: getOpenaiOAuthUrl,
+    getUrl: (agentName) => getOpenaiOAuthUrl(agentName),
     submitCallback: submitOpenaiOAuthCallback,
     revoke: revokeOpenaiOAuth,
   },
   gemini: {
-    getUrl: getGeminiOAuthUrl,
+    getUrl: (agentName, options) => getGeminiOAuthUrl(agentName, options?.projectId),
     submitCallback: submitGeminiOAuthCallback,
     revoke: revokeGeminiOAuth,
   },
   xai: {
-    getUrl: getXaiOAuthUrl,
+    getUrl: (agentName) => getXaiOAuthUrl(agentName),
     submitCallback: submitXaiOAuthCallback,
     revoke: revokeXaiOAuth,
   },

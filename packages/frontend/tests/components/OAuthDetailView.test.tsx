@@ -420,7 +420,9 @@ describe('OAuthDetailView', () => {
     await waitFor(() => {
       expect(screen.getByText(/Copy the full URL/)).toBeDefined();
     });
-    expect(container.querySelector('video[src="/images/oauth-callback-example.mp4"]')).not.toBeNull();
+    expect(
+      container.querySelector('video[src="/images/oauth-callback-example.mp4"]'),
+    ).not.toBeNull();
   });
 
   it('sets preload="auto" on the OAuth tutorial video so it plays immediately', async () => {
@@ -450,6 +452,23 @@ describe('OAuthDetailView', () => {
     });
     expect(screen.queryByText(/Copy the full URL/)).toBeNull();
     expect(container.querySelector('video[src="/images/oauth-callback-example.mp4"]')).toBeNull();
+  });
+
+  it('sends an optional Google Cloud project ID when starting Gemini OAuth', async () => {
+    mockGetOpenaiOAuthUrl.mockResolvedValue({ url: 'https://oauth.google.com/authorize' });
+    vi.spyOn(window, 'open').mockReturnValue({ closed: false } as unknown as Window);
+
+    renderView({ provId: 'gemini', provDef: geminiProvDef });
+    fireEvent.input(screen.getByLabelText(/Google Cloud project ID/), {
+      target: { value: 'workspace-project' },
+    });
+    fireEvent.click(screen.getByText('Log in with Gemini'));
+
+    await waitFor(() => {
+      expect(mockGetOpenaiOAuthUrl).toHaveBeenCalledWith('test-agent', {
+        projectId: 'workspace-project',
+      });
+    });
   });
 
   it('Disconnect all revokes all OpenAI OAuth tokens', async () => {
@@ -622,7 +641,7 @@ describe('OAuthDetailView', () => {
     fireEvent.click(screen.getByText('Connect'));
 
     await waitFor(() => {
-      expect(screen.getByText(/Failed to exchange token/)).toBeDefined();
+      expect(screen.getByText('expired')).toBeDefined();
     });
   });
 

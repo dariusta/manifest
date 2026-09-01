@@ -63,6 +63,7 @@ const OAuthDetailView: Component<Props> = (props) => {
   const [successHandled, setSuccessHandled] = createSignal(false);
   const [pasteUrl, setPasteUrl] = createSignal('');
   const [pasteError, setPasteError] = createSignal<string | null>(null);
+  const [geminiProjectId, setGeminiProjectId] = createSignal('');
   const [oauthState, setOauthState] = createSignal<string | null>(null);
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
@@ -76,6 +77,7 @@ const OAuthDetailView: Component<Props> = (props) => {
   const isMultiKey = () => (props.activeKeys?.() ?? []).length > 1;
   const isXaiProvider = () => props.provId === 'xai';
   const isOpenAiProvider = () => props.provId === 'openai';
+  const isGeminiProvider = () => props.provId === 'gemini';
   const callbackPlaceholder = () =>
     isXaiProvider()
       ? 'Paste the xAI authorization code or callback URL'
@@ -131,7 +133,11 @@ const OAuthDetailView: Component<Props> = (props) => {
     setPasteUrl('');
     setPasteError(null);
     try {
-      const { url } = await oauthApi().getUrl(props.agentName);
+      const { url } = isGeminiProvider()
+        ? await oauthApi().getUrl(props.agentName, {
+            projectId: geminiProjectId().trim() || undefined,
+          })
+        : await oauthApi().getUrl(props.agentName);
       try {
         setOauthState(new URL(url).searchParams.get('state'));
       } catch {
@@ -191,8 +197,12 @@ const OAuthDetailView: Component<Props> = (props) => {
       setPasteError(null);
       await oauthApi().submitCallback(code, state);
       finishOAuthSuccess();
-    } catch {
-      setPasteError('Failed to exchange token. The URL may have expired. Try logging in again.');
+    } catch (err) {
+      setPasteError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to exchange token. The URL may have expired. Try logging in again.',
+      );
     } finally {
       props.setBusy(false);
     }
@@ -283,6 +293,26 @@ const OAuthDetailView: Component<Props> = (props) => {
               <p class="provider-detail__hint">
                 Log in with your {props.provDef.name} account to connect your subscription.
               </p>
+              <Show when={isGeminiProvider()}>
+                <div class="provider-detail__field" style="margin-top: 12px;">
+                  <label class="provider-detail__label" for="gemini-project-id">
+                    Google Cloud project ID <span style="font-weight: 400;">(optional)</span>
+                  </label>
+                  <input
+                    id="gemini-project-id"
+                    type="text"
+                    class="provider-detail__input"
+                    autocomplete="off"
+                    placeholder="my-google-cloud-project"
+                    value={geminiProjectId()}
+                    onInput={(event) => setGeminiProjectId(event.currentTarget.value)}
+                  />
+                  <p class="provider-detail__hint" style="margin-top: 6px;">
+                    Leave blank for eligible personal accounts. Workspace and standard-tier accounts
+                    require a project ID.
+                  </p>
+                </div>
+              </Show>
               <button
                 class="btn btn--primary provider-detail__action"
                 disabled={props.busy()}

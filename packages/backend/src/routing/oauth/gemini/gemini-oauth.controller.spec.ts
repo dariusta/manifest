@@ -62,6 +62,7 @@ describe('GeminiOauthController', () => {
         'my-agent',
         { tenantId: 'tenant-1', userId: 'user-1' } as never,
         req,
+        undefined,
       );
 
       expect(resolveAgent.resolve).toHaveBeenCalledWith('tenant-1', 'my-agent');
@@ -70,6 +71,7 @@ describe('GeminiOauthController', () => {
         'tenant-1',
         'http://localhost:3001',
         'user-1',
+        undefined,
       );
       expect(result).toEqual({ url: 'https://accounts.google.com/o/oauth2/v2/auth?...' });
     });
@@ -146,6 +148,7 @@ describe('GeminiOauthController', () => {
         'my-agent',
         { tenantId: 'tenant-1', userId: 'user-1' } as never,
         req,
+        undefined,
       );
 
       expect(oauthService.generateAuthorizationUrl).toHaveBeenCalledWith(
@@ -153,7 +156,50 @@ describe('GeminiOauthController', () => {
         'tenant-1',
         'https://manifest.example.com',
         'user-1',
+        undefined,
       );
+    });
+
+    it('stores an optional Google Cloud project with the OAuth flow', async () => {
+      resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+      oauthService.generateAuthorizationUrl.mockResolvedValue('https://accounts.google.com/auth');
+      const req = {
+        protocol: 'http',
+        get: jest.fn().mockReturnValue('localhost:3001'),
+      } as unknown as Request;
+
+      await controller.authorize(
+        'my-agent',
+        { tenantId: 'tenant-1', userId: 'user-1' } as never,
+        req,
+        'my-cloud-project',
+      );
+
+      expect(oauthService.generateAuthorizationUrl).toHaveBeenCalledWith(
+        'agent-id-1',
+        'tenant-1',
+        'http://localhost:3001',
+        'user-1',
+        { googleCloudProjectId: 'my-cloud-project' },
+      );
+    });
+
+    it('rejects a numeric Google Cloud project number', async () => {
+      resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+      const req = {
+        protocol: 'http',
+        get: jest.fn().mockReturnValue('localhost:3001'),
+      } as unknown as Request;
+
+      await expect(
+        controller.authorize(
+          'my-agent',
+          { tenantId: 'tenant-1', userId: 'user-1' } as never,
+          req,
+          '123456789',
+        ),
+      ).rejects.toThrow('project ID, not its numeric project number');
+      expect(oauthService.generateAuthorizationUrl).not.toHaveBeenCalled();
     });
   });
 

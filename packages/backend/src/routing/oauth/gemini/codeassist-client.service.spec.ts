@@ -110,43 +110,69 @@ describe('CodeAssistClientService', () => {
       expect(fetchMock.mock.calls[2][1].method).toBe('GET');
     });
 
-    it('falls back to the first allowed tier when no tier is marked isDefault', async () => {
+    it('does not auto-select a non-default standard tier without a project', async () => {
+      fetchMock.mockResolvedValueOnce(
+        mockOkResponse({
+          allowedTiers: [{ id: 'standard-tier' }],
+        }),
+      );
+
+      await expect(svc.onboard('access-token')).rejects.toThrow(
+        'requires a Google Cloud project ID',
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses an explicit Google Cloud project for a non-default tier', async () => {
       fetchMock
         .mockResolvedValueOnce(
           mockOkResponse({
             allowedTiers: [{ id: 'standard-tier' }],
           }),
         )
-        .mockResolvedValueOnce(
-          mockOkResponse({
-            done: true,
-            response: { cloudaicompanionProject: { id: 'proj-789' } },
-          }),
-        );
+        .mockResolvedValueOnce(mockOkResponse({ done: true, response: {} }));
 
-      const result = await svc.onboard('access-token');
+      const result = await svc.onboard('access-token', 'my-cloud-project');
 
-      expect(result.tierId).toBe('standard-tier');
-      expect(result.projectId).toBe('proj-789');
+      expect(result).toEqual({ projectId: 'my-cloud-project', tierId: 'legacy-tier' });
+      const loadBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      const onboardBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+      expect(loadBody.cloudaicompanionProject).toBe('my-cloud-project');
+      expect(loadBody.metadata.duetProject).toBe('my-cloud-project');
+      expect(onboardBody.cloudaicompanionProject).toBe('my-cloud-project');
+      expect(onboardBody.metadata.duetProject).toBe('my-cloud-project');
     });
 
-    it('throws when allowedTiers is empty', async () => {
+    it('asks for a project when allowedTiers is empty', async () => {
       fetchMock.mockResolvedValue(mockOkResponse({ allowedTiers: [] }));
 
       await expect(svc.onboard('access-token')).rejects.toThrow(
-        'CodeAssist returned no allowed tiers',
+        'requires a Google Cloud project ID',
       );
     });
 
-    it('throws when allowedTiers is missing', async () => {
+    it('asks for a project when allowedTiers is missing', async () => {
       fetchMock.mockResolvedValue(mockOkResponse({}));
 
       await expect(svc.onboard('access-token')).rejects.toThrow(
-        'CodeAssist returned no allowed tiers',
+        'requires a Google Cloud project ID',
       );
     });
 
-    it('throws when onboardUser returns no project id', async () => {
+    it('surfaces Google eligibility reasons instead of reporting a token exchange failure', async () => {
+      fetchMock.mockResolvedValueOnce(
+        mockOkResponse({
+          allowedTiers: [{ id: 'standard-tier' }],
+          ineligibleTiers: [{ reasonMessage: 'This account is not eligible for the free tier.' }],
+        }),
+      );
+
+      await expect(svc.onboard('access-token')).rejects.toThrow(
+        'Google Code Assist is unavailable for this account: This account is not eligible for the free tier.',
+      );
+    });
+
+    it('reports the project requirement when free-tier onboarding returns no managed project', async () => {
       fetchMock
         .mockResolvedValueOnce(
           mockOkResponse({ allowedTiers: [{ id: 'free-tier', isDefault: true }] }),
@@ -154,8 +180,18 @@ describe('CodeAssistClientService', () => {
         .mockResolvedValueOnce(mockOkResponse({ done: true, response: {} }));
 
       await expect(svc.onboard('access-token')).rejects.toThrow(
-        'CodeAssist onboardUser returned no project id.',
+        'requires a Google Cloud project ID',
       );
+    });
+
+    it('uses an explicit project when Google has a current tier but no managed project', async () => {
+      fetchMock.mockResolvedValueOnce(mockOkResponse({ currentTier: { id: 'standard-tier' } }));
+
+      await expect(svc.onboard('access-token', 'workspace-project')).resolves.toEqual({
+        projectId: 'workspace-project',
+        tierId: 'standard-tier',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('throws with the method name when loadCodeAssist returns non-OK', async () => {

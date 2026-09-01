@@ -45,6 +45,7 @@ export class GeminiOauthController {
     @Query('agentName') agentName: string,
     @TenantCtx() ctx: TenantContext,
     @Req() req: Request,
+    @Query('projectId') projectId?: string | string[],
   ) {
     if (!agentName) {
       throw new HttpException('agentName query parameter is required', HttpStatus.BAD_REQUEST);
@@ -54,12 +55,20 @@ export class GeminiOauthController {
     // cannot redirect the OAuth flow.
     const trustedBackendUrl = this.configService.get<string>('BETTER_AUTH_URL');
     const backendUrl = trustedBackendUrl || `${req.protocol}://${req.get('host')}`;
+    const googleCloudProjectId = optionalTrimmedStringQuery(projectId, 'projectId');
+    if (googleCloudProjectId && /^\d+$/.test(googleCloudProjectId)) {
+      throw new HttpException(
+        'Use the Google Cloud project ID, not its numeric project number.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     try {
       const url = await this.oauthService.generateAuthorizationUrl(
         agent.id,
         agent.tenant_id,
         backendUrl,
         ctx.userId,
+        googleCloudProjectId ? { googleCloudProjectId } : undefined,
       );
       return { url };
     } catch (err) {

@@ -314,6 +314,14 @@ describe('oauth API client', () => {
     expect(url).toContain('agentName=my-agent');
   });
 
+  it('getGeminiOAuthUrl forwards an optional Google Cloud project ID', async () => {
+    const fetchMock = setupFetch({ url: 'https://accounts.google.com/o/oauth2/v2/auth?...' });
+    await oauth.getGeminiOAuthUrl('my-agent', 'workspace-project');
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('agentName=my-agent');
+    expect(url).toContain('projectId=workspace-project');
+  });
+
   it('submitGeminiOAuthCallback POSTs code and state to the callback endpoint', async () => {
     const fetchMock = setupFetch({ ok: true });
     await oauth.submitGeminiOAuthCallback('auth-code-123', 'state-abc');
@@ -369,6 +377,14 @@ describe('oauth API client', () => {
     expect(result).toEqual({ url: 'https://accounts.google.com/auth' });
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toContain('/api/v1/oauth/gemini/authorize');
+  });
+
+  it('getPopupOauthApi gemini forwards project options', async () => {
+    const fetchMock = setupFetch({ url: 'https://accounts.google.com/auth' });
+    const api = oauth.getPopupOauthApi('gemini');
+    await api.getUrl('agent-1', { projectId: 'workspace-project' });
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('projectId=workspace-project');
   });
 
   it('getPopupOauthApi gemini submitCallback delegates to submitGeminiOAuthCallback', async () => {

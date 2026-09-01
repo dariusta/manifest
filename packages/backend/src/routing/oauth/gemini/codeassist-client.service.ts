@@ -42,9 +42,22 @@ export interface OnboardResult {
 }
 
 interface LoadCodeAssistResponse {
-  currentTier?: { id?: string };
-  cloudaicompanionProject?: string;
-  allowedTiers?: { id: string; isDefault?: boolean }[];
+  currentTier?: CodeAssistTier | null;
+  cloudaicompanionProject?: string | null;
+  allowedTiers?: CodeAssistTier[] | null;
+  ineligibleTiers?: CodeAssistIneligibleTier[] | null;
+  paidTier?: CodeAssistTier | null;
+}
+
+interface CodeAssistTier {
+  id?: string;
+  name?: string;
+  isDefault?: boolean;
+  userDefinedCloudaicompanionProject?: boolean | null;
+}
+
+interface CodeAssistIneligibleTier {
+  reasonMessage?: string;
 }
 
 interface LongRunningOperation {
@@ -61,31 +74,62 @@ export class CodeAssistClientService {
    * One-time-per-user setup. Returns the project id that must be sent on
    * every chat request thereafter. Idempotent — safe to call repeatedly.
    */
-  async onboard(accessToken: string): Promise<OnboardResult> {
+  async onboard(accessToken: string, requestedProjectId?: string): Promise<OnboardResult> {
+    const explicitProjectId = requestedProjectId?.trim() || undefined;
+    const loadMetadata = explicitProjectId
+      ? { ...CLIENT_METADATA, duetProject: explicitProjectId }
+      : CLIENT_METADATA;
     const loaded = await this.callJson<LoadCodeAssistResponse>(':loadCodeAssist', accessToken, {
-      metadata: CLIENT_METADATA,
+      ...(explicitProjectId ? { cloudaicompanionProject: explicitProjectId } : {}),
+      metadata: loadMetadata,
     });
     const existingProject = loaded.cloudaicompanionProject;
-    const currentTierId = loaded.currentTier?.id;
-    if (existingProject && currentTierId) {
+    const currentTierId = loaded.paidTier?.id ?? loaded.currentTier?.id ?? 'standard-tier';
+    if (existingProject && loaded.currentTier) {
       return { projectId: existingProject, tierId: currentTierId };
     }
-    // No project yet — pick the default-allowed tier and onboard. For
-    // personal accounts this is `free-tier`.
-    const tier = loaded.allowedTiers?.find((t) => t.isDefault) ?? loaded.allowedTiers?.[0];
-    if (!tier) {
-      throw new Error('CodeAssist returned no allowed tiers — onboarding cannot proceed.');
+    if (loaded.currentTier) {
+      if (explicitProjectId) {
+        return { projectId: explicitProjectId, tierId: currentTierId };
+      }
+      this.throwEligibilityOrProjectError(loaded);
     }
+
+    // Match Google's Gemini CLI: only an explicitly-default tier can be
+    // auto-selected. Taking allowedTiers[0] can accidentally select the
+    // standard tier, which requires a caller-supplied Google Cloud project.
+    const tier = loaded.allowedTiers?.find((candidate) => candidate.isDefault) ?? {
+      id: 'legacy-tier',
+      userDefinedCloudaicompanionProject: true,
+    };
+    if (!tier.id) this.throwEligibilityOrProjectError(loaded);
+    const isFreeTier = tier.id === 'free-tier';
+    if (!isFreeTier && !explicitProjectId) this.throwEligibilityOrProjectError(loaded);
+
+    const onboardMetadata = explicitProjectId && !isFreeTier ? loadMetadata : CLIENT_METADATA;
     const lro = await this.callJson<LongRunningOperation>(':onboardUser', accessToken, {
       tierId: tier.id,
-      metadata: CLIENT_METADATA,
+      ...(explicitProjectId && !isFreeTier ? { cloudaicompanionProject: explicitProjectId } : {}),
+      metadata: onboardMetadata,
     });
     const completed = await this.waitForOperation(lro, accessToken);
-    const projectId = completed.response?.cloudaicompanionProject?.id;
+    const projectId = completed.response?.cloudaicompanionProject?.id ?? explicitProjectId;
     if (!projectId) {
-      throw new Error('CodeAssist onboardUser returned no project id.');
+      this.throwEligibilityOrProjectError(loaded);
     }
     return { projectId, tierId: tier.id };
+  }
+
+  private throwEligibilityOrProjectError(loaded: LoadCodeAssistResponse): never {
+    const reasons = (loaded.ineligibleTiers ?? [])
+      .map((tier) => tier.reasonMessage?.trim())
+      .filter((reason): reason is string => Boolean(reason));
+    if (reasons.length > 0) {
+      throw new Error(`Google Code Assist is unavailable for this account: ${reasons.join(', ')}`);
+    }
+    throw new Error(
+      'Google sign-in succeeded, but this account requires a Google Cloud project ID. Enter the project ID in Manifest and sign in again.',
+    );
   }
 
   private async waitForOperation(
