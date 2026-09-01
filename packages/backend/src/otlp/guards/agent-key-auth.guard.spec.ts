@@ -1,8 +1,18 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash } from 'crypto';
+import { createHash, scryptSync } from 'crypto';
 import { AgentKeyAuthGuard } from './agent-key-auth.guard';
 import { hashKey } from '../../common/utils/hash.util';
+import { decrypt, encrypt } from '../../common/utils/crypto.util';
+
+const TEST_SECRET = 'r'.repeat(32);
+jest.mock('../../common/utils/crypto.util', () => {
+  const actual = jest.requireActual('../../common/utils/crypto.util');
+  return {
+    ...actual,
+    getEncryptionSecret: () => TEST_SECRET,
+  };
+});
 
 function testCacheKey(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -38,6 +48,8 @@ describe('AgentKeyAuthGuard', () => {
   let mockGetMany: jest.Mock;
   let mockCreateQueryBuilder: jest.Mock;
   let mockExecute: jest.Mock;
+  let mockUpdateSet: jest.Mock;
+  let mockUpdateWhere: jest.Mock;
   let mockFindOne: jest.Mock;
   let mockExistsBy: jest.Mock;
   let mockConfig: ConfigService;
@@ -57,17 +69,19 @@ describe('AgentKeyAuthGuard', () => {
       getOne: jest.fn().mockResolvedValue(null),
     };
     mockExecute = jest.fn().mockResolvedValue({});
+    mockUpdateSet = jest.fn().mockImplementation((setObj) => {
+      if (setObj) {
+        for (const val of Object.values(setObj)) {
+          if (typeof val === 'function') (val as () => unknown)();
+        }
+      }
+      return mockUpdateQb;
+    });
+    mockUpdateWhere = jest.fn().mockReturnThis();
     const mockUpdateQb = {
       update: jest.fn().mockReturnThis(),
-      set: jest.fn().mockImplementation((setObj) => {
-        if (setObj) {
-          for (const val of Object.values(setObj)) {
-            if (typeof val === 'function') (val as () => unknown)();
-          }
-        }
-        return mockUpdateQb;
-      }),
-      where: jest.fn().mockReturnThis(),
+      set: mockUpdateSet,
+      where: mockUpdateWhere,
       execute: mockExecute,
     };
     mockCreateQueryBuilder = jest.fn().mockImplementation((alias?: string) => {
@@ -197,6 +211,111 @@ describe('AgentKeyAuthGuard', () => {
       agentName: 'test-agent',
       userId: 'user-1',
     });
+  });
+
+  it('encrypts a verified hash-only key so the dashboard can reveal it without rotation', async () => {
+    const token = 'mnfst_legacy-recoverable-key';
+    const legacyHash = scryptSync(token, 'manifest-api-key-salt', 32).toString('hex');
+    mockGetMany.mockResolvedValue([
+      {
+        id: 'legacy-key-1',
+        key: null,
+        tenant_id: 'tenant-1',
+        agent_id: 'agent-1',
+        key_hash: legacyHash,
+        expires_at: null,
+        agent: { name: 'test-agent' },
+        tenant: { owner_user_id: 'user-1' },
+      },
+    ]);
+
+    const { ctx } = makeContext({ authorization: `Bearer ${token}` });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+
+    const recoveryPatch = mockUpdateSet.mock.calls
+      .map(([value]) => value as { key?: string; key_hash?: string })
+      .find((value) => typeof value.key === 'string');
+    expect(recoveryPatch).toBeDefined();
+    expect(decrypt(recoveryPatch!.key!, TEST_SECRET)).toBe(token);
+    expect(recoveryPatch!.key_hash).toMatch(/^[0-9a-f]{32}:[0-9a-f]{64}$/);
+    expect(mockUpdateWhere).toHaveBeenCalledWith('id = :id', { id: 'legacy-key-1' });
+
+    const selectColumns = mockCreateQueryBuilder('k').select.mock.calls[0][0] as string[];
+    expect(selectColumns).toContain('k.key');
+  });
+
+  it('does not rewrite a key that is already recoverable with the current encryption secret', async () => {
+    const token = 'mnfst_already-recoverable-key';
+    mockGetMany.mockResolvedValue([
+      {
+        id: 'recoverable-key-1',
+        key: encrypt(token, TEST_SECRET),
+        tenant_id: 'tenant-1',
+        agent_id: 'agent-1',
+        key_hash: hashKey(token),
+        expires_at: null,
+        agent: { name: 'test-agent' },
+        tenant: { owner_user_id: 'user-1' },
+      },
+    ]);
+
+    const { ctx } = makeContext({ authorization: `Bearer ${token}` });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+
+    const keyWrites = mockUpdateSet.mock.calls.filter(
+      ([value]) => typeof (value as { key?: string }).key === 'string',
+    );
+    expect(keyWrites).toHaveLength(0);
+  });
+
+  it('re-encrypts a verified key when the stored ciphertext uses an old encryption secret', async () => {
+    const token = 'mnfst_old-encryption-secret';
+    mockGetMany.mockResolvedValue([
+      {
+        id: 'old-secret-key-1',
+        key: encrypt(token, 'o'.repeat(32)),
+        tenant_id: 'tenant-1',
+        agent_id: 'agent-1',
+        key_hash: hashKey(token),
+        expires_at: null,
+        agent: { name: 'test-agent' },
+        tenant: { owner_user_id: 'user-1' },
+      },
+    ]);
+
+    const { ctx } = makeContext({ authorization: `Bearer ${token}` });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+
+    const recoveryPatch = mockUpdateSet.mock.calls
+      .map(([value]) => value as { key?: string })
+      .find((value) => typeof value.key === 'string');
+    expect(recoveryPatch).toBeDefined();
+    expect(decrypt(recoveryPatch!.key!, TEST_SECRET)).toBe(token);
+  });
+
+  it('keeps a verified key working when recoverable-key persistence fails', async () => {
+    const token = 'mnfst_recovery-write-failure';
+    mockGetMany.mockResolvedValue([
+      {
+        id: 'recovery-failure-key',
+        key: null,
+        tenant_id: 'tenant-1',
+        agent_id: 'agent-1',
+        key_hash: hashKey(token),
+        expires_at: null,
+        agent: { name: 'test-agent' },
+        tenant: { owner_user_id: 'user-1' },
+      },
+    ]);
+    mockExecute.mockRejectedValueOnce(new Error('DB write error'));
+    const logger = (guard as unknown as { logger: { warn: jest.Mock } }).logger;
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    const { ctx } = makeContext({ authorization: `Bearer ${token}` });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to make authenticated agent key recoverable'),
+    );
   });
 
   it('authenticates a key whose tenant has a null owner_user_id (multi-workspace)', async () => {

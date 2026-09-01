@@ -17,7 +17,8 @@ import {
   IngestionContext,
   RequestWithManifestErrorContext,
 } from '../interfaces/ingestion-context.interface';
-import { verifyKey, keyPrefix as computePrefix } from '../../common/utils/hash.util';
+import { hashKey, verifyKey, keyPrefix as computePrefix } from '../../common/utils/hash.util';
+import { decrypt, encrypt, getEncryptionSecret } from '../../common/utils/crypto.util';
 import { API_KEY_PREFIX } from '../../common/constants/api-key.constants';
 import { isLoopbackPeer } from '../../common/utils/local-ip';
 const MIN_TOKEN_LENGTH = 12;
@@ -90,7 +91,8 @@ export class AgentKeyAuthGuard implements CanActivate, OnModuleInit, OnModuleDes
       if (legacyCount > 0) {
         this.logger.warn(
           `${legacyCount} active agent API key(s) still use the legacy static-salt hash. ` +
-            'Rotate them in the dashboard (Agent → Rotate Key) when convenient.',
+            'They will be upgraded after their next successful authenticated request; ' +
+            'rotation is not required.',
         );
       }
     } catch (err) {
@@ -163,6 +165,47 @@ export class AgentKeyAuthGuard implements CanActivate, OnModuleInit, OnModuleDes
     return true;
   }
 
+  /**
+   * Older agent keys only retained a one-way hash, which made the dashboard's
+   * reveal and copy actions impossible without rotating the key. Once the
+   * existing key proves itself through normal authentication, retain an
+   * encrypted copy and upgrade its legacy static-salt hash in place.
+   *
+   * Authentication must remain available if this best-effort persistence
+   * fails. The next uncached request will retry without ever logging the key.
+   */
+  private async makeKeyRecoverable(keyRecord: AgentApiKey, token: string): Promise<void> {
+    const hashNeedsUpgrade = !keyRecord.key_hash.includes(':');
+    let keyNeedsRecovery = !keyRecord.key;
+
+    try {
+      const secret = getEncryptionSecret();
+      if (keyRecord.key) {
+        try {
+          keyNeedsRecovery = decrypt(keyRecord.key, secret) !== token;
+        } catch {
+          keyNeedsRecovery = true;
+        }
+      }
+
+      if (!keyNeedsRecovery && !hashNeedsUpgrade) return;
+
+      await this.keyRepo
+        .createQueryBuilder()
+        .update(AgentApiKey)
+        .set({
+          ...(keyNeedsRecovery ? { key: encrypt(token, secret) } : {}),
+          ...(hashNeedsUpgrade ? { key_hash: hashKey(token) } : {}),
+        })
+        .where('id = :id', { id: keyRecord.id })
+        .execute();
+    } catch (err) {
+      this.logger.warn(
+        `Failed to make authenticated agent key recoverable: ${(err as Error).message}`,
+      );
+    }
+  }
+
   private async validateMnfstToken(request: Request, token: string): Promise<boolean> {
     const hashed = cacheKey(token);
     const now = Date.now();
@@ -223,6 +266,7 @@ export class AgentKeyAuthGuard implements CanActivate, OnModuleInit, OnModuleDes
       .createQueryBuilder('k')
       .select([
         'k.id',
+        'k.key',
         'k.key_hash',
         'k.tenant_id',
         'k.agent_id',
@@ -287,6 +331,8 @@ export class AgentKeyAuthGuard implements CanActivate, OnModuleInit, OnModuleDes
       };
       throw new UnauthorizedException('API key expired');
     }
+
+    await this.makeKeyRecoverable(keyRecord, token);
 
     this.keyRepo
       .createQueryBuilder()
