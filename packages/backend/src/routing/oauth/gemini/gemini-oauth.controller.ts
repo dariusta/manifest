@@ -92,7 +92,10 @@ export class GeminiOauthController {
     }
     const keyLabel = optionalTrimmedStringQuery(label, 'label');
     const agent = await this.resolveAgent.resolve(ctx.tenantId, agentName);
-    const keys = await this.providerKeyService.getProviderKeys(
+    // Own keys only: getProviderKeys() also returns providers borrowed from
+    // team workspaces, and revoking one of those would kill the token for the
+    // workspace that owns it while removeProvider below only deletes our rows.
+    const keys = await this.providerKeyService.getOwnedProviderKeys(
       agent.tenant_id,
       'gemini',
       'subscription',

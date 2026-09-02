@@ -384,3 +384,83 @@ describe('ProviderKeyService — filterProvidersForAgent (per-agent visibility)'
     expect(keys.map((k) => k.id).sort()).toEqual(['tp-a', 'tp-b']);
   });
 });
+
+/**
+ * Regression cover for the destructive-path scoping split. getProviderKeys()
+ * deliberately widens to team workspaces the tenant borrows from; the OAuth
+ * revoke handlers must NOT see that widened set, because revoking a borrowed
+ * token kills it for the workspace that owns it while the disconnect only ever
+ * deletes the acting tenant's own rows.
+ */
+describe('ProviderKeyService — getOwnedProviderKeys never widens to borrowed tenants', () => {
+  const SECRET = 'a'.repeat(64);
+
+  const row = (over: Partial<TenantProvider>): TenantProvider =>
+    ({
+      id: 'tp-own',
+      tenant_id: 'tenant-1',
+      provider: 'openai',
+      auth_type: 'subscription',
+      label: 'Default',
+      priority: 0,
+      is_active: true,
+      region: null,
+      api_key_encrypted: encrypt(JSON.stringify({ t: 'tok', r: 'ref', e: 0 }), SECRET),
+      ...over,
+    }) as TenantProvider;
+
+  const build = (rows: TenantProvider[]) => {
+    const find = jest.fn().mockResolvedValue(rows);
+    const svc = new ProviderKeyService(
+      { find } as never, // providerRepo
+      {} as never, // pricingCache
+      {} as never, // discoveryService
+      {
+        getProviderKeys: jest.fn().mockReturnValue(undefined),
+        setProviderKeys: jest.fn(),
+      } as never, // routingCache
+      {} as never, // providerService
+      null, // enabledProviderRepo
+      // A tenant cache that DOES report a borrowed team workspace: the whole
+      // point is that getOwnedProviderKeys ignores it.
+      { sharedProviderTenantIds: jest.fn().mockResolvedValue(['team-tenant']) } as never,
+    );
+    return { svc, find };
+  };
+
+  it('queries an exact tenant_id, never an In([...]) over borrowed workspaces', async () => {
+    const { svc, find } = build([row({})]);
+
+    await svc.getOwnedProviderKeys('tenant-1', 'openai', 'subscription');
+
+    expect(find).toHaveBeenCalledTimes(1);
+    const where = find.mock.calls[0][0].where;
+    // A plain string, not a FindOperator — In() would serialise the borrowed ids.
+    expect(where.tenant_id).toBe('tenant-1');
+    expect(typeof where.tenant_id).toBe('string');
+    expect(where.auth_type).toBe('subscription');
+    expect(where.is_active).toBe(true);
+  });
+
+  it('does not return a borrowed workspace key even if the repo hands one back', async () => {
+    // Belt and braces: were the query ever widened again, the borrowed row must
+    // still not reach a revoke loop.
+    const { svc } = build([
+      row({ id: 'tp-own', tenant_id: 'tenant-1' }),
+      row({ id: 'tp-borrowed', tenant_id: 'team-tenant', label: 'Team' }),
+    ]);
+
+    const keys = await svc.getOwnedProviderKeys('tenant-1', 'openai', 'subscription');
+
+    expect(keys.map((k) => k.id)).toEqual(['tp-own']);
+  });
+
+  it('the proxy path still widens, so sharing is not regressed', async () => {
+    const { svc, find } = build([row({})]);
+
+    await svc.getProviderKeys('tenant-1', 'openai', 'subscription');
+
+    const where = find.mock.calls[0][0].where;
+    expect(typeof where.tenant_id).not.toBe('string'); // In([tenant-1, team-tenant])
+  });
+});

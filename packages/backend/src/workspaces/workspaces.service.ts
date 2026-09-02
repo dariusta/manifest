@@ -211,6 +211,7 @@ export class WorkspacesService {
     });
     this.tenantCache.invalidateRole(target.id, tenantId);
     this.tenantCache.invalidate(target.id);
+    await this.invalidateSharedProviders(target.id);
     return { userId: target.id, email: target.email, name: target.name, role };
   }
 
@@ -228,6 +229,19 @@ export class WorkspacesService {
     if (!result.affected) throw new NotFoundException('That user is not in this workspace.');
     this.tenantCache.invalidateRole(targetUserId, tenantId);
     this.tenantCache.invalidate(targetUserId);
+    await this.invalidateSharedProviders(targetUserId);
+  }
+
+  /**
+   * Shared-provider borrowing is resolved from the *personal* workspace of the
+   * user whose membership changed ("team shares all -> members" keys the cache
+   * on the borrowing tenant, not the team). Without this the borrow set stays
+   * cached for the full TTL, so a user removed from a team keeps spending that
+   * team's provider keys — and a newly added one cannot use them yet.
+   */
+  private async invalidateSharedProviders(userId: string): Promise<void> {
+    const personalTenantId = await this.tenantCache.resolve(userId);
+    if (personalTenantId) this.tenantCache.invalidateSharedProviders(personalTenantId);
   }
 
   async rename(actorUserId: string, tenantId: string, name: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, type FindOptionsWhere } from 'typeorm';
 import type { AuthType, ModelRoute } from 'manifest-shared';
 import { TenantProvider } from '../../entities/tenant-provider.entity';
 import { AgentEnabledProvider } from '../../entities/agent-enabled-provider.entity';
@@ -121,6 +121,43 @@ export class ProviderKeyService {
     const result = await this.resolveProviderKeys(tenantId, provider, authType, agentId);
     this.routingCache.setProviderKeys(tenantId, provider, result, authType, agentId);
     return result;
+  }
+
+  /**
+   * The acting tenant's OWN keys for (provider, authType) — never the ones it
+   * borrows from a team workspace.
+   *
+   * Destructive flows must use this instead of getProviderKeys(): that one
+   * deliberately widens the row set to borrowed tenants so the proxy can spend
+   * a team's credential, but revoking a borrowed OAuth token kills it for the
+   * workspace that actually owns it. Uncached and not agent-scoped —
+   * revocation is tenant-level and must never act on a stale cache.
+   */
+  async getOwnedProviderKeys(
+    tenantId: string,
+    provider: string,
+    authType?: AuthType,
+  ): Promise<CachedProviderKey[]> {
+    const where: FindOptionsWhere<TenantProvider> = { tenant_id: tenantId, is_active: true };
+    if (authType) where.auth_type = authType;
+    if (provider.startsWith('custom:')) where.provider = provider;
+    const records = await this.providerRepo.find({
+      where,
+      order: { priority: 'ASC', id: 'ASC' },
+    });
+    const names = provider.startsWith('custom:') ? null : expandProviderNames([provider]);
+    return records
+      .filter(
+        (r) =>
+          // Re-assert ownership in memory. The where clause above already scopes
+          // it, but this is the guard that stands between a disconnect and
+          // another workspace's live token — cheap enough to not depend on one
+          // query staying un-widened.
+          r.tenant_id === tenantId &&
+          isManifestUsableProvider(r) &&
+          (names ? names.has(r.provider.toLowerCase()) : true),
+      )
+      .flatMap((record) => this.decryptOne(record));
   }
 
   /** Returns the label of the first (default) key for the given provider+authType. */

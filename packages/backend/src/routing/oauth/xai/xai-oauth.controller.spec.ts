@@ -22,7 +22,7 @@ function build() {
     resolve: jest.fn().mockResolvedValue({ id: 'agent-1', tenant_id: 'tenant-1' }),
   } as unknown as ResolveAgentService;
   const providerKeyService = {
-    getProviderKeys: jest.fn().mockResolvedValue([]),
+    getOwnedProviderKeys: jest.fn().mockResolvedValue([]),
   } as unknown as ProviderKeyService;
   const providerService = {
     removeProvider: jest.fn().mockResolvedValue({ notifications: [] }),
@@ -203,7 +203,7 @@ describe('XaiOauthController', () => {
 
     it('revokes both access and refresh tokens for stored keys', async () => {
       const { ctrl, oauth, providerKeyService, providerService } = build();
-      (providerKeyService.getProviderKeys as jest.Mock).mockResolvedValue([
+      (providerKeyService.getOwnedProviderKeys as jest.Mock).mockResolvedValue([
         blobKey('Default', 'access-1', 'refresh-1'),
       ]);
       await ctrl.revoke('agent', undefined, ctx);
@@ -223,7 +223,7 @@ describe('XaiOauthController', () => {
       const { ctrl, providerKeyService } = build();
       await ctrl.revoke('agent', undefined, ctx);
       // First arg must be agent.tenant_id ('tenant-1'), not agent.id ('agent-1')
-      expect(providerKeyService.getProviderKeys).toHaveBeenCalledWith(
+      expect(providerKeyService.getOwnedProviderKeys).toHaveBeenCalledWith(
         'tenant-1',
         'xai',
         'subscription',
@@ -232,7 +232,7 @@ describe('XaiOauthController', () => {
 
     it('filters keys by label case-insensitively when label is provided', async () => {
       const { ctrl, oauth, providerKeyService, providerService } = build();
-      (providerKeyService.getProviderKeys as jest.Mock).mockResolvedValue([
+      (providerKeyService.getOwnedProviderKeys as jest.Mock).mockResolvedValue([
         blobKey('Default', 'a1', 'r1'),
         blobKey('Work', 'a2', 'r2'),
       ]);
@@ -254,7 +254,7 @@ describe('XaiOauthController', () => {
       ['malformed JSON', 'not-json{'],
     ])('skips revokeToken for %s but still calls removeProvider', async (_desc, apiKey) => {
       const { ctrl, oauth, providerKeyService, providerService } = build();
-      (providerKeyService.getProviderKeys as jest.Mock).mockResolvedValue([
+      (providerKeyService.getOwnedProviderKeys as jest.Mock).mockResolvedValue([
         { id: 'p1', label: 'Default', priority: 0, apiKey, region: null },
       ]);
       await expect(ctrl.revoke('agent', undefined, ctx)).resolves.toEqual({

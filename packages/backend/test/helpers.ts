@@ -67,6 +67,10 @@ const entities = [
   ManifestRequest,
   ApiKey,
   Tenant,
+  // Imported but never registered: without it `synchronize` never creates
+  // `tenant_members`, so nothing under test can exercise workspace membership
+  // or the shared-provider borrowing that resolves from it.
+  TenantMember,
   Agent,
   AgentApiKey,
   NotificationRule,

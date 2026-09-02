@@ -129,7 +129,11 @@ export class TenantCacheService {
   async listForUser(
     userId: string,
   ): Promise<Array<{ id: string; name: string; role: WorkspaceRole }>> {
-    const owned = await this.tenantRepo.find({ where: { owner_user_id: userId } });
+    // Match the membership branch below: a deactivated workspace is not offered
+    // in the switcher regardless of how the user reaches it.
+    const owned = await this.tenantRepo.find({
+      where: { owner_user_id: userId, is_active: true },
+    });
     const memberships = await this.memberRepo.find({
       where: { user_id: userId },
       order: { created_at: 'ASC' },

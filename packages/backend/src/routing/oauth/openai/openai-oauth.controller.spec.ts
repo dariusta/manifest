@@ -26,7 +26,7 @@ describe('OpenaiOauthController', () => {
     } as unknown as jest.Mocked<ResolveAgentService>;
 
     providerKeyService = {
-      getProviderKeys: jest.fn(),
+      getOwnedProviderKeys: jest.fn(),
     } as unknown as jest.Mocked<ProviderKeyService>;
 
     providerService = {
@@ -171,7 +171,7 @@ describe('OpenaiOauthController', () => {
 
     it('revokes every active OpenAI subscription key when no label is provided', async () => {
       resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
-      providerKeyService.getProviderKeys.mockResolvedValue([
+      providerKeyService.getOwnedProviderKeys.mockResolvedValue([
         {
           id: 'key-1',
           label: 'Default',
@@ -193,7 +193,7 @@ describe('OpenaiOauthController', () => {
         userId: 'user-1',
       } as never);
 
-      expect(providerKeyService.getProviderKeys).toHaveBeenCalledWith(
+      expect(providerKeyService.getOwnedProviderKeys).toHaveBeenCalledWith(
         'tenant-1',
         'openai',
         'subscription',
@@ -214,7 +214,7 @@ describe('OpenaiOauthController', () => {
 
     it('revokes and removes only the labeled OpenAI subscription key', async () => {
       resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
-      providerKeyService.getProviderKeys.mockResolvedValue([
+      providerKeyService.getOwnedProviderKeys.mockResolvedValue([
         {
           id: 'key-1',
           label: 'Default',
@@ -261,13 +261,13 @@ describe('OpenaiOauthController', () => {
         status: HttpStatus.BAD_REQUEST,
       });
       expect(resolveAgent.resolve).not.toHaveBeenCalled();
-      expect(providerKeyService.getProviderKeys).not.toHaveBeenCalled();
+      expect(providerKeyService.getOwnedProviderKeys).not.toHaveBeenCalled();
       expect(providerService.removeProvider).not.toHaveBeenCalled();
     });
 
     it('returns ok even when no stored token exists', async () => {
       resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
-      providerKeyService.getProviderKeys.mockResolvedValue([]);
+      providerKeyService.getOwnedProviderKeys.mockResolvedValue([]);
 
       const result = await controller.revoke('my-agent', undefined, {
         tenantId: 'tenant-1',
@@ -287,7 +287,7 @@ describe('OpenaiOauthController', () => {
 
     it('returns ok when token blob is not valid JSON', async () => {
       resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
-      providerKeyService.getProviderKeys.mockResolvedValue([
+      providerKeyService.getOwnedProviderKeys.mockResolvedValue([
         { id: 'key-1', label: 'Default', priority: 0, apiKey: 'not-json', region: null },
       ]);
 

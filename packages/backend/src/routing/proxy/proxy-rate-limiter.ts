@@ -55,7 +55,11 @@ export class ProxyRateLimiter implements OnModuleDestroy {
       process.env['PROXY_IP_RATE_MAX_REQUESTS'],
       DEFAULT_IP_RATE_MAX_REQUESTS,
     );
-    const proxyConcurrencyMax = process.env['PROXY_CONCURRENCY_MAX'];
+    // Treat an empty value as absent. Compose/k8s interpolate an unset variable
+    // to "", which is !== undefined and so silently suppressed the
+    // MANIFEST_CONCURRENCY_MAX fallback below.
+    const rawProxyConcurrencyMax = process.env['PROXY_CONCURRENCY_MAX'];
+    const proxyConcurrencyMax = rawProxyConcurrencyMax?.trim() ? rawProxyConcurrencyMax : undefined;
     this.concurrencyMax =
       proxyConcurrencyMax !== undefined
         ? parseProxyLimit(proxyConcurrencyMax, DEFAULT_CONCURRENCY_MAX)
