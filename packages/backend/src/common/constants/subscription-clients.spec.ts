@@ -34,4 +34,15 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     expect(headers['x-stainless-arch']).toBeDefined();
     expect(headers['x-stainless-os']).toBeDefined();
   });
+
+  it('identifies as Claude Code 2.1.251+ so Fable 5.1 is not rejected', () => {
+    const headers = buildClaudeCodeSubscriptionHeaders('key-123');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.258 (external, sdk-cli)');
+    const match = headers['user-agent']?.match(/^claude-cli\/(\d+)\.(\d+)\.(\d+) /);
+    expect(match).not.toBeNull();
+    const [, major, minor, patch] = match!;
+    const version = Number(major) * 1_000_000 + Number(minor) * 1_000 + Number(patch);
+    const minimumFable51 = 2 * 1_000_000 + 1 * 1_000 + 251;
+    expect(version).toBeGreaterThanOrEqual(minimumFable51);
+  });
 });
