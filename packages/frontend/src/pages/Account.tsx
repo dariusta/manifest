@@ -398,6 +398,7 @@ const Account: Component = () => {
                       month: 'long',
                       day: 'numeric',
                       year: 'numeric',
+                      timeZone: 'UTC',
                     })}
                   </span>
                 </Show>
@@ -418,6 +419,7 @@ const Account: Component = () => {
                     {new Date(billing()!.requests.periodEnd!).toLocaleDateString(undefined, {
                       month: 'short',
                       day: 'numeric',
+                      timeZone: 'UTC',
                     })}
                   </span>
                 </Show>

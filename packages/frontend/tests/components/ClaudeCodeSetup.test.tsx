@@ -60,6 +60,17 @@ describe("ClaudeCodeSetup", () => {
     expect(container.textContent).toContain("mnfst_YOUR_KEY");
   });
 
+  it("never copies a prefix-only key into the settings block", () => {
+    const writeText = vi.mocked(navigator.clipboard.writeText);
+    const { container } = render(() => (
+      <ClaudeCodeSetup {...baseProps} keyPrefix="mnfst_dead" />
+    ));
+    const copyButton = container.querySelector('button[aria-label*="Copy" i]') as HTMLButtonElement;
+    fireEvent.click(copyButton);
+    expect(writeText.mock.calls[0][0]).toContain("mnfst_YOUR_KEY");
+    expect(writeText.mock.calls[0][0]).not.toContain("mnfst_dead");
+  });
+
   it("toggles the API key reveal when the eye button is clicked", () => {
     const { container } = render(() => (
       <ClaudeCodeSetup {...baseProps} apiKey="mnfst_full_secret_value" keyPrefix="mnfst_full" />

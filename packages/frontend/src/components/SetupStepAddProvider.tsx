@@ -58,6 +58,13 @@ const SetupStepAddProvider: Component<Props> = (props) => {
                     : 'Connect your harness to Manifest'}
       </h3>
 
+      <Show when={!props.apiKey && props.keyPrefix}>
+        <p class="setup-step__desc" role="alert">
+          The full API key is no longer available. Rotate this harness key in Settings before
+          copying a setup snippet. The displayed key prefix cannot authenticate requests.
+        </p>
+      </Show>
+
       {/* Platform-filtered mode: show only relevant content */}
       <Show when={isFiltered()}>
         <Switch>

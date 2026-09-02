@@ -23,6 +23,11 @@ describe("SetupStepAddProvider", () => {
     expect(screen.getByText("Connect your harness to Manifest")).toBeDefined();
   });
 
+  it("warns that a prefix-only key cannot authenticate", () => {
+    render(() => <SetupStepAddProvider {...defaultProps} keyPrefix="mnfst_dead" />);
+    expect(screen.getByRole("alert").textContent).toContain("cannot authenticate requests");
+  });
+
   it("shows description with auto model", () => {
     const { container } = render(() => <SetupStepAddProvider {...defaultProps} />);
     expect(container.textContent).toContain("auto");

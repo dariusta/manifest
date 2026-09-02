@@ -43,7 +43,8 @@ const NanobotSetup: Component<Props> = (props) => {
 
   const hasFullKey = () => !!props.apiKey;
   const masked = () => (props.keyPrefix ? `${props.keyPrefix}...` : 'mnfst_YOUR_KEY');
-  const copyKey = () => props.apiKey ?? masked();
+  // A prefix is display-only and will always 401. Never put it on the clipboard.
+  const copyKey = () => props.apiKey ?? 'mnfst_YOUR_KEY';
   const visibleKey = () => (keyRevealed() && props.apiKey ? props.apiKey : masked());
 
   const settingsCopy = () => getNanobotConfigSnippet(props.baseUrl, copyKey());

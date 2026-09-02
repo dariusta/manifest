@@ -44,6 +44,17 @@ describe("FrameworkSnippets", () => {
     expect(container.textContent).toContain("mnfst_abc...");
   });
 
+  it("never copies a prefix-only key into a toolkit snippet", () => {
+    const writeText = vi.mocked(navigator.clipboard.writeText);
+    const { container } = render(() => (
+      <FrameworkSnippets {...defaultProps} keyPrefix="mnfst_dead" />
+    ));
+    const copyButtons = container.querySelectorAll('[aria-label="Copy to clipboard"]');
+    fireEvent.click(copyButtons[0]);
+    expect(writeText.mock.calls[0][0]).toContain("mnfst_YOUR_KEY");
+    expect(writeText.mock.calls[0][0]).not.toContain("mnfst_dead");
+  });
+
   it("renders full API key when provided", () => {
     const { container } = render(() => (
       <FrameworkSnippets {...defaultProps} apiKey="mnfst_full_key_123" />
@@ -347,7 +358,7 @@ describe("FrameworkSnippets", () => {
     expect(copiedText).toContain("mnfst_real_key");
   });
 
-  it("copies snippet with masked key when no full apiKey provided", async () => {
+  it("copies a safe placeholder when no full apiKey is available", async () => {
     const writeTextMock = vi.mocked(navigator.clipboard.writeText);
     const { container } = render(() => (
       <FrameworkSnippets {...defaultProps} keyPrefix="mnfst_pre" />
@@ -357,7 +368,8 @@ describe("FrameworkSnippets", () => {
     await fireEvent.click(copyBtn!);
     expect(writeTextMock).toHaveBeenCalled();
     const copiedText = writeTextMock.mock.calls[0][0];
-    expect(copiedText).toContain("mnfst_pre...");
+    expect(copiedText).toContain("mnfst_YOUR_KEY");
+    expect(copiedText).not.toContain("mnfst_pre");
   });
 
   it("shows eye toggle in code block when apiKey provided", () => {

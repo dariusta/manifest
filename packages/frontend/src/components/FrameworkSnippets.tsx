@@ -80,7 +80,8 @@ const FrameworkSnippets: Component<Props> = (props) => {
 
   const hasFullKey = () => !!props.apiKey;
   const maskedKey = () => (props.keyPrefix ? `${props.keyPrefix}...` : 'mnfst_YOUR_KEY');
-  const copyKey = () => props.apiKey ?? maskedKey();
+  // A prefix is display-only and will always 401. Never put it on the clipboard.
+  const copyKey = () => props.apiKey ?? 'mnfst_YOUR_KEY';
   const displayKey = () => {
     if (!hasFullKey()) return maskedKey();
     return keyRevealed() ? props.apiKey! : maskedKey();
