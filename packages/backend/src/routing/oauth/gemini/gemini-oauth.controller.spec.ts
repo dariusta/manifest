@@ -26,7 +26,7 @@ describe('GeminiOauthController', () => {
     } as unknown as jest.Mocked<ResolveAgentService>;
 
     providerKeyService = {
-      getProviderKeys: jest.fn(),
+      getOwnedProviderKeys: jest.fn(),
     } as unknown as jest.Mocked<ProviderKeyService>;
 
     providerService = {
@@ -222,7 +222,7 @@ describe('GeminiOauthController', () => {
     it('revokes both access and refresh tokens from stored blob', async () => {
       resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
       const blob = JSON.stringify({ t: 'access-tok', r: 'refresh-tok', e: Date.now() + 3600000 });
-      providerKeyService.getProviderKeys.mockResolvedValue([
+      providerKeyService.getOwnedProviderKeys.mockResolvedValue([
         { label: 'Gemini', apiKey: blob } as never,
       ]);
 
@@ -231,7 +231,7 @@ describe('GeminiOauthController', () => {
         userId: 'user-1',
       } as never);
 
-      expect(providerKeyService.getProviderKeys).toHaveBeenCalledWith(
+      expect(providerKeyService.getOwnedProviderKeys).toHaveBeenCalledWith(
         'tenant-1',
         'gemini',
         'subscription',
@@ -250,7 +250,7 @@ describe('GeminiOauthController', () => {
 
     it('returns ok even when no stored token exists', async () => {
       resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
-      providerKeyService.getProviderKeys.mockResolvedValue([]);
+      providerKeyService.getOwnedProviderKeys.mockResolvedValue([]);
 
       const result = await controller.revoke('my-agent', undefined, {
         tenantId: 'tenant-1',
@@ -270,7 +270,7 @@ describe('GeminiOauthController', () => {
 
     it('returns ok when token blob is not valid JSON', async () => {
       resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
-      providerKeyService.getProviderKeys.mockResolvedValue([
+      providerKeyService.getOwnedProviderKeys.mockResolvedValue([
         { label: 'Gemini', apiKey: 'not-json' } as never,
       ]);
 
@@ -294,7 +294,7 @@ describe('GeminiOauthController', () => {
       resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
       const selectedBlob = JSON.stringify({ t: 'selected-access', e: Date.now() + 3600000 });
       const otherBlob = JSON.stringify({ t: 'other-access', e: Date.now() + 3600000 });
-      providerKeyService.getProviderKeys.mockResolvedValue([
+      providerKeyService.getOwnedProviderKeys.mockResolvedValue([
         { label: 'Default', apiKey: otherBlob } as never,
         { label: 'Work', apiKey: selectedBlob } as never,
       ]);
