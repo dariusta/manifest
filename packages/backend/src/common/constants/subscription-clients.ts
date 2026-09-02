@@ -84,17 +84,11 @@ export const ANTIGRAVITY_CLI_VERSION = '1.21.9';
 export const ANTIGRAVITY_ENDPOINT_DAILY = 'https://daily-cloudcode-pa.googleapis.com';
 export const ANTIGRAVITY_ENDPOINT_PROD = 'https://cloudcode-pa.googleapis.com';
 
-export function antigravityPlatform(platform = process.platform): string {
-  switch (platform) {
-    case 'darwin':
-      return 'MACOS';
-    case 'linux':
-      return 'LINUX';
-    case 'win32':
-      return 'WINDOWS';
-    default:
-      return 'PLATFORM_UNSPECIFIED';
-  }
+export function antigravityPlatform(_platform = process.platform): string {
+  // Cloud Code's protobuf JSON parser currently rejects symbolic OS values
+  // such as LINUX, WINDOWS, and MACOS with INVALID_ARGUMENT. The only stable
+  // string enum accepted by loadCodeAssist/onboardUser is the zero value.
+  return 'PLATFORM_UNSPECIFIED';
 }
 
 export function antigravityUserAgent(platform = process.platform, arch = process.arch): string {

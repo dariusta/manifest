@@ -297,6 +297,7 @@ describe('CodeAssistClientService', () => {
         const metadata = body.metadata as Record<string, unknown>;
         expect(metadata).toBeDefined();
         expect(metadata.ideType).toBe('ANTIGRAVITY');
+        expect(metadata.platform).toBe('PLATFORM_UNSPECIFIED');
         expect(metadata.pluginType).toBe('GEMINI');
         expect(metadata.pluginVersion).toBe('0.1.0');
       }

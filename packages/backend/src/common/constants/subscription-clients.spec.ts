@@ -52,14 +52,12 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
 });
 
 describe('antigravityPlatform', () => {
-  it.each([
-    ['darwin', 'MACOS'],
-    ['linux', 'LINUX'],
-    ['win32', 'WINDOWS'],
-    ['sunos', 'PLATFORM_UNSPECIFIED'],
-  ])('maps %s to %s', (platform, expected) => {
-    expect(antigravityPlatform(platform as NodeJS.Platform)).toBe(expected);
-  });
+  it.each(['darwin', 'linux', 'win32', 'sunos'])(
+    'uses the protobuf zero value for %s because Cloud Code rejects symbolic OS enums',
+    (platform) => {
+      expect(antigravityPlatform(platform as NodeJS.Platform)).toBe('PLATFORM_UNSPECIFIED');
+    },
+  );
 });
 
 describe('buildAntigravitySubscriptionHeaders', () => {
