@@ -650,11 +650,16 @@ export class ProviderClient {
       if (stream) url += '?alt=sse';
       const innerBody = toGoogleRequest(requestSource, bareModel, ctx.signatureLookup);
       const requestBody = endpoint.codeAssistEnvelope
-        ? // CodeAssist routes by `cloudaicompanionProject` rather than URL
+        ? // Cloud Code routes by `cloudaicompanionProject` rather than URL
           // path; the project id was stashed in the OAuth blob's `u` field
           // by GeminiOauthService.enrichBlob and travels through the proxy
           // pipeline as `providerResource`.
-          { model: bareModel, project: ctx.providerResource ?? '', request: innerBody }
+          {
+            model: bareModel,
+            project: ctx.providerResource ?? '',
+            request: innerBody,
+            userAgent: 'antigravity',
+          }
         : innerBody;
       return {
         url,

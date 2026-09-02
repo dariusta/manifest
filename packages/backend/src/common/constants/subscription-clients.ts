@@ -77,3 +77,40 @@ export const buildClaudeCodeSubscriptionHeaders = (apiKey: string): Record<strin
 
 export const COPILOT_EDITOR_VERSION = 'vscode/1.100.0';
 export const COPILOT_PLUGIN_VERSION = 'copilot/1.300.0';
+
+// Google shut down Gemini Code Assist for individuals. Personal Google
+// subscriptions now authenticate as Antigravity (`agy`) against Cloud Code.
+export const ANTIGRAVITY_CLI_VERSION = '1.21.9';
+export const ANTIGRAVITY_ENDPOINT_DAILY = 'https://daily-cloudcode-pa.googleapis.com';
+export const ANTIGRAVITY_ENDPOINT_PROD = 'https://cloudcode-pa.googleapis.com';
+
+export function antigravityPlatform(platform = process.platform): string {
+  switch (platform) {
+    case 'darwin':
+      return 'MACOS';
+    case 'linux':
+      return 'LINUX';
+    case 'win32':
+      return 'WINDOWS';
+    default:
+      return 'PLATFORM_UNSPECIFIED';
+  }
+}
+
+export function antigravityUserAgent(platform = process.platform, arch = process.arch): string {
+  return `antigravity/${ANTIGRAVITY_CLI_VERSION} ${platform}/${arch}`;
+}
+
+export const ANTIGRAVITY_CLIENT_METADATA = {
+  ideType: 'ANTIGRAVITY',
+  platform: antigravityPlatform(),
+  pluginType: 'GEMINI',
+} as const;
+
+export const buildAntigravitySubscriptionHeaders = (apiKey: string): Record<string, string> => ({
+  Authorization: `Bearer ${apiKey}`,
+  'Content-Type': 'application/json',
+  'User-Agent': antigravityUserAgent(),
+  'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
+  'Client-Metadata': JSON.stringify(ANTIGRAVITY_CLIENT_METADATA),
+});

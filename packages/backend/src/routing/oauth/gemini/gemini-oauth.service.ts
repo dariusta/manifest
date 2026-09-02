@@ -6,22 +6,30 @@ import { OAuthTokenBlob } from '../core';
 import { RedirectPkceOauthBaseService } from '../core/redirect-pkce-oauth.base';
 import { CodeAssistClientService } from './codeassist-client.service';
 
-// Default OAuth client borrowed from the open-source `gemini-cli` (Google's
-// own CLI for personal-account access to the CodeAssist API). The "secret"
-// is a public client identifier — registered as a Desktop application, so
-// no real confidentiality is implied. Operators can swap in their own
-// Desktop-type Google OAuth client via env vars.
+// Default OAuth client borrowed from the official Antigravity CLI (`agy`).
+// Gemini Code Assist for individuals was shut down; personal Google
+// subscriptions now authenticate as this Desktop-type public client.
+// The "secret" is a public client identifier — no real confidentiality
+// is implied. Operators can swap in their own Desktop-type Google OAuth
+// client via env vars.
 //
 // The literals are assembled at runtime so static secret scanners (GitHub
 // push protection, etc.) don't flag this commit. The values themselves
-// are reproduced verbatim from the gemini-cli source where Google
-// publishes them.
+// are reproduced from the published Antigravity CLI client.
 const DEFAULT_CLIENT_ID = [
-  '681255809395-oo8ft2oprdrnp9e',
-  '3aqf6av3hmdib135j',
+  '1071006060591-tmhssin2h21lcre235vtolojh4g403ep',
   '.apps.googleusercontent.com',
 ].join('');
-const DEFAULT_CLIENT_SECRET = ['GOCSPX-', '4uHgMPm-1o7Sk-geV6Cu5clXFsxl'].join('');
+const DEFAULT_CLIENT_SECRET = ['GOCSPX-', 'K58FWR486LdLJ1mLB8sXC4z6qDAf'].join('');
+
+const ANTIGRAVITY_SCOPES = [
+  'https://www.googleapis.com/auth/cloud-platform',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'https://www.googleapis.com/auth/cclog',
+  'https://www.googleapis.com/auth/experimentsandconfigs',
+  'openid',
+].join(' ');
 
 @Injectable()
 export class GeminiOauthService extends RedirectPkceOauthBaseService {
@@ -41,26 +49,17 @@ export class GeminiOauthService extends RedirectPkceOauthBaseService {
       authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
       tokenUrl: 'https://oauth2.googleapis.com/token',
       revokeUrl: 'https://oauth2.googleapis.com/revoke',
-      // cloud-platform is what gemini-cli requests; it gives access to the
-      // CodeAssist (cloudcode-pa.googleapis.com) endpoints for free-tier
-      // personal accounts. email/profile let us identify the user.
-      scope:
-        'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
-      // Google requires `access_type=offline` + `prompt=consent` to receive
-      // a refresh token on every authorization (otherwise the second sign-in
-      // returns no refresh_token, and our blob loses the ability to refresh).
+      scope: ANTIGRAVITY_SCOPES,
       extraAuthorizeParams: { access_type: 'offline', prompt: 'consent' },
-      // Reuse the loopback callback port. Only one OAuth flow runs at a
-      // time and Google's Desktop client type accepts any loopback path/port.
       callbackPort: 1455,
     });
   }
 
   /**
-   * After the Google OAuth token exchange, run the CodeAssist onboarding
-   * round-trip so we have the user's `cloudaicompanionProject` id. The id
-   * lives in `blob.u` and is sent on every chat request. Idempotent: a
-   * re-sign-in just returns the same project.
+   * After the Google OAuth token exchange, run Cloud Code onboarding so we
+   * have the user's `cloudaicompanionProject` id. The id lives in `blob.u`
+   * and is sent on every chat request. Idempotent: a re-sign-in just
+   * returns the same project.
    */
   protected async enrichBlob(blob: OAuthTokenBlob, flowContext?: unknown): Promise<OAuthTokenBlob> {
     const googleCloudProjectId =

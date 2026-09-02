@@ -308,8 +308,9 @@ const OAuthDetailView: Component<Props> = (props) => {
                     onInput={(event) => setGeminiProjectId(event.currentTarget.value)}
                   />
                   <p class="provider-detail__hint" style="margin-top: 6px;">
-                    Leave blank for eligible personal accounts. Workspace and standard-tier accounts
-                    require a project ID.
+                    Google sunset Gemini Code Assist for individuals. Manifest now signs in through
+                    Antigravity. Leave blank for eligible personal accounts. Workspace and
+                    standard-tier accounts still need a project ID.
                   </p>
                 </div>
               </Show>

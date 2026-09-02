@@ -258,11 +258,10 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     supportsSubscription: true as const,
     subscriptionLabel: 'Sign in with Google',
     subscriptionAuthMode: 'popup_oauth' as const,
-    // CodeAssist (gemini-cli) supports a fixed list of Gemini models. The
+    // Antigravity Cloud Code supports a fixed list of Gemini models. The
     // dashboard uses these as fallback when no native /models call returns
-    // (CodeAssist does not expose one). Keep this list strict to models that
-    // the CodeAssist route recognizes; some current Gemini API model IDs still
-    // 404 on the CodeAssist API.
+    // (Cloud Code does not expose one). Keep this list strict to models that
+    // the Cloud Code route recognizes.
     knownModels: Object.freeze([
       'gemini-3.1-flash-lite',
       'gemini-3.1-flash-lite-preview',

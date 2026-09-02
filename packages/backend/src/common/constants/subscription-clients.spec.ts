@@ -1,4 +1,8 @@
 import {
+  ANTIGRAVITY_CLI_VERSION,
+  antigravityPlatform,
+  antigravityUserAgent,
+  buildAntigravitySubscriptionHeaders,
   buildClaudeCodeSubscriptionHeaders,
   claudeCodeStainlessArch,
   claudeCodeStainlessOs,
@@ -44,5 +48,31 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     const version = Number(major) * 1_000_000 + Number(minor) * 1_000 + Number(patch);
     const minimumFable51 = 2 * 1_000_000 + 1 * 1_000 + 251;
     expect(version).toBeGreaterThanOrEqual(minimumFable51);
+  });
+});
+
+describe('antigravityPlatform', () => {
+  it.each([
+    ['darwin', 'MACOS'],
+    ['linux', 'LINUX'],
+    ['win32', 'WINDOWS'],
+    ['sunos', 'PLATFORM_UNSPECIFIED'],
+  ])('maps %s to %s', (platform, expected) => {
+    expect(antigravityPlatform(platform as NodeJS.Platform)).toBe(expected);
+  });
+});
+
+describe('buildAntigravitySubscriptionHeaders', () => {
+  it('identifies as Antigravity so personal Google accounts are not rejected', () => {
+    const headers = buildAntigravitySubscriptionHeaders('ya29.token');
+    expect(headers.Authorization).toBe('Bearer ya29.token');
+    expect(headers['User-Agent']).toBe(antigravityUserAgent());
+    expect(headers['User-Agent']).toContain(`antigravity/${ANTIGRAVITY_CLI_VERSION}`);
+    expect(headers['X-Goog-Api-Client']).toBe('google-cloud-sdk vscode_cloudshelleditor/0.1');
+    expect(JSON.parse(headers['Client-Metadata']!)).toEqual({
+      ideType: 'ANTIGRAVITY',
+      platform: antigravityPlatform(),
+      pluginType: 'GEMINI',
+    });
   });
 });

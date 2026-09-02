@@ -1,12 +1,13 @@
 /**
- * CodeAssist client — talks to `cloudcode-pa.googleapis.com/v1internal:*`.
+ * Cloud Code client — talks to Antigravity's Cloud Code Assist API
+ * (`daily-cloudcode-pa.googleapis.com/v1internal:*`, with production
+ * `cloudcode-pa.googleapis.com` as fallback).
  *
- * Gemini OAuth tokens for personal Google accounts (the `gemini-cli` flow)
- * cannot hit `generativelanguage.googleapis.com` directly: that API needs
- * either an API key or a billed GCP project for quota attribution. The
- * CodeAssist endpoint is what `gemini-cli` itself uses — Google's own
- * "free tier with personal account" path — and routes by an opaque
- * `cloudaicompanionProject` id assigned to the user during onboarding.
+ * Gemini OAuth tokens for personal Google accounts cannot hit
+ * `generativelanguage.googleapis.com` directly: that API needs either an
+ * API key or a billed GCP project for quota attribution. Cloud Code is
+ * what Antigravity (`agy`) uses after Google shut down Gemini Code Assist
+ * for individuals.
  *
  * Two responsibilities:
  *
@@ -20,17 +21,21 @@
  *      Streaming chunks have the same wrapper shape.
  */
 import { Injectable, Logger } from '@nestjs/common';
+import {
+  ANTIGRAVITY_CLIENT_METADATA,
+  ANTIGRAVITY_ENDPOINT_DAILY,
+  ANTIGRAVITY_ENDPOINT_PROD,
+  buildAntigravitySubscriptionHeaders,
+} from '../../../common/constants/subscription-clients';
 import { scrubSecrets } from '../../../common/utils/secret-scrub';
 
-const CODE_ASSIST_BASE = 'https://cloudcode-pa.googleapis.com';
 const CODE_ASSIST_VERSION = 'v1internal';
 const CODE_ASSIST_OPERATION_POLL_MS = 5_000;
 const CODE_ASSIST_OPERATION_MAX_POLLS = 12;
+const CODE_ASSIST_ENDPOINTS = [ANTIGRAVITY_ENDPOINT_DAILY, ANTIGRAVITY_ENDPOINT_PROD] as const;
 
 const CLIENT_METADATA = {
-  ideType: 'IDE_UNSPECIFIED',
-  platform: 'PLATFORM_UNSPECIFIED',
-  pluginType: 'GEMINI',
+  ...ANTIGRAVITY_CLIENT_METADATA,
   pluginVersion: '0.1.0',
 } as const;
 
@@ -95,7 +100,7 @@ export class CodeAssistClientService {
       this.throwEligibilityOrProjectError(loaded);
     }
 
-    // Match Google's Gemini CLI: only an explicitly-default tier can be
+    // Match Google's CLI: only an explicitly-default tier can be
     // auto-selected. Taking allowedTiers[0] can accidentally select the
     // standard tier, which requires a caller-supplied Google Cloud project.
     const tier = loaded.allowedTiers?.find((candidate) => candidate.isDefault) ?? {
@@ -125,7 +130,7 @@ export class CodeAssistClientService {
       .map((tier) => tier.reasonMessage?.trim())
       .filter((reason): reason is string => Boolean(reason));
     if (reasons.length > 0) {
-      throw new Error(`Google Code Assist is unavailable for this account: ${reasons.join(', ')}`);
+      throw new Error(`Google Cloud Code is unavailable for this account: ${reasons.join(', ')}`);
     }
     throw new Error(
       'Google sign-in succeeded, but this account requires a Google Cloud project ID. Enter the project ID in Manifest and sign in again.',
@@ -139,13 +144,13 @@ export class CodeAssistClientService {
     let current = lro;
     for (let poll = 0; poll < CODE_ASSIST_OPERATION_MAX_POLLS && current.done !== true; poll++) {
       if (!current.name) {
-        throw new Error('CodeAssist onboardUser operation returned no operation name.');
+        throw new Error('Cloud Code onboardUser operation returned no operation name.');
       }
       await new Promise((resolve) => setTimeout(resolve, CODE_ASSIST_OPERATION_POLL_MS));
       current = await this.callOperation(current.name, accessToken);
     }
     if (current.done !== true) {
-      throw new Error('CodeAssist onboardUser operation did not complete.');
+      throw new Error('Cloud Code onboardUser operation did not complete.');
     }
     return current;
   }
@@ -155,39 +160,68 @@ export class CodeAssistClientService {
     accessToken: string,
     body: Record<string, unknown>,
   ): Promise<T> {
-    const url = `${CODE_ASSIST_BASE}/${CODE_ASSIST_VERSION}${method}`;
+    let lastError: Error | undefined;
+    for (const base of CODE_ASSIST_ENDPOINTS) {
+      const url = `${base}/${CODE_ASSIST_VERSION}${method}`;
+      try {
+        return await this.postJson<T>(url, accessToken, body, `Cloud Code ${method}`);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (!this.shouldFallbackToNextEndpoint(lastError)) {
+          throw lastError;
+        }
+        this.logger.warn(
+          `Cloud Code ${method} failed on ${base}; trying next endpoint. ${lastError.message}`,
+        );
+      }
+    }
+    throw lastError ?? new Error(`Cloud Code ${method} failed`);
+  }
+
+  private shouldFallbackToNextEndpoint(error: Error): boolean {
+    const match = error.message.match(/failed \((\d+)\)/);
+    if (!match) return true;
+    const status = Number(match[1]);
+    return status >= 500 || status === 404;
+  }
+
+  private async postJson<T>(
+    url: string,
+    accessToken: string,
+    body: Record<string, unknown>,
+    label: string,
+  ): Promise<T> {
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: buildAntigravitySubscriptionHeaders(accessToken),
       body: JSON.stringify(body),
     });
     if (!response.ok) {
       const text = await response.text();
-      this.logger.error(`CodeAssist ${method} failed (${response.status}): ${scrubSecrets(text)}`);
-      throw new Error(`CodeAssist ${method} failed (${response.status})`);
+      this.logger.error(`${label} failed (${response.status}): ${scrubSecrets(text)}`);
+      throw new Error(`${label} failed (${response.status})`);
     }
     return (await response.json()) as T;
   }
 
   private async callOperation(name: string, accessToken: string): Promise<LongRunningOperation> {
-    const url = `${CODE_ASSIST_BASE}/${CODE_ASSIST_VERSION}/${name}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!response.ok) {
+    let lastError: Error | undefined;
+    for (const base of CODE_ASSIST_ENDPOINTS) {
+      const url = `${base}/${CODE_ASSIST_VERSION}/${name}`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: buildAntigravitySubscriptionHeaders(accessToken),
+      });
+      if (response.ok) {
+        return (await response.json()) as LongRunningOperation;
+      }
       const text = await response.text();
-      this.logger.error(
-        `CodeAssist operation ${name} failed (${response.status}): ${scrubSecrets(text)}`,
-      );
-      throw new Error(`CodeAssist operation ${name} failed (${response.status})`);
+      lastError = new Error(`Cloud Code operation ${name} failed (${response.status})`);
+      this.logger.error(`${lastError.message}: ${scrubSecrets(text)}`);
+      if (response.status < 500 && response.status !== 404) {
+        throw lastError;
+      }
     }
-    return (await response.json()) as LongRunningOperation;
+    throw lastError ?? new Error(`Cloud Code operation ${name} failed`);
   }
 }

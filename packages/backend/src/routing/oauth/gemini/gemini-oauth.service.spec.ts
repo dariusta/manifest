@@ -126,12 +126,15 @@ describe('GeminiOauthService', () => {
       expect(parsed.searchParams.get('prompt')).toBe('consent');
     });
 
-    it('includes the cloud-platform scope required for CodeAssist', async () => {
+    it('includes the Antigravity Cloud Code scopes', async () => {
       const url = await svc.generateAuthorizationUrl('agent-1', 'user-1');
       const scope = new URL(url).searchParams.get('scope') ?? '';
       expect(scope).toContain('https://www.googleapis.com/auth/cloud-platform');
       expect(scope).toContain('https://www.googleapis.com/auth/userinfo.email');
       expect(scope).toContain('https://www.googleapis.com/auth/userinfo.profile');
+      expect(scope).toContain('https://www.googleapis.com/auth/cclog');
+      expect(scope).toContain('https://www.googleapis.com/auth/experimentsandconfigs');
+      expect(scope).toContain('openid');
     });
 
     it('uses port 1455 for the callback redirect URI', async () => {
@@ -209,7 +212,7 @@ describe('GeminiOauthService', () => {
       expect(providerService.nextOAuthLabel).toHaveBeenCalledWith('user-1', 'gemini');
     });
 
-    it('passes the Google Cloud project stored with the OAuth state into Code Assist', async () => {
+    it('passes the Google Cloud project stored with the OAuth state into Cloud Code', async () => {
       fetchMock.mockResolvedValue(
         mockResponse(200, {
           access_token: 'access-1',
@@ -260,7 +263,7 @@ describe('GeminiOauthService', () => {
           expires_in: 3600,
         }),
       );
-      codeAssist.onboard.mockRejectedValue(new Error('CodeAssist returned no allowed tiers'));
+      codeAssist.onboard.mockRejectedValue(new Error('Cloud Code returned no allowed tiers'));
 
       const url = await svc.generateAuthorizationUrl('agent-1', 'user-1');
       const state = new URL(url).searchParams.get('state')!;

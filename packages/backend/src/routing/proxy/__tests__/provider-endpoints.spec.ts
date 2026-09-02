@@ -937,8 +937,8 @@ describe('gemini-subscription endpoint', () => {
     expect(ep).toBeDefined();
   });
 
-  it('uses the CodeAssist base URL', () => {
-    expect(ep.baseUrl).toBe('https://cloudcode-pa.googleapis.com');
+  it('uses the Antigravity Cloud Code daily URL', () => {
+    expect(ep.baseUrl).toBe('https://daily-cloudcode-pa.googleapis.com');
   });
 
   it('uses google format', () => {
@@ -949,10 +949,15 @@ describe('gemini-subscription endpoint', () => {
     expect(ep.codeAssistEnvelope).toBe(true);
   });
 
-  it('buildHeaders returns Authorization: Bearer and Content-Type', () => {
+  it('buildHeaders returns Antigravity Cloud Code headers', () => {
     const headers = ep.buildHeaders('my-access-token');
     expect(headers['Authorization']).toBe('Bearer my-access-token');
     expect(headers['Content-Type']).toBe('application/json');
+    expect(headers['User-Agent']).toContain('antigravity/');
+    expect(headers['X-Goog-Api-Client']).toBe('google-cloud-sdk vscode_cloudshelleditor/0.1');
+    expect(JSON.parse(headers['Client-Metadata']!)).toEqual(
+      expect.objectContaining({ ideType: 'ANTIGRAVITY', pluginType: 'GEMINI' }),
+    );
   });
 
   it('buildPath returns the non-streaming generateContent path', () => {

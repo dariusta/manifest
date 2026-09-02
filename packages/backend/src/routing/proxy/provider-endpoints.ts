@@ -10,6 +10,8 @@ import {
   CODEX_CLI_USER_AGENT,
   COPILOT_EDITOR_VERSION,
   COPILOT_PLUGIN_VERSION,
+  ANTIGRAVITY_ENDPOINT_DAILY,
+  buildAntigravitySubscriptionHeaders,
   buildClaudeCodeSubscriptionHeaders,
 } from '../../common/constants/subscription-clients';
 import { normalizeProviderBaseUrl } from '../provider-base-url';
@@ -456,18 +458,14 @@ export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
     buildStreamPath: (model: string) => `/publishers/google/models/${model}:streamGenerateContent`,
     format: 'google',
   },
-  // Gemini OAuth (gemini-cli flow) routes through the CodeAssist API, which
-  // wraps the standard Gemini request/response in a small envelope and
-  // identifies the user via a Bearer token + their assigned
-  // `cloudaicompanionProject` id (stored in the OAuth blob's `u` field).
-  // Wrap/unwrap happens in `provider-client` and `proxy-response-handler`
-  // when `endpointKey === 'gemini-subscription'`.
+  // Gemini OAuth (Antigravity / Cloud Code) wraps the standard Gemini
+  // request/response in a small envelope and identifies the user via a
+  // Bearer token + their assigned `cloudaicompanionProject` id (stored in
+  // the OAuth blob's `u` field). Wrap/unwrap happens in `provider-client`
+  // and `proxy-response-handler` when `endpointKey === 'gemini-subscription'`.
   'gemini-subscription': {
-    baseUrl: 'https://cloudcode-pa.googleapis.com',
-    buildHeaders: (apiKey: string) => ({
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    }),
+    baseUrl: ANTIGRAVITY_ENDPOINT_DAILY,
+    buildHeaders: (apiKey: string) => buildAntigravitySubscriptionHeaders(apiKey),
     buildPath: () => '/v1internal:generateContent',
     buildStreamPath: () => '/v1internal:streamGenerateContent',
     format: 'google',

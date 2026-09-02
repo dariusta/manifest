@@ -5199,6 +5199,7 @@ describe('ProviderClient', () => {
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(sentBody.model).toBe('gemini-2.5-pro');
       expect(sentBody.project).toBe('proj-code-assist-999');
+      expect(sentBody.userAgent).toBe('antigravity');
       expect(sentBody.request).toBeDefined();
       expect(sentBody.request.contents).toBeDefined();
       expect(result.isGoogle).toBe(true);

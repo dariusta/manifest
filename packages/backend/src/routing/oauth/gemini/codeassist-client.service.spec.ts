@@ -105,7 +105,7 @@ describe('CodeAssistClientService', () => {
       });
       expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(fetchMock.mock.calls[2][0]).toBe(
-        'https://cloudcode-pa.googleapis.com/v1internal/operations/onboard-123',
+        'https://daily-cloudcode-pa.googleapis.com/v1internal/operations/onboard-123',
       );
       expect(fetchMock.mock.calls[2][1].method).toBe('GET');
     });
@@ -168,7 +168,7 @@ describe('CodeAssistClientService', () => {
       );
 
       await expect(svc.onboard('access-token')).rejects.toThrow(
-        'Google Code Assist is unavailable for this account: This account is not eligible for the free tier.',
+        'Google Cloud Code is unavailable for this account: This account is not eligible for the free tier.',
       );
     });
 
@@ -205,12 +205,19 @@ describe('CodeAssistClientService', () => {
         .mockResolvedValueOnce(
           mockOkResponse({ allowedTiers: [{ id: 'free-tier', isDefault: true }] }),
         )
+        .mockResolvedValueOnce(mockErrorResponse(500, 'Internal error'))
         .mockResolvedValueOnce(mockErrorResponse(500, 'Internal error'));
 
       await expect(svc.onboard('access-token')).rejects.toThrow(':onboardUser');
+      expect(fetchMock.mock.calls[1][0]).toBe(
+        'https://daily-cloudcode-pa.googleapis.com/v1internal:onboardUser',
+      );
+      expect(fetchMock.mock.calls[2][0]).toBe(
+        'https://cloudcode-pa.googleapis.com/v1internal:onboardUser',
+      );
     });
 
-    it('sends Authorization: Bearer and Content-Type: application/json on both requests', async () => {
+    it('sends Antigravity Cloud Code headers on both requests', async () => {
       fetchMock
         .mockResolvedValueOnce(
           mockOkResponse({ allowedTiers: [{ id: 'free-tier', isDefault: true }] }),
@@ -225,6 +232,11 @@ describe('CodeAssistClientService', () => {
         const headers = init.headers as Record<string, string>;
         expect(headers['Authorization']).toBe('Bearer my-token');
         expect(headers['Content-Type']).toBe('application/json');
+        expect(headers['User-Agent']).toContain('antigravity/');
+        expect(headers['X-Goog-Api-Client']).toBe('google-cloud-sdk vscode_cloudshelleditor/0.1');
+        expect(JSON.parse(headers['Client-Metadata'])).toEqual(
+          expect.objectContaining({ ideType: 'ANTIGRAVITY', pluginType: 'GEMINI' }),
+        );
       }
     });
 
@@ -240,10 +252,32 @@ describe('CodeAssistClientService', () => {
       await svc.onboard('my-token');
 
       expect(fetchMock.mock.calls[0][0]).toBe(
-        'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
+        'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
       );
       expect(fetchMock.mock.calls[1][0]).toBe(
-        'https://cloudcode-pa.googleapis.com/v1internal:onboardUser',
+        'https://daily-cloudcode-pa.googleapis.com/v1internal:onboardUser',
+      );
+    });
+
+    it('falls back to production Cloud Code when the daily endpoint is unavailable', async () => {
+      fetchMock
+        .mockResolvedValueOnce(mockErrorResponse(404, 'Requested entity was not found'))
+        .mockResolvedValueOnce(
+          mockOkResponse({
+            currentTier: { id: 'free-tier' },
+            cloudaicompanionProject: 'proj-prod',
+          }),
+        );
+
+      await expect(svc.onboard('access-token')).resolves.toEqual({
+        projectId: 'proj-prod',
+        tierId: 'free-tier',
+      });
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
+      );
+      expect(fetchMock.mock.calls[1][0]).toBe(
+        'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
       );
     });
 
@@ -262,8 +296,7 @@ describe('CodeAssistClientService', () => {
         const body = JSON.parse(init.body as string) as Record<string, unknown>;
         const metadata = body.metadata as Record<string, unknown>;
         expect(metadata).toBeDefined();
-        expect(metadata.ideType).toBe('IDE_UNSPECIFIED');
-        expect(metadata.platform).toBe('PLATFORM_UNSPECIFIED');
+        expect(metadata.ideType).toBe('ANTIGRAVITY');
         expect(metadata.pluginType).toBe('GEMINI');
         expect(metadata.pluginVersion).toBe('0.1.0');
       }
@@ -277,7 +310,7 @@ describe('CodeAssistClientService', () => {
         .mockResolvedValueOnce(mockOkResponse({ done: false }));
 
       await expect(svc.onboard('access-token')).rejects.toThrow(
-        'CodeAssist onboardUser operation returned no operation name.',
+        'Cloud Code onboardUser operation returned no operation name.',
       );
     });
 
@@ -291,7 +324,7 @@ describe('CodeAssistClientService', () => {
 
       const resultPromise = svc.onboard('access-token');
       const assertion = expect(resultPromise).rejects.toThrow(
-        'CodeAssist onboardUser operation did not complete.',
+        'Cloud Code onboardUser operation did not complete.',
       );
       await jest.advanceTimersByTimeAsync(5_000 * 13);
       await assertion;
@@ -308,7 +341,7 @@ describe('CodeAssistClientService', () => {
 
       const resultPromise = svc.onboard('access-token');
       const assertion = expect(resultPromise).rejects.toThrow(
-        'CodeAssist operation operations/op-err failed (403)',
+        'Cloud Code operation operations/op-err failed (403)',
       );
       await jest.advanceTimersByTimeAsync(5_000);
       await assertion;
