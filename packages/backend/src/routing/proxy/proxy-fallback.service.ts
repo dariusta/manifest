@@ -560,8 +560,15 @@ export class ProxyFallbackService {
       authType,
       opts.model,
     );
+    // Claude identity headers (x-claude-code-session-id / -agent-id) are
+    // Anthropic-specific: forwarding them to OpenAI/Google/custom/local routes
+    // would leak Claude session identifiers to unrelated providers.
+    const isAnthropicRoute = provider.toLowerCase() === 'anthropic';
+    const identityHeaders = isAnthropicRoute
+      ? extractHarnessIdentityHeaders(opts.inboundHeaders)
+      : undefined;
     const extraHeaders = {
-      ...extractHarnessIdentityHeaders(opts.inboundHeaders),
+      ...identityHeaders,
       ...buildProviderExtraHeaders(provider, opts.providerCacheKey),
     };
     const mergedExtraHeaders = Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined;

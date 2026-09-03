@@ -4,7 +4,6 @@ import {
   antigravityUserAgent,
   buildAntigravitySubscriptionHeaders,
   buildClaudeCodeSubscriptionHeaders,
-  claudeCodeForwardedServerId,
   claudeCodeStainlessArch,
   claudeCodeStainlessOs,
 } from './subscription-clients';
@@ -38,9 +37,12 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     expect(headers['x-app']).toBe('cli');
     expect(headers['x-stainless-arch']).toBeDefined();
     expect(headers['x-stainless-os']).toBeDefined();
-    expect(headers['x-forwarded-server']).toMatch(/^[a-f0-9]{12}$/);
-    expect(headers['x-stainless-package-version']).toBe('0.112.1');
-    expect(headers['x-stainless-runtime-version']).toBe('v26.3.0');
+    expect(headers['x-stainless-helper-method']).toBe('stream');
+    // Header set copied byte-for-byte from the known-good implementation:
+    // a synthetic forwarded-server id must NOT be present.
+    expect(headers).not.toHaveProperty('x-forwarded-server');
+    expect(headers['x-stainless-package-version']).toBe('0.80.0');
+    expect(headers['x-stainless-runtime-version']).toBe('v24.14.0');
   });
 
   it('identifies as Claude Code 2.1.251+ so Fable 5.1 is not rejected', () => {
@@ -54,17 +56,15 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     expect(version).toBeGreaterThanOrEqual(minimumFable51);
   });
 
-  it('generates a stable opaque forwarded-server id from the Manifest public URL', () => {
-    const url = 'https://manifest.example.com';
-    expect(claudeCodeForwardedServerId(url)).toMatch(/^[a-f0-9]{12}$/);
-    expect(claudeCodeForwardedServerId(url)).toBe(claudeCodeForwardedServerId(url));
-  });
-
-  it('adds the OAuth beta only for private OAuth endpoints', () => {
-    const inference = buildClaudeCodeSubscriptionHeaders('key-123');
-    const oauth = buildClaudeCodeSubscriptionHeaders('key-123', { includeOauthBeta: true });
-    expect(inference['anthropic-beta']).not.toContain('oauth-2025-04-20');
-    expect(oauth['anthropic-beta']).toContain('oauth-2025-04-20');
+  it('ALWAYS includes the oauth beta flag so Anthropic treats the bearer token as first-party Claude Code', () => {
+    // Without oauth-2025-04-20 Anthropic classifies the subscription token as
+    // a third-party app and bills extra usage instead of plan limits
+    // ("Third-party apps now draw from your extra usage…" 400).
+    const headers = buildClaudeCodeSubscriptionHeaders('key-123');
+    expect(headers['anthropic-beta']).toContain('oauth-2025-04-20');
+    expect(headers['anthropic-beta']).toContain('claude-code-20250219');
+    expect(headers['anthropic-beta']).toContain('context-management-2025-06-27');
+    expect(headers['anthropic-beta']).toContain('effort-2025-11-24');
   });
 });
 

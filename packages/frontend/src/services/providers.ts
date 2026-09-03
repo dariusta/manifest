@@ -398,6 +398,7 @@ const PROVIDER_UI: Record<string, ProviderUIOverlay> = {
     subtitle: 'Llama, Qwen, Gemma, and more',
     noKeyRequired: true,
     models: [],
+    defaultLocalPort: 11434,
   },
   'ollama-cloud': {
     initial: 'Oc',

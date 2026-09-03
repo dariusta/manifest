@@ -477,7 +477,7 @@ describe('PROVIDER_ENDPOINTS', () => {
     const headers = PROVIDER_ENDPOINTS['anthropic'].buildHeaders('skst-token', 'subscription');
     expect(headers['Authorization']).toBe('Bearer skst-token');
     expect(headers['anthropic-beta']).toContain('claude-code-20250219');
-    expect(headers['anthropic-beta']).not.toContain('oauth-2025-04-20');
+    expect(headers['anthropic-beta']).toContain('oauth-2025-04-20');
     expect(headers['anthropic-beta']).toContain('context-management-2025-06-27');
     expect(headers['anthropic-beta']).toContain('effort-2025-11-24');
     expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true');

@@ -9,6 +9,10 @@
 // fails loudly.
 
 import { ProviderClient } from '../provider-client';
+import {
+  claudeCodeStainlessArch,
+  claudeCodeStainlessOs,
+} from '../../../common/constants/subscription-clients';
 import { CodexSessionAffinity } from '../codex-session-affinity';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -72,22 +76,21 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
       'anthropic-dangerous-direct-browser-access': 'true',
       'user-agent': expect.stringContaining('claude-cli/'),
       'x-app': 'cli',
-      'x-forwarded-server': expect.stringMatching(/^[a-f0-9]{12}$/),
-      'x-stainless-arch': 'arm64',
+      'x-stainless-arch': claudeCodeStainlessArch(),
+      'x-stainless-helper-method': 'stream',
       'x-stainless-lang': 'js',
-      'x-stainless-os': 'MacOS',
-      'x-stainless-package-version': '0.112.1',
+      'x-stainless-os': claudeCodeStainlessOs(),
+      'x-stainless-package-version': '0.80.0',
       'x-stainless-retry-count': '0',
       'x-stainless-runtime': 'node',
-      'x-stainless-runtime-version': 'v26.3.0',
+      'x-stainless-runtime-version': 'v24.14.0',
       'x-stainless-timeout': '600',
     });
-    expect(sentHeaders['anthropic-beta']).toContain('context-1m-2025-08-07');
+    expect(sentHeaders).not.toHaveProperty('x-forwarded-server');
+    expect(sentHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
+    expect(sentHeaders['anthropic-beta']).toContain('claude-code-20250219');
     expect(sentHeaders['anthropic-beta']).toContain('context-management-2025-06-27');
-    expect(sentHeaders['anthropic-beta']).toContain('advanced-tool-use-2025-11-20');
-    expect(sentHeaders['anthropic-beta']).toContain('prompt-caching-scope-2026-01-05');
-    expect(sentHeaders['anthropic-beta']).toContain('fallback-credit-2026-06-01');
-    expect(sentHeaders['anthropic-beta']).not.toContain('oauth-2025-04-20');
+    expect(sentHeaders['anthropic-beta']).toContain('effort-2025-11-24');
     expect(sentHeaders).not.toHaveProperty('x-api-key');
   });
 
@@ -119,13 +122,12 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     expect(sentHeaders['x-app']).toBe('cli');
     expect(sentHeaders['x-stainless-lang']).toBe('js');
     expect(sentHeaders['x-stainless-runtime']).toBe('node');
-    expect(sentHeaders['x-stainless-package-version']).toBe('0.112.1');
-    expect(sentHeaders['anthropic-beta']).toContain('advanced-tool-use-2025-11-20');
+    expect(sentHeaders['x-stainless-package-version']).toBe('0.80.0');
+    expect(sentHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
     expect(sentHeaders['anthropic-beta']).not.toContain('caller-controlled');
     expect(sentHeaders['x-claude-code-session-id']).toBe('session-123');
     expect(sentHeaders['x-claude-code-agent-id']).toBe('agent-456');
-    expect(sentHeaders['x-forwarded-server']).toMatch(/^[a-f0-9]{12}$/);
-    expect(sentHeaders['x-forwarded-server']).not.toBe('caller-controlled');
+    expect(sentHeaders).not.toHaveProperty('x-forwarded-server');
     expect(sentHeaders.Authorization).toBe('Bearer «reda...…»');
     expect(sentHeaders).not.toHaveProperty('x-api-key');
   });

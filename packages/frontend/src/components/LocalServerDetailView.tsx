@@ -41,8 +41,19 @@ export function resolveLocalServerBaseUrl(
   const raw = input.trim();
   if (!raw) return fallbackUrl;
   const hasScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(raw);
+  let host = raw;
+  if (!hasScheme) {
+    // Bare IPv6 literals (`::1`, `fe80::1`) must be bracketed before URL
+    // construction; otherwise `new URL('http://::1')` throws and the raw
+    // string leaks through to backend URL validation, which rejects it.
+    // IPv6 has multiple colons; a single colon is host:port (IPv4).
+    if ((raw.match(/:/g) ?? []).length >= 2 && !raw.startsWith('[')) {
+      host = `[${raw}]`;
+    }
+    host = `http://${host}`;
+  }
   try {
-    const url = new URL(hasScheme ? raw : `http://${raw}`);
+    const url = new URL(host);
     if (!url.port) url.port = String(defaultPort);
     if (!url.pathname || url.pathname === '/') url.pathname = '/v1';
     return url.toString().replace(/\/$/, '');
