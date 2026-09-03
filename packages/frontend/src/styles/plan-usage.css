@@ -85,3 +85,56 @@
   color: hsl(var(--muted-foreground));
   font-size: var(--font-size-sm);
 }
+
+.plan-usage-tabs {
+  margin-bottom: var(--gap-lg);
+}
+
+.plan-usage-tabs .panel__tab {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.plan-usage-tab-empty {
+  margin-top: var(--gap-lg);
+}
+
+.plan-usage-balance {
+  margin-top: var(--gap-sm);
+  color: hsl(var(--foreground));
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.plan-usage-manual-limit {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--gap-md);
+  padding-top: var(--gap-md);
+  border-top: 1px solid hsl(var(--border));
+}
+
+.plan-usage-manual-limit > label {
+  color: hsl(var(--foreground));
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.plan-usage-manual-limit__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.plan-usage-manual-limit__controls .input {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .plan-usage-manual-limit__controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

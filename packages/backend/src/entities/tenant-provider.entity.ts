@@ -48,6 +48,9 @@ export class TenantProvider {
   @Column(timestampType(), { default: timestampDefault() })
   updated_at!: string;
 
+  @Column('decimal', { precision: 14, scale: 2, nullable: true, default: null })
+  manual_usage_limit_usd!: string | null;
+
   @Column('simple-json', { nullable: true, default: null })
   cached_models!: DiscoveredModel[] | null;
 

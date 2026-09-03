@@ -161,6 +161,7 @@ import { AddAutofixAccessGrant1799000400000 } from './migrations/1799000400000-A
 import { AddRequestsAndProviderAttempts1801000000000 } from './migrations/1801000000000-AddRequestsAndProviderAttempts';
 import { AddProviderAttemptOrdering1801100000000 } from './migrations/1801100000000-AddProviderAttemptOrdering';
 import { AddBetterAuthAccountIssuer1802200000000 } from './migrations/1802200000000-AddBetterAuthAccountIssuer';
+import { AddManualUsageLimit1802300000000 } from './migrations/1802300000000-AddManualUsageLimit';
 
 export const entities = [
   AgentMessage,
@@ -324,4 +325,5 @@ export const migrations = [
   SlimTenantAgentModelIndex1802000000000,
   AddTenantMembers1802100000000,
   AddBetterAuthAccountIssuer1802200000000,
+  AddManualUsageLimit1802300000000,
 ];

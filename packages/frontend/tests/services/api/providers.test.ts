@@ -6,6 +6,7 @@ import {
   getProviders,
   getProviderPlanUsage,
   getProviderUsage,
+  setProviderManualUsageLimit,
   mergeUsage,
   type TenantProviderConfig,
   type TenantProviderUsage,
@@ -181,6 +182,26 @@ describe('providers API client', () => {
     expect(String(url)).toContain('/api/v1/providers/plan-usage');
     expect(String(url)).toContain('connectionId=tp-1');
     expect((init as RequestInit).credentials).toBe('include');
+  });
+
+  it('sets and clears a manual per-connection usage allowance', async () => {
+    const response = { connectionId: 'tp-1', limitUsd: 100 };
+    const fetchMock = setupFetch(response);
+
+    await expect(setProviderManualUsageLimit('tp-1', 100)).resolves.toEqual(response);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/v1/providers/plan-usage/tp-1/manual-limit',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ limitUsd: 100 }),
+      }),
+    );
+
+    await setProviderManualUsageLimit('tp-1', null);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/v1/providers/plan-usage/tp-1/manual-limit',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
   });
 });
 

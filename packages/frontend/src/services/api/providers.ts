@@ -1,6 +1,6 @@
 import { SHARED_PROVIDERS, type AuthType } from 'manifest-shared';
 import { invalidateAll } from './cache.js';
-import { BASE_URL, fetchJson, parseErrorMessage } from './core.js';
+import { BASE_URL, fetchJson, fetchMutate, parseErrorMessage } from './core.js';
 
 export interface TenantProviderConnection {
   id: string;
@@ -139,7 +139,7 @@ export function getProviderUsage() {
 }
 
 export type ProviderPlanUsageStatus =
-  'live' | 'cached' | 'unavailable' | 'unsupported' | 'needs_reconnect';
+  'live' | 'cached' | 'manual' | 'unavailable' | 'unsupported' | 'needs_reconnect';
 
 export interface ProviderPlanUsageWindow {
   name: string;
@@ -207,6 +207,16 @@ export function getProviderPlanUsage(connectionId?: string) {
     connectionId ? { connectionId } : undefined,
     { cache: false },
   );
+}
+
+export function setProviderManualUsageLimit(connectionId: string, limitUsd: number | null) {
+  const path = `/providers/plan-usage/${encodeURIComponent(connectionId)}/manual-limit`;
+  return fetchMutate<{ connectionId: string; limitUsd: number | null }>(path, {
+    method: limitUsd === null ? 'DELETE' : 'PATCH',
+    ...(limitUsd === null
+      ? {}
+      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limitUsd }) }),
+  });
 }
 
 const USAGE_ZERO: Omit<TenantProviderUsage, 'provider' | 'auth_type'> = {

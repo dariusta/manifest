@@ -20,6 +20,7 @@ const provider = (over: Partial<TenantProvider>): TenantProvider =>
     updated_at: '2026-09-01T00:00:00.000Z',
     cached_models: null,
     models_fetched_at: null,
+    manual_usage_limit_usd: null,
     ...over,
   }) as TenantProvider;
 
@@ -29,8 +30,17 @@ function harness(options?: {
   probe?: jest.Mock;
   credential?: jest.Mock;
 }) {
+  const providers = options?.providers ?? [provider({})];
   const providerRepo = {
-    find: jest.fn().mockResolvedValue(options?.providers ?? [provider({})]),
+    find: jest.fn().mockResolvedValue(providers),
+    findOne: jest
+      .fn()
+      .mockImplementation(
+        async ({ where }: { where: { id: string; tenant_id: string } }) =>
+          providers.find((item) => item.id === where.id && item.tenant_id === where.tenant_id) ??
+          null,
+      ),
+    save: jest.fn().mockImplementation(async (value) => value),
   };
   const messageRepo = {
     query: jest.fn().mockResolvedValue(options?.metrics ?? []),
@@ -185,6 +195,95 @@ describe('PlanUsageService', () => {
       windows: [{ name: '5-hour', usedPercent: 10 }],
     });
     expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('turns a manual API-key allowance into an exact per-connection remaining balance', async () => {
+    const apiKey = provider({
+      id: 'tp-api',
+      auth_type: 'api_key',
+      manual_usage_limit_usd: '100.00',
+    });
+    const probe = jest.fn().mockResolvedValue({
+      status: 'unsupported',
+      source: 'manifest_observed_only',
+      fetchedAt: null,
+      windows: [],
+      message: 'Automatic balance unavailable',
+    });
+    const { service } = harness({
+      providers: [apiKey],
+      probe,
+      metrics: [
+        {
+          tenant_provider_id: 'tp-api',
+          requests: '4',
+          tokens: '800',
+          cost: '25.50',
+          attempts: '4',
+          succeeded: '4',
+          last_used_at: null,
+        },
+      ],
+    });
+
+    const [row] = await service.getPlanUsage('tenant-1');
+
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(row.quota).toMatchObject({
+      status: 'manual',
+      source: 'manual_30d_allowance',
+      windows: [
+        {
+          name: 'Manual 30-day allowance',
+          limit: 100,
+          used: 25.5,
+          remaining: 74.5,
+          remainingPercent: 74.5,
+          unit: 'USD',
+        },
+      ],
+    });
+  });
+
+  it('keeps live provider quota authoritative when a manual fallback is also configured', async () => {
+    const apiKey = provider({
+      id: 'tp-live-manual',
+      provider: 'zai',
+      auth_type: 'api_key',
+      manual_usage_limit_usd: '100.00',
+    });
+    const probe = jest.fn().mockResolvedValue({
+      status: 'live',
+      source: 'zai_live',
+      fetchedAt: '2026-09-02T00:00:00.000Z',
+      windows: [{ name: 'credit limit', remainingPercent: 88 }],
+    });
+    const { service } = harness({ providers: [apiKey], probe });
+
+    const [row] = await service.getPlanUsage('tenant-1');
+
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(row.quota).toMatchObject({
+      status: 'live',
+      source: 'zai_live',
+      windows: [{ name: 'credit limit', remainingPercent: 88 }],
+    });
+  });
+
+  it('sets and clears a manual limit only on an owned usage-based connection', async () => {
+    const apiKey = provider({ id: 'tp-api', auth_type: 'api_key' });
+    const { service, providerRepo } = harness({ providers: [apiKey] });
+
+    await expect(service.setManualLimit('tenant-1', 'tp-api', 125.5)).resolves.toMatchObject({
+      manual_usage_limit_usd: '125.50',
+    });
+    expect(providerRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'tp-api', manual_usage_limit_usd: '125.50' }),
+    );
+
+    await expect(service.setManualLimit('tenant-1', 'tp-api', null)).resolves.toMatchObject({
+      manual_usage_limit_usd: null,
+    });
   });
 
   it('validates a manual-refresh connection ID against the tenant', async () => {

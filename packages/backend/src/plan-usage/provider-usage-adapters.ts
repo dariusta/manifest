@@ -12,7 +12,7 @@ import { parseOAuthTokenBlob } from '../routing/oauth/core';
 import { isZaiProviderId } from '../routing/zai-region';
 
 export type ProviderUsageStatus =
-  'live' | 'cached' | 'unavailable' | 'unsupported' | 'needs_reconnect';
+  'live' | 'cached' | 'manual' | 'unavailable' | 'unsupported' | 'needs_reconnect';
 
 export interface ProviderQuotaWindow {
   name: string;
@@ -527,11 +527,11 @@ export class ProviderUsageAdapterRegistry {
       });
       if (response.status === 401 || response.status === 403) {
         return {
-          status: 'needs_reconnect',
+          status: 'unavailable',
           source: definition.source,
           fetchedAt: null,
           windows: [],
-          message: 'Provider authorization is no longer valid',
+          message: 'Usage endpoint did not accept this credential; inference may still work',
         };
       }
       if (response.status === 429) {

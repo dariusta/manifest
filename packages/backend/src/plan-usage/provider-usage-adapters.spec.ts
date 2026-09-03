@@ -329,6 +329,22 @@ describe('ProviderUsageAdapterRegistry probes', () => {
     expect(result.status).toBe('live');
   });
 
+  it('does not claim inference credentials are invalid when only the private usage endpoint rejects them', async () => {
+    const registry = new ProviderUsageAdapterRegistry(
+      jest.fn().mockResolvedValue({ ok: false, status: 401 }) as never,
+    );
+
+    await expect(
+      registry.probe(
+        connection({ provider: 'anthropic' }),
+        async () => 'still-valid-for-inference',
+      ),
+    ).resolves.toMatchObject({
+      status: 'unavailable',
+      message: 'Usage endpoint did not accept this credential; inference may still work',
+    });
+  });
+
   it('returns needs_reconnect for a missing credential and never calls fetch', async () => {
     const fetchFn = jest.fn();
     const report = await new ProviderUsageAdapterRegistry(fetchFn as never).probe(

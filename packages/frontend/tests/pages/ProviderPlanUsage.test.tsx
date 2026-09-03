@@ -3,11 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@solidjs/testing-li
 
 const mocks = vi.hoisted(() => ({
   getProviderPlanUsage: vi.fn(),
+  setProviderManualUsageLimit: vi.fn(),
 }));
 
 vi.mock('@solidjs/meta', () => ({ Title: () => null }));
 vi.mock('../../src/services/api/providers.js', () => ({
   getProviderPlanUsage: (...args: unknown[]) => mocks.getProviderPlanUsage(...args),
+  setProviderManualUsageLimit: (...args: unknown[]) => mocks.setProviderManualUsageLimit(...args),
 }));
 vi.mock('../../src/components/ProviderIcon.jsx', () => ({
   providerIcon: () => null,
@@ -80,6 +82,8 @@ const siblingAnthropic = {
 
 beforeEach(() => {
   mocks.getProviderPlanUsage.mockReset();
+  mocks.setProviderManualUsageLimit.mockReset();
+  mocks.setProviderManualUsageLimit.mockResolvedValue({ connectionId: 'tp-openai-key', limitUsd: 100 });
 });
 
 afterEach(() => {
@@ -87,7 +91,7 @@ afterEach(() => {
 });
 
 describe('Plan Usage page', () => {
-  it('renders one card per connection and keeps same-provider keys distinct', async () => {
+  it('separates subscription plans from usage-based API keys', async () => {
     mocks.getProviderPlanUsage.mockResolvedValue({
       connections: [liveAnthropic, siblingAnthropic, unsupportedOpenAI],
     });
@@ -95,12 +99,103 @@ describe('Plan Usage page', () => {
 
     await screen.findByText('Work Max');
     expect(screen.getAllByText('Claude Max').length).toBeGreaterThan(0);
-    expect(screen.getByText('Prod key')).toBeDefined();
-    expect(screen.getAllByText(/Anthropic|Claude/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('5-hour').length).toBe(2);
-    expect(screen.getAllByText('58% remaining').length).toBe(2);
+    expect(screen.queryByText('Prod key')).toBeNull();
+    expect(screen.getByRole('tab', { name: /Subscriptions/ }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+
+    await fireEvent.click(screen.getByRole('tab', { name: /Usage-based API keys/ }));
+    expect(await screen.findByText('Prod key')).toBeDefined();
+    expect(screen.queryByText('Work Max')).toBeNull();
     expect(screen.getByText('Provider balance unavailable')).toBeDefined();
     expect(screen.queryByText('0 remaining')).toBeNull();
+  });
+
+  it('offers manual setup only when an API key has no automatic quota report', async () => {
+    const liveApiKey = {
+      ...unsupportedOpenAI,
+      tenant_provider_id: 'tp-zai-key',
+      provider: 'zai',
+      label: 'Live key',
+      quota: {
+        status: 'live',
+        source: 'zai-live',
+        fetchedAt: '2026-09-02T01:00:00.000Z',
+        windows: [{ name: 'credit limit', remainingPercent: 75 }],
+      },
+    };
+    const unsupportedSubscription = {
+      ...liveAnthropic,
+      tenant_provider_id: 'tp-sub-unavailable',
+      label: 'Private plan',
+      quota: {
+        status: 'unsupported',
+        source: 'none',
+        fetchedAt: null,
+        windows: [],
+      },
+    };
+    mocks.getProviderPlanUsage.mockResolvedValue({
+      connections: [unsupportedSubscription, unsupportedOpenAI, liveApiKey],
+    });
+    render(() => <PlanUsage />);
+
+    await screen.findByText('Private plan');
+    expect(screen.getByText('Usage unavailable')).toBeDefined();
+    expect(screen.queryByText('Manual setup')).toBeNull();
+
+    await fireEvent.click(screen.getByRole('tab', { name: /Usage-based API keys/ }));
+    expect(await screen.findByText('Manual setup')).toBeDefined();
+    expect(screen.getByRole('spinbutton', { name: 'Manual 30-day allowance for Prod key' })).toBeDefined();
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Manual 30-day allowance for Live key' }),
+    ).toBeNull();
+  });
+
+  it('lets an operator set a manual 30-day allowance on a usage-based key', async () => {
+    mocks.getProviderPlanUsage.mockResolvedValue({ connections: [liveAnthropic, unsupportedOpenAI] });
+    render(() => <PlanUsage />);
+
+    await screen.findByText('Claude Max');
+    await fireEvent.click(screen.getByRole('tab', { name: /Usage-based API keys/ }));
+    const input = screen.getByRole('spinbutton', { name: 'Manual 30-day allowance for Prod key' });
+    await fireEvent.input(input, { target: { value: '100' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save allowance for Prod key' }));
+
+    await waitFor(() =>
+      expect(mocks.setProviderManualUsageLimit).toHaveBeenCalledWith('tp-openai-key', 100),
+    );
+  });
+
+  it('clears the visible allowance after deleting a manual fallback', async () => {
+    mocks.getProviderPlanUsage.mockResolvedValue({
+      connections: [
+        {
+          ...unsupportedOpenAI,
+          quota: {
+            status: 'manual',
+            source: 'manual',
+            stale: false,
+            fetchedAt: null,
+            windows: [],
+            balance: { limit: 125.5, used: 20, remaining: 105.5, unit: 'USD' },
+          },
+        },
+      ],
+    });
+    render(() => <PlanUsage />);
+
+    await fireEvent.click(await screen.findByRole('tab', { name: /Usage-based API keys/ }));
+    const input = screen.getByRole('spinbutton', {
+      name: 'Manual 30-day allowance for Prod key',
+    }) as HTMLInputElement;
+    expect(input.value).toBe('125.5');
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear allowance for Prod key' }));
+
+    await waitFor(() => {
+      expect(mocks.setProviderManualUsageLimit).toHaveBeenCalledWith('tp-openai-key', null);
+      expect(input.value).toBe('');
+    });
   });
 
   it('shows an empty state when no connections exist', async () => {

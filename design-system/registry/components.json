@@ -1844,6 +1844,14 @@
         "tooltip.css"
       ]
     },
+    "input": {
+      "classes": [
+        "input"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
     "json-block": {
       "classes": [
         "json-block",
@@ -2474,6 +2482,7 @@
         "cards.css",
         "charts.css",
         "limits.css",
+        "plan-usage.css",
         "request-drawer.css",
         "routing-providers.css",
         "routing-tabs.css",
@@ -2521,6 +2530,14 @@
         "plan-usage.css"
       ]
     },
+    "plan-usage-balance": {
+      "classes": [
+        "plan-usage-balance"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
     "plan-usage-card": {
       "classes": [
         "plan-usage-card",
@@ -2541,6 +2558,15 @@
         "plan-usage.css"
       ]
     },
+    "plan-usage-manual-limit": {
+      "classes": [
+        "plan-usage-manual-limit",
+        "plan-usage-manual-limit__controls"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
     "plan-usage-message": {
       "classes": [
         "plan-usage-message"
@@ -2552,6 +2578,22 @@
     "plan-usage-observed": {
       "classes": [
         "plan-usage-observed"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-tab-empty": {
+      "classes": [
+        "plan-usage-tab-empty"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-tabs": {
+      "classes": [
+        "plan-usage-tabs"
       ],
       "files": [
         "plan-usage.css"
@@ -5191,8 +5233,8 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 322,
-    "classes": 1733,
+    "blocks": 327,
+    "classes": 1739,
     "canonicalRules": 47,
     "ghostRules": 47
   }

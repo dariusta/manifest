@@ -4,6 +4,7 @@ import ErrorState from '../../components/ErrorState.jsx';
 import { providerIcon } from '../../components/ProviderIcon.jsx';
 import {
   getProviderPlanUsage,
+  setProviderManualUsageLimit,
   type ProviderPlanUsage,
   type ProviderPlanUsageStatus,
   type ProviderPlanUsageWindow,
@@ -16,10 +17,27 @@ import '../../styles/plan-usage.css';
 const STATUS_LABEL: Record<ProviderPlanUsageStatus, string> = {
   live: 'Live',
   cached: 'Cached',
-  unavailable: 'Unavailable',
-  unsupported: 'Unsupported',
+  manual: 'Manual',
+  unavailable: 'Usage unavailable',
+  unsupported: 'Usage unavailable',
   needs_reconnect: 'Needs reconnect',
 };
+
+function statusLabel(row: ProviderPlanUsage): string {
+  if (row.quota.status === 'unsupported' && row.auth_type === 'api_key') return 'Manual setup';
+  return STATUS_LABEL[row.quota.status];
+}
+
+function canSetManualAllowance(row: ProviderPlanUsage): boolean {
+  return (
+    row.auth_type === 'api_key' &&
+    (row.quota.status === 'manual' ||
+      row.quota.status === 'unsupported' ||
+      row.quota.status === 'unavailable')
+  );
+}
+
+type UsageTab = 'subscription' | 'api_key';
 
 function providerName(id: string): string {
   return PROVIDERS.find((provider) => provider.id === id)?.name ?? id;
@@ -35,11 +53,11 @@ function formatReset(value?: string): string | null {
 }
 
 function windowRemainingLabel(window: ProviderPlanUsageWindow): string | null {
-  const remaining = clampPercent(window.remainingPercent);
-  if (remaining != null) return `${Math.round(remaining)}% remaining`;
   if (window.remaining != null && window.unit) {
     return `${formatNumber(window.remaining)} ${window.unit} remaining`;
   }
+  const remaining = clampPercent(window.remainingPercent);
+  if (remaining != null) return `${Math.round(remaining)}% remaining`;
   if (window.remaining != null) return `${formatNumber(window.remaining)} remaining`;
   if (window.used != null && window.limit != null) {
     return `${formatNumber(Math.max(0, window.limit - window.used))} remaining`;
@@ -47,8 +65,17 @@ function windowRemainingLabel(window: ProviderPlanUsageWindow): string | null {
   return null;
 }
 
+function balanceRemainingLabel(row: ProviderPlanUsage): string | null {
+  const balance = row.quota.balance;
+  if (!balance) return null;
+  if (balance.unlimited) return 'Unlimited';
+  if (balance.remaining == null) return null;
+  return `${formatNumber(balance.remaining)} ${balance.unit} remaining`;
+}
+
 const PlanUsage: Component = () => {
   const [loadError, setLoadError] = createSignal<unknown>(null);
+  const [activeTab, setActiveTab] = createSignal<UsageTab>('subscription');
   const [data, { refetch }] = createResource(async () => {
     try {
       const result = await getProviderPlanUsage();
@@ -60,15 +87,19 @@ const PlanUsage: Component = () => {
     }
   });
   const connections = createMemo(() => data()?.connections ?? []);
+  const subscriptions = createMemo(() =>
+    connections().filter((row) => row.auth_type === 'subscription'),
+  );
+  const usageBased = createMemo(() => connections().filter((row) => row.auth_type === 'api_key'));
+  const visibleConnections = createMemo(() =>
+    activeTab() === 'subscription' ? subscriptions() : usageBased(),
+  );
   const liveCount = createMemo(
     () =>
-      connections().filter((row) => row.quota.status === 'live' || row.quota.status === 'cached')
-        .length,
+      connections().filter((row) => ['live', 'cached', 'manual'].includes(row.quota.status)).length,
   );
   const attentionCount = createMemo(
-    () =>
-      connections().filter((row) => ['unavailable', 'needs_reconnect'].includes(row.quota.status))
-        .length,
+    () => connections().filter((row) => row.quota.status === 'needs_reconnect').length,
   );
 
   return (
@@ -126,17 +157,101 @@ const PlanUsage: Component = () => {
           </div>
         </div>
 
-        <div class="plan-usage-grid">
-          <For each={connections()}>{(row) => <PlanUsageCard row={row} />}</For>
+        <div class="panel__tabs plan-usage-tabs" role="tablist" aria-label="Plan usage type">
+          <button
+            type="button"
+            role="tab"
+            class="panel__tab"
+            classList={{ 'panel__tab--active': activeTab() === 'subscription' }}
+            aria-selected={activeTab() === 'subscription'}
+            onClick={() => setActiveTab('subscription')}
+          >
+            Subscriptions ({subscriptions().length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="panel__tab"
+            classList={{ 'panel__tab--active': activeTab() === 'api_key' }}
+            aria-selected={activeTab() === 'api_key'}
+            onClick={() => setActiveTab('api_key')}
+          >
+            Usage-based API keys ({usageBased().length})
+          </button>
         </div>
+
+        <Show
+          when={visibleConnections().length > 0}
+          fallback={
+            <div class="empty-state plan-usage-tab-empty">
+              <div class="empty-state__title">
+                {activeTab() === 'subscription'
+                  ? 'No subscriptions connected'
+                  : 'No usage-based API keys connected'}
+              </div>
+            </div>
+          }
+        >
+          <div class="plan-usage-grid">
+            <For each={visibleConnections()}>
+              {(row) => (
+                <PlanUsageCard
+                  row={row}
+                  onSaved={() => {
+                    void refetch();
+                  }}
+                />
+              )}
+            </For>
+          </div>
+        </Show>
       </Show>
     </div>
   );
 };
 
-const PlanUsageCard: Component<{ row: ProviderPlanUsage }> = (props) => {
+const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> = (props) => {
   const observed = () => props.row.observed_30d;
   const quota = () => props.row.quota;
+  const [manualLimit, setManualLimit] = createSignal(
+    props.row.quota.status === 'manual' && props.row.quota.balance?.limit != null
+      ? String(props.row.quota.balance.limit)
+      : '',
+  );
+  const [saving, setSaving] = createSignal(false);
+  const [saveError, setSaveError] = createSignal<string | null>(null);
+
+  const saveManualLimit = async () => {
+    const value = Number(manualLimit());
+    if (!Number.isFinite(value) || value <= 0) {
+      setSaveError('Enter an allowance greater than $0.');
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await setProviderManualUsageLimit(props.row.tenant_provider_id, value);
+      props.onSaved();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save allowance');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clearManualLimit = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await setProviderManualUsageLimit(props.row.tenant_provider_id, null);
+      setManualLimit('');
+      props.onSaved();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not clear allowance');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <section class="panel plan-usage-card">
@@ -149,7 +264,7 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage }> = (props) => {
           </div>
         </div>
         <span class={`plan-usage-badge plan-usage-badge--${quota().status}`}>
-          {STATUS_LABEL[quota().status]}
+          {statusLabel(props.row)}
         </span>
       </div>
 
@@ -189,6 +304,56 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage }> = (props) => {
             </div>
           )}
         </For>
+      </Show>
+
+      <Show when={balanceRemainingLabel(props.row)}>
+        {(remaining) => <div class="plan-usage-balance">{remaining()}</div>}
+      </Show>
+
+      <Show when={canSetManualAllowance(props.row)}>
+        <div class="plan-usage-manual-limit">
+          <label for={`manual-limit-${props.row.tenant_provider_id}`}>
+            Manual 30-day allowance (USD)
+          </label>
+          <div class="plan-usage-manual-limit__controls">
+            <input
+              id={`manual-limit-${props.row.tenant_provider_id}`}
+              class="input"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={manualLimit()}
+              aria-label={`Manual 30-day allowance for ${props.row.label}`}
+              placeholder="e.g. 100"
+              onInput={(event) => setManualLimit(event.currentTarget.value)}
+            />
+            <button
+              class="btn btn--outline btn--sm"
+              type="button"
+              disabled={saving()}
+              aria-label={`Save allowance for ${props.row.label}`}
+              onClick={() => void saveManualLimit()}
+            >
+              Save
+            </button>
+            <Show when={quota().status === 'manual'}>
+              <button
+                class="btn btn--ghost btn--sm"
+                type="button"
+                disabled={saving()}
+                aria-label={`Clear allowance for ${props.row.label}`}
+                onClick={() => void clearManualLimit()}
+              >
+                Clear
+              </button>
+            </Show>
+          </div>
+          <p class="plan-usage-message">
+            Remaining allowance is the amount you enter minus Manifest-tracked cost over the last 30
+            days.
+          </p>
+          <Show when={saveError()}>{(message) => <p class="form-error">{message()}</p>}</Show>
+        </div>
       </Show>
 
       <div class="plan-usage-observed">

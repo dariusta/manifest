@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AgentMessage } from '../entities/agent-message.entity';
@@ -159,7 +159,6 @@ export class PlanUsageService {
       connections,
       MAX_CONCURRENT_PROBES,
       async (connection) => {
-        const quota = await this.quotaFor(tenantId, connection, Boolean(refreshConnectionId));
         const metric = metricById.get(connection.id);
         const attempts = numberValue(metric?.attempts);
         const succeeded = numberValue(metric?.succeeded);
@@ -174,6 +173,17 @@ export class PlanUsageService {
               last_used_at: iso(metric.last_used_at),
             }
           : emptyObserved();
+        const automaticQuota = await this.quotaFor(
+          tenantId,
+          connection,
+          Boolean(refreshConnectionId),
+        );
+        const quota =
+          connection.auth_type === 'api_key' &&
+          connection.manual_usage_limit_usd != null &&
+          (automaticQuota.status === 'unsupported' || automaticQuota.status === 'unavailable')
+            ? this.manualQuota(connection.manual_usage_limit_usd, observed.estimated_cost_usd)
+            : automaticQuota;
         return {
           tenant_provider_id: connection.id,
           provider: connection.provider,
@@ -188,6 +198,59 @@ export class PlanUsageService {
     );
 
     return rows;
+  }
+
+  async setManualLimit(
+    tenantId: string | null,
+    connectionId: string,
+    limitUsd: number | null,
+  ): Promise<TenantProvider> {
+    if (!tenantId) throw new NotFoundException('Provider connection not found');
+    const connection = await this.providerRepo.findOne({
+      where: { id: connectionId, tenant_id: tenantId },
+    });
+    if (!connection) throw new NotFoundException('Provider connection not found');
+    if (connection.auth_type !== 'api_key') {
+      throw new BadRequestException(
+        'Manual allowances are only available for usage-based API keys',
+      );
+    }
+    if (
+      limitUsd !== null &&
+      (!Number.isFinite(limitUsd) || limitUsd <= 0 || limitUsd > 999999999999)
+    ) {
+      throw new BadRequestException('Manual allowance must be greater than zero');
+    }
+
+    connection.manual_usage_limit_usd = limitUsd === null ? null : limitUsd.toFixed(2);
+    connection.updated_at = new Date().toISOString();
+    this.cache.delete(`${tenantId}:${connection.id}`);
+    return this.providerRepo.save(connection);
+  }
+
+  private manualQuota(rawLimit: string, observedCostUsd: number): PlanUsageQuota {
+    const limit = numberValue(rawLimit);
+    const used = Math.max(0, observedCostUsd);
+    const remaining = Math.max(0, limit - used);
+    const usedPercent = limit > 0 ? Math.min(100, (used / limit) * 100) : 100;
+    return {
+      status: 'manual',
+      source: 'manual_30d_allowance',
+      fetchedAt: new Date().toISOString(),
+      windows: [
+        {
+          name: 'Manual 30-day allowance',
+          limit,
+          used,
+          remaining,
+          usedPercent,
+          remainingPercent: Math.max(0, 100 - usedPercent),
+          unit: 'USD',
+        },
+      ],
+      balance: { limit, used, remaining, unit: 'USD' },
+      message: 'Calculated from your manual allowance and Manifest-tracked cost over 30 days',
+    };
   }
 
   private async quotaFor(

@@ -33,6 +33,7 @@ describe('TenantProvidersController', () => {
       updated_at: '2026-01-01T00:00:00.000Z',
       cached_models: [{ id: 'gpt-4o' }] as never,
       models_fetched_at: '2026-01-01T00:00:00.000Z',
+      manual_usage_limit_usd: null,
     }) as TenantProvider;
 
   it('lists multiple provider rows without deleting them', async () => {
