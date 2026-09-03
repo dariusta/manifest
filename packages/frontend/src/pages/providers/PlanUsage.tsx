@@ -1,4 +1,12 @@
-import { For, Show, createMemo, createResource, createSignal, type Component } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  type Component,
+} from 'solid-js';
 import { Title } from '@solidjs/meta';
 import ErrorState from '../../components/ErrorState.jsx';
 import { providerIcon } from '../../components/ProviderIcon.jsx';
@@ -53,6 +61,7 @@ function formatReset(value?: string): string | null {
 }
 
 function windowRemainingLabel(window: ProviderPlanUsageWindow): string | null {
+  if (window.unit === 'unlimited') return 'Unlimited';
   if (window.remaining != null && window.unit) {
     return `${formatNumber(window.remaining)} ${window.unit} remaining`;
   }
@@ -66,6 +75,9 @@ function windowRemainingLabel(window: ProviderPlanUsageWindow): string | null {
 }
 
 function balanceRemainingLabel(row: ProviderPlanUsage): string | null {
+  // Manual quota already renders the allowance as its window; showing the same
+  // number again as a balance line would duplicate it.
+  if (row.quota.status === 'manual') return null;
   const balance = row.quota.balance;
   if (!balance) return null;
   if (balance.unlimited) return 'Unlimited';
@@ -76,6 +88,18 @@ function balanceRemainingLabel(row: ProviderPlanUsage): string | null {
 const PlanUsage: Component = () => {
   const [loadError, setLoadError] = createSignal<unknown>(null);
   const [activeTab, setActiveTab] = createSignal<UsageTab>('subscription');
+  // Land on the first tab that actually has data; preserve explicit switches.
+  const [userPickedTab, setUserPickedTab] = createSignal(false);
+  createEffect(() => {
+    if (userPickedTab() || data.loading) return;
+    if (activeTab() === 'subscription' && subscriptions().length === 0 && usageBased().length > 0) {
+      setActiveTab('api_key');
+    }
+  });
+  const selectTab = (tab: UsageTab) => {
+    setUserPickedTab(true);
+    setActiveTab(tab);
+  };
   const [data, { refetch }] = createResource(async () => {
     try {
       const result = await getProviderPlanUsage();
@@ -94,9 +118,10 @@ const PlanUsage: Component = () => {
   const visibleConnections = createMemo(() =>
     activeTab() === 'subscription' ? subscriptions() : usageBased(),
   );
+  // Manual allowances are operator-entered estimates, not provider telemetry;
+  // counting them would overstate live provider reports.
   const liveCount = createMemo(
-    () =>
-      connections().filter((row) => ['live', 'cached', 'manual'].includes(row.quota.status)).length,
+    () => connections().filter((row) => ['live', 'cached'].includes(row.quota.status)).length,
   );
   const attentionCount = createMemo(
     () => connections().filter((row) => row.quota.status === 'needs_reconnect').length,
@@ -164,7 +189,7 @@ const PlanUsage: Component = () => {
             class="panel__tab"
             classList={{ 'panel__tab--active': activeTab() === 'subscription' }}
             aria-selected={activeTab() === 'subscription'}
-            onClick={() => setActiveTab('subscription')}
+            onClick={() => selectTab('subscription')}
           >
             Subscriptions ({subscriptions().length})
           </button>
@@ -174,7 +199,7 @@ const PlanUsage: Component = () => {
             class="panel__tab"
             classList={{ 'panel__tab--active': activeTab() === 'api_key' }}
             aria-selected={activeTab() === 'api_key'}
-            onClick={() => setActiveTab('api_key')}
+            onClick={() => selectTab('api_key')}
           >
             Usage-based API keys ({usageBased().length})
           </button>
