@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * Client identification strings sent to subscription backends that gate model
  * lists or requests by client version. Lifted into one place so bumping a
@@ -21,14 +23,30 @@ export const CODEX_CLI_USER_AGENT = 'codex_cli_rs/0.0.0 (Unknown 0; unknown) unk
 // 2.1.251+. Identify as the current latest CLI so subscription harnesses
 // are not rejected with claude_code_version_too_old.
 export const CLAUDE_CODE_USER_AGENT = 'claude-cli/2.1.258 (external, sdk-cli)';
-export const CLAUDE_CODE_STAINLESS_PACKAGE_VERSION = '0.80.0';
-export const CLAUDE_CODE_STAINLESS_RUNTIME_VERSION = 'v24.14.0';
+export const CLAUDE_CODE_STAINLESS_PACKAGE_VERSION = '0.112.1';
+export const CLAUDE_CODE_STAINLESS_RUNTIME_VERSION = 'v26.3.0';
 export const CLAUDE_CODE_BETA_FLAGS = [
   'claude-code-20250219',
-  'oauth-2025-04-20',
+  'context-1m-2025-08-07',
+  'interleaved-thinking-2025-05-14',
+  'thinking-token-count-2026-05-13',
   'context-management-2025-06-27',
+  'prompt-caching-scope-2026-01-05',
+  'mid-conversation-system-2026-04-07',
+  'advisor-tool-2026-03-01',
+  'advanced-tool-use-2025-11-20',
   'effort-2025-11-24',
+  'fallback-credit-2026-06-01',
 ].join(',');
+
+export function claudeCodeForwardedServerId(
+  seed = process.env.BETTER_AUTH_URL ??
+    process.env.MANIFEST_PUBLIC_URL ??
+    process.env.HOSTNAME ??
+    'manifest',
+): string {
+  return createHash('sha256').update(seed).digest('hex').slice(0, 12);
+}
 
 export function claudeCodeStainlessArch(arch = process.arch): string {
   switch (arch) {
@@ -56,14 +74,20 @@ export function claudeCodeStainlessOs(platform = process.platform): string {
   }
 }
 
-export const buildClaudeCodeSubscriptionHeaders = (apiKey: string): Record<string, string> => ({
+export const buildClaudeCodeSubscriptionHeaders = (
+  apiKey: string,
+  options: { includeOauthBeta?: boolean } = {},
+): Record<string, string> => ({
   Authorization: `Bearer ${apiKey}`,
   'Content-Type': 'application/json',
   'anthropic-version': '2023-06-01',
-  'anthropic-beta': CLAUDE_CODE_BETA_FLAGS,
+  'anthropic-beta': options.includeOauthBeta
+    ? `oauth-2025-04-20,${CLAUDE_CODE_BETA_FLAGS}`
+    : CLAUDE_CODE_BETA_FLAGS,
   'anthropic-dangerous-direct-browser-access': 'true',
   'user-agent': CLAUDE_CODE_USER_AGENT,
   'x-app': 'cli',
+  'x-forwarded-server': claudeCodeForwardedServerId(),
   'x-stainless-arch': claudeCodeStainlessArch(),
   'x-stainless-helper-method': 'stream',
   'x-stainless-lang': 'js',

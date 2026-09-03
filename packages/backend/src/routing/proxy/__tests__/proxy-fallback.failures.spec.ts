@@ -299,7 +299,9 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
     expect(second.response.status).toBe(429);
     expect(second.providerCallStarted).toBe(false);
     expect(second.response.headers.get('retry-after')).toBe('120');
-    expect(await second.response.text()).toContain('temporarily cooling down');
+    const cooldownBody = await second.response.text();
+    expect(cooldownBody).toContain('temporarily cooling down');
+    expect(cooldownBody).toContain('Retry in 120s');
     expect(providerClient.forward).toHaveBeenCalledTimes(1);
   });
 

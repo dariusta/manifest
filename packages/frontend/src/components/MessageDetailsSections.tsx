@@ -1,6 +1,10 @@
 import { createSignal, For, Show, type JSX } from 'solid-js';
 import InfoTooltip from './InfoTooltip.jsx';
 
+const INBOUND_HEADERS_TOOLTIP =
+  'Headers received from the calling harness. Sensitive credentials are removed. ' +
+  'Provider-bound headers may also include Manifest-owned authentication and compatibility headers.';
+
 const MODEL_PARAMS_TOOLTIP =
   'Provider-specific request parameters that affected this call, e.g. ' +
   "DeepSeek's `thinking` toggle. The set is curated per provider today; " +
@@ -39,7 +43,7 @@ export function RequestHeadersSection(props: { headers: Record<string, string> }
           aria-controls={tableId}
           onClick={() => setOpen((v) => !v)}
         >
-          Request Headers
+          Inbound Request Headers
           <span class="msg-detail__count-badge">{entries().length}</span>
           <span
             class="msg-detail__chevron"
@@ -57,6 +61,7 @@ export function RequestHeadersSection(props: { headers: Record<string, string> }
             </svg>
           </span>
         </button>
+        <InfoTooltip text={INBOUND_HEADERS_TOOLTIP} />
       </div>
       <Show when={open()}>
         <div class="data-table-scroll" id={tableId}>

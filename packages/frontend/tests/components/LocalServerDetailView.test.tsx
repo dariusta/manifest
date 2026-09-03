@@ -25,7 +25,9 @@ vi.mock('../../src/services/toast-store.js', () => ({
   toast: mockToast,
 }));
 
-import LocalServerDetailView from '../../src/components/LocalServerDetailView';
+import LocalServerDetailView, {
+  resolveLocalServerBaseUrl,
+} from '../../src/components/LocalServerDetailView';
 import type { ProviderDef } from '../../src/services/providers';
 
 const lmsProv: ProviderDef = {
@@ -57,6 +59,18 @@ const llamacppProv: ProviderDef = {
   models: [],
   defaultLocalPort: 8080,
 };
+
+describe('resolveLocalServerBaseUrl', () => {
+  it.each([
+    ['192.168.1.42', 'http://192.168.1.42:11434/v1'],
+    ['192.168.1.42:1234', 'http://192.168.1.42:1234/v1'],
+    ['ollama.lan', 'http://ollama.lan:11434/v1'],
+    ['http://ollama.lan:11434', 'http://ollama.lan:11434/v1'],
+    ['http://ollama.lan:11434/custom', 'http://ollama.lan:11434/custom'],
+  ])('resolves %s to %s', (input, expected) => {
+    expect(resolveLocalServerBaseUrl(input, 'http://localhost:11434/v1', 11434)).toBe(expected);
+  });
+});
 
 describe('LocalServerDetailView', () => {
   beforeEach(() => {
@@ -842,7 +856,7 @@ describe('LocalServerDetailView', () => {
     ));
 
     const input = await waitFor(() => {
-      const field = container.querySelector('input[aria-label="Base URL"]') as HTMLInputElement | null;
+      const field = container.querySelector('input[aria-label="Server IP or Base URL"]') as HTMLInputElement | null;
       if (!field) throw new Error('base url input missing');
       return field;
     });
@@ -889,7 +903,7 @@ describe('LocalServerDetailView', () => {
     ));
 
     const input = await waitFor(() => {
-      const field = container.querySelector('input[aria-label="Base URL"]') as HTMLInputElement | null;
+      const field = container.querySelector('input[aria-label="Server IP or Base URL"]') as HTMLInputElement | null;
       if (!field) throw new Error('base url input missing');
       return field;
     });

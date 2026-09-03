@@ -142,12 +142,17 @@ describe('extractHarnessIdentityHeaders', () => {
         'user-agent': 'claude-cli/2.1.258 (external, cli)',
         'x-app': 'cli',
         'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+        'x-claude-code-session-id': 'session-123',
+        'x-claude-code-agent-id': 'agent-456',
+        'x-forwarded-server': 'untrusted-proxy',
         'x-forwarded-for': '1.1.1.1',
       }),
     ).toEqual({
       'user-agent': 'claude-cli/2.1.258 (external, cli)',
       'x-app': 'cli',
       'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+      'x-claude-code-session-id': 'session-123',
+      'x-claude-code-agent-id': 'agent-456',
     });
   });
 });

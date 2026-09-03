@@ -1026,7 +1026,7 @@ export const PROVIDER_CONFIGS: Record<string, FetcherConfig> = {
         'anthropic-version': '2023-06-01',
       };
       if (authType === 'subscription') {
-        return buildClaudeCodeSubscriptionHeaders(key);
+        return buildClaudeCodeSubscriptionHeaders(key, { includeOauthBeta: true });
       } else {
         headers['x-api-key'] = key;
       }

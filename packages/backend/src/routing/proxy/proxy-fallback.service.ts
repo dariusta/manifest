@@ -530,7 +530,7 @@ export class ProxyFallbackService {
     const retryAfterSeconds = Math.max(1, Math.ceil((cooldown.expiresAt - Date.now()) / 1000));
     const message =
       `Provider route temporarily cooling down after an upstream ${cooldown.status}: ` +
-      `${opts.provider}/${opts.model}`;
+      `${opts.provider}/${opts.model}. Retry in ${retryAfterSeconds}s.`;
     return {
       response: new Response(JSON.stringify({ error: { message } }), {
         status: cooldown.status,

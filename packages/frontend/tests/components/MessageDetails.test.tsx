@@ -482,7 +482,7 @@ describe('MessageDetails', () => {
     expect(labels).not.toContain('SDK');
   });
 
-  it('renders Request Headers section collapsed by default with a visible count', async () => {
+  it('renders Inbound Request Headers section collapsed by default with a visible count', async () => {
     const withHeaders = {
       ...detailsResponse,
       message: {
@@ -497,7 +497,7 @@ describe('MessageDetails', () => {
     mockGetMessageDetails.mockResolvedValue(withHeaders);
     const { container } = render(() => <MessageDetails messageId="msg-1" />);
     await vi.waitFor(() => {
-      expect(container.textContent).toContain('Request Headers');
+      expect(container.textContent).toContain('Inbound Request Headers');
     });
 
     // Title button is visible with aria-expanded="false"
@@ -508,7 +508,7 @@ describe('MessageDetails', () => {
     expect(toggle!.tagName).toBe('BUTTON');
     expect(toggle!.getAttribute('aria-expanded')).toBe('false');
 
-    // Count badge stays visible when collapsed. Request Headers uses the
+    // Count badge stays visible when collapsed. Inbound Request Headers uses the
     // `msg-detail__count-badge` styling (border + bg).
     const headerCount = container.querySelector('.msg-detail__count-badge');
     expect(headerCount).not.toBeNull();
@@ -522,7 +522,7 @@ describe('MessageDetails', () => {
     expect(tables.length).toBe(0);
   });
 
-  it('expands Request Headers when the title is clicked, and collapses on second click', async () => {
+  it('expands Inbound Request Headers when the title is clicked, and collapses on second click', async () => {
     const withHeaders = {
       ...detailsResponse,
       message: {
@@ -536,7 +536,7 @@ describe('MessageDetails', () => {
     mockGetMessageDetails.mockResolvedValue(withHeaders);
     const { container } = render(() => <MessageDetails messageId="msg-1" />);
     await vi.waitFor(() => {
-      expect(container.textContent).toContain('Request Headers');
+      expect(container.textContent).toContain('Inbound Request Headers');
     });
 
     const toggle = container.querySelector(
@@ -573,14 +573,14 @@ describe('MessageDetails', () => {
     mockGetMessageDetails.mockResolvedValue(withHeaders);
     const { container } = render(() => <MessageDetails messageId="msg-1" />);
     await vi.waitFor(() => {
-      expect(container.textContent).toContain('Request Headers');
+      expect(container.textContent).toContain('Inbound Request Headers');
     });
     const toggle = container.querySelector(
       '.msg-detail__section-title--toggle',
     ) as HTMLButtonElement;
     toggle.click();
     const tables = container.querySelectorAll('table.msg-detail__table');
-    // First table after expanding is Request Headers.
+    // First table after expanding is Inbound Request Headers.
     const headersTable = tables[0]!;
     const keyCells = Array.from(headersTable.querySelectorAll('tbody tr td:first-child')).map(
       (c) => c.textContent,
@@ -588,7 +588,7 @@ describe('MessageDetails', () => {
     expect(keyCells).toEqual(['a-first', 'm-mid', 'z-last']);
   });
 
-  it('rotates the chevron when the Request Headers section is expanded', async () => {
+  it('rotates the chevron when the Inbound Request Headers section is expanded', async () => {
     const withHeaders = {
       ...detailsResponse,
       message: {
@@ -599,7 +599,7 @@ describe('MessageDetails', () => {
     mockGetMessageDetails.mockResolvedValue(withHeaders);
     const { container } = render(() => <MessageDetails messageId="msg-1" />);
     await vi.waitFor(() => {
-      expect(container.textContent).toContain('Request Headers');
+      expect(container.textContent).toContain('Inbound Request Headers');
     });
     const chevron = container.querySelector('.msg-detail__chevron')!;
     expect(chevron.classList.contains('msg-detail__chevron--open')).toBe(false);
@@ -610,7 +610,7 @@ describe('MessageDetails', () => {
     expect(chevron.classList.contains('msg-detail__chevron--open')).toBe(true);
   });
 
-  it('hides Request Headers section when headers are null', async () => {
+  it('hides Inbound Request Headers section when headers are null', async () => {
     const noHeaders = {
       ...detailsResponse,
       message: { ...detailsResponse.message, request_headers: null },
@@ -620,10 +620,10 @@ describe('MessageDetails', () => {
     await vi.waitFor(() => {
       expect(container.textContent).toContain('Request');
     });
-    expect(container.textContent).not.toContain('Request Headers');
+    expect(container.textContent).not.toContain('Inbound Request Headers');
   });
 
-  it('hides Request Headers section when headers are an empty object', async () => {
+  it('hides Inbound Request Headers section when headers are an empty object', async () => {
     const empty = {
       ...detailsResponse,
       message: { ...detailsResponse.message, request_headers: {} },
@@ -633,7 +633,7 @@ describe('MessageDetails', () => {
     await vi.waitFor(() => {
       expect(container.textContent).toContain('Request');
     });
-    expect(container.textContent).not.toContain('Request Headers');
+    expect(container.textContent).not.toContain('Inbound Request Headers');
   });
 
   it('omits Provider and Model when the message has no model attached', async () => {
@@ -927,7 +927,7 @@ describe('MessageDetails', () => {
       expect(aria.toLowerCase()).toContain('custom');
     });
 
-    it('renders Model Parameters above Request Headers — user intent before protocol noise', async () => {
+    it('renders Model Parameters above Inbound Request Headers — user intent before protocol noise', async () => {
       // When both sections are present, Model Parameters comes first in the
       // DOM. Headers are protocol noise; params are user intent. The reading
       // order in routing analytics is intent → wire → response.
@@ -943,10 +943,10 @@ describe('MessageDetails', () => {
       const { container } = render(() => <MessageDetails messageId="msg-1" />);
       await vi.waitFor(() => {
         expect(container.textContent).toContain('Model Parameters');
-        expect(container.textContent).toContain('Request Headers');
+        expect(container.textContent).toContain('Inbound Request Headers');
       });
       const html = container.innerHTML;
-      expect(html.indexOf('Model Parameters')).toBeLessThan(html.indexOf('Request Headers'));
+      expect(html.indexOf('Model Parameters')).toBeLessThan(html.indexOf('Inbound Request Headers'));
     });
 
     it('renders multiple parameter keys as separate rows, sorted alphabetically — forward-compat for new providers', async () => {
@@ -980,7 +980,7 @@ describe('MessageDetails', () => {
       expect(titleButton.textContent).toContain('3');
       titleButton.click();
       // Scope the key-extraction to the Model Parameters table specifically;
-      // the Request Headers section also uses `.msg-detail__table` and would
+      // the Inbound Request Headers section also uses `.msg-detail__table` and would
       // dilute a global selector. The wrapper id starts with
       // `msg-detail-model-params-` for exactly this kind of disambiguation.
       await vi.waitFor(() => {

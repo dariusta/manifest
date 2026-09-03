@@ -387,7 +387,8 @@ const DEFINITIONS: Record<string, ProbeDefinition> = {
     source: 'anthropic_internal_oauth_usage',
     url: () => 'https://api.anthropic.com/api/oauth/usage',
     method: 'GET',
-    headers: (credential) => buildClaudeCodeSubscriptionHeaders(credential.token),
+    headers: (credential) =>
+      buildClaudeCodeSubscriptionHeaders(credential.token, { includeOauthBeta: true }),
     parse: parseAnthropicUsage,
   },
   openai: {

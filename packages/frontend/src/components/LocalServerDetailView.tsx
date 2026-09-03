@@ -33,6 +33,24 @@ interface ProbeState {
   baseUrl: string;
 }
 
+export function resolveLocalServerBaseUrl(
+  input: string,
+  fallbackUrl: string,
+  defaultPort: number,
+): string {
+  const raw = input.trim();
+  if (!raw) return fallbackUrl;
+  const hasScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(raw);
+  try {
+    const url = new URL(hasScheme ? raw : `http://${raw}`);
+    if (!url.port) url.port = String(defaultPort);
+    if (!url.pathname || url.pathname === '/') url.pathname = '/v1';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return raw;
+  }
+}
+
 const LocalServerDetailView: Component<Props> = (props) => {
   const isEdit = () => !!props.editData;
   const hint = (): LocalServerHint | undefined => LOCAL_SERVER_HINTS[props.provider.id];
@@ -46,7 +64,8 @@ const LocalServerDetailView: Component<Props> = (props) => {
       setBaseUrlDraft(defaultBaseUrl());
     }
   });
-  const resolvedBaseUrl = () => baseUrlDraft().trim() || defaultBaseUrl();
+  const resolvedBaseUrl = () =>
+    resolveLocalServerBaseUrl(baseUrlDraft(), defaultBaseUrl(), props.provider.defaultLocalPort!);
 
   // In edit mode, pre-select only the models that are already connected.
   const initialSelected = () =>
@@ -203,15 +222,19 @@ const LocalServerDetailView: Component<Props> = (props) => {
       </div>
 
       <label class="field" style="display: grid; gap: 6px; margin-bottom: 16px;">
-        <span>Base URL</span>
+        <span>Server IP or Base URL</span>
         <input
           class="input"
-          aria-label="Base URL"
+          aria-label="Server IP or Base URL"
           value={baseUrlDraft()}
-          placeholder={defaultBaseUrl()}
+          placeholder="192.168.1.42"
           onInput={(event) => setBaseUrlDraft(event.currentTarget.value)}
           onChange={() => retry()}
         />
+        <small style="color: hsl(var(--muted-foreground));">
+          Enter an IP, hostname, or complete URL. Manifest adds http://, port{' '}
+          {props.provider.defaultLocalPort}, and /v1 when omitted.
+        </small>
       </label>
 
       <Show

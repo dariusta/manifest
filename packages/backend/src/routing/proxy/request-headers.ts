@@ -89,6 +89,8 @@ const HARNESS_IDENTITY_HEADERS = [
   'anthropic-version',
   'anthropic-dangerous-direct-browser-access',
   'x-anthropic-billing-header',
+  'x-claude-code-session-id',
+  'x-claude-code-agent-id',
   'x-stainless-arch',
   'x-stainless-helper-method',
   'x-stainless-lang',

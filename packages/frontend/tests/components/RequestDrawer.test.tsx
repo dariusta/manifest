@@ -130,7 +130,7 @@ describe('RequestDrawer', () => {
     // Autofix context card: role-aware copy + operations table.
     expect(container.textContent).toContain('rename: old → new');
 
-    fireEvent.click(screen.getByText('Request headers'));
+    fireEvent.click(screen.getByText('Inbound headers'));
     expect(screen.getByText('alpha')).toBeDefined();
     expect(screen.getByText('zeta')).toBeDefined();
     fireEvent.click(screen.getByText('Model params'));

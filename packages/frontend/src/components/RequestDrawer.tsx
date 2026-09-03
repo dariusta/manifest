@@ -248,7 +248,7 @@ const RequestDrawer: Component<RequestDrawerProps> = (props) => {
       tabs.push({ value: 'raw', label: 'Raw' });
     }
     if (att?.request_headers && Object.keys(att.request_headers).length > 0) {
-      tabs.push({ value: 'headers', label: 'Request headers' });
+      tabs.push({ value: 'headers', label: 'Inbound headers' });
     }
     if (att?.request_params && Object.keys(att.request_params).length > 0) {
       tabs.push({ value: 'params', label: 'Model params' });

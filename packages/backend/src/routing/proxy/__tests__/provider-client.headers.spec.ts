@@ -72,6 +72,7 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
       'anthropic-dangerous-direct-browser-access': 'true',
       'user-agent': expect.stringContaining('claude-cli/'),
       'x-app': 'cli',
+      'x-forwarded-server': expect.stringMatching(/^[a-f0-9]{12}$/),
       'x-stainless-arch': expect.any(String),
       'x-stainless-helper-method': 'stream',
       'x-stainless-lang': 'js',
@@ -82,10 +83,12 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
       'x-stainless-runtime-version': expect.any(String),
       'x-stainless-timeout': '600',
     });
-    expect(sentHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
+    expect(sentHeaders['anthropic-beta']).toContain('context-1m-2025-08-07');
     expect(sentHeaders['anthropic-beta']).toContain('context-management-2025-06-27');
-    expect(sentHeaders['anthropic-beta']).toContain('effort-2025-11-24');
-    expect(sentHeaders['anthropic-beta']).not.toContain('prompt-caching-scope-2026-01-05');
+    expect(sentHeaders['anthropic-beta']).toContain('advanced-tool-use-2025-11-20');
+    expect(sentHeaders['anthropic-beta']).toContain('prompt-caching-scope-2026-01-05');
+    expect(sentHeaders['anthropic-beta']).toContain('fallback-credit-2026-06-01');
+    expect(sentHeaders['anthropic-beta']).not.toContain('oauth-2025-04-20');
     expect(sentHeaders).not.toHaveProperty('x-api-key');
   });
 
@@ -103,12 +106,19 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
         'user-agent': 'claude-cli/2.1.300 (external, cli)',
         'x-app': 'cli',
         'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+        'x-claude-code-session-id': 'session-123',
+        'x-claude-code-agent-id': 'agent-456',
+        'x-forwarded-server': 'caller-controlled',
       },
     });
 
     const sentHeaders = mockFetch.mock.calls[0][1].headers as Record<string, string>;
     expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.300 (external, cli)');
     expect(sentHeaders['x-app']).toBe('cli');
+    expect(sentHeaders['x-claude-code-session-id']).toBe('session-123');
+    expect(sentHeaders['x-claude-code-agent-id']).toBe('agent-456');
+    expect(sentHeaders['x-forwarded-server']).toMatch(/^[a-f0-9]{12}$/);
+    expect(sentHeaders['x-forwarded-server']).not.toBe('caller-controlled');
     expect(sentHeaders.Authorization).toBe('Bearer «reda...…»');
     expect(sentHeaders).not.toHaveProperty('x-api-key');
   });

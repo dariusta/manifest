@@ -4,6 +4,7 @@ import {
   antigravityUserAgent,
   buildAntigravitySubscriptionHeaders,
   buildClaudeCodeSubscriptionHeaders,
+  claudeCodeForwardedServerId,
   claudeCodeStainlessArch,
   claudeCodeStainlessOs,
 } from './subscription-clients';
@@ -37,6 +38,9 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     expect(headers['x-app']).toBe('cli');
     expect(headers['x-stainless-arch']).toBeDefined();
     expect(headers['x-stainless-os']).toBeDefined();
+    expect(headers['x-forwarded-server']).toMatch(/^[a-f0-9]{12}$/);
+    expect(headers['x-stainless-package-version']).toBe('0.112.1');
+    expect(headers['x-stainless-runtime-version']).toBe('v26.3.0');
   });
 
   it('identifies as Claude Code 2.1.251+ so Fable 5.1 is not rejected', () => {
@@ -48,6 +52,19 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     const version = Number(major) * 1_000_000 + Number(minor) * 1_000 + Number(patch);
     const minimumFable51 = 2 * 1_000_000 + 1 * 1_000 + 251;
     expect(version).toBeGreaterThanOrEqual(minimumFable51);
+  });
+
+  it('generates a stable opaque forwarded-server id from the Manifest public URL', () => {
+    const url = 'https://manifest.example.com';
+    expect(claudeCodeForwardedServerId(url)).toMatch(/^[a-f0-9]{12}$/);
+    expect(claudeCodeForwardedServerId(url)).toBe(claudeCodeForwardedServerId(url));
+  });
+
+  it('adds the OAuth beta only for private OAuth endpoints', () => {
+    const inference = buildClaudeCodeSubscriptionHeaders('key-123');
+    const oauth = buildClaudeCodeSubscriptionHeaders('key-123', { includeOauthBeta: true });
+    expect(inference['anthropic-beta']).not.toContain('oauth-2025-04-20');
+    expect(oauth['anthropic-beta']).toContain('oauth-2025-04-20');
   });
 });
 
