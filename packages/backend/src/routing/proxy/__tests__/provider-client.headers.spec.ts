@@ -73,14 +73,13 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
       'user-agent': expect.stringContaining('claude-cli/'),
       'x-app': 'cli',
       'x-forwarded-server': expect.stringMatching(/^[a-f0-9]{12}$/),
-      'x-stainless-arch': expect.any(String),
-      'x-stainless-helper-method': 'stream',
+      'x-stainless-arch': 'arm64',
       'x-stainless-lang': 'js',
-      'x-stainless-os': expect.any(String),
-      'x-stainless-package-version': expect.any(String),
+      'x-stainless-os': 'MacOS',
+      'x-stainless-package-version': '0.112.1',
       'x-stainless-retry-count': '0',
       'x-stainless-runtime': 'node',
-      'x-stainless-runtime-version': expect.any(String),
+      'x-stainless-runtime-version': 'v26.3.0',
       'x-stainless-timeout': '600',
     });
     expect(sentHeaders['anthropic-beta']).toContain('context-1m-2025-08-07');
@@ -92,7 +91,7 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     expect(sentHeaders).not.toHaveProperty('x-api-key');
   });
 
-  it('forwards Claude Code identity headers over the synthetic defaults', async () => {
+  it('keeps provider-owned Claude identity on cross-harness fallbacks', async () => {
     mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
     await client.forward({
@@ -103,9 +102,12 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
       stream: false,
       authType: 'subscription',
       extraHeaders: {
-        'user-agent': 'claude-cli/2.1.300 (external, cli)',
-        'x-app': 'cli',
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+        'user-agent': 'OpenAI/Python 2.24.0',
+        'x-app': 'not-claude',
+        'anthropic-beta': 'caller-controlled',
+        'x-stainless-lang': 'python',
+        'x-stainless-runtime': 'CPython',
+        'x-stainless-package-version': '2.24.0',
         'x-claude-code-session-id': 'session-123',
         'x-claude-code-agent-id': 'agent-456',
         'x-forwarded-server': 'caller-controlled',
@@ -113,8 +115,13 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     });
 
     const sentHeaders = mockFetch.mock.calls[0][1].headers as Record<string, string>;
-    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.300 (external, cli)');
+    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.258 (external, sdk-cli)');
     expect(sentHeaders['x-app']).toBe('cli');
+    expect(sentHeaders['x-stainless-lang']).toBe('js');
+    expect(sentHeaders['x-stainless-runtime']).toBe('node');
+    expect(sentHeaders['x-stainless-package-version']).toBe('0.112.1');
+    expect(sentHeaders['anthropic-beta']).toContain('advanced-tool-use-2025-11-20');
+    expect(sentHeaders['anthropic-beta']).not.toContain('caller-controlled');
     expect(sentHeaders['x-claude-code-session-id']).toBe('session-123');
     expect(sentHeaders['x-claude-code-agent-id']).toBe('agent-456');
     expect(sentHeaders['x-forwarded-server']).toMatch(/^[a-f0-9]{12}$/);

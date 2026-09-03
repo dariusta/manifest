@@ -39,6 +39,24 @@ export const CLAUDE_CODE_BETA_FLAGS = [
   'fallback-credit-2026-06-01',
 ].join(',');
 
+/** Compatibility identity owned by Manifest for Anthropic subscription calls. */
+export const CLAUDE_CODE_PROVIDER_OWNED_HEADERS = Object.freeze([
+  'anthropic-version',
+  'anthropic-beta',
+  'anthropic-dangerous-direct-browser-access',
+  'user-agent',
+  'x-app',
+  'x-forwarded-server',
+  'x-stainless-arch',
+  'x-stainless-lang',
+  'x-stainless-os',
+  'x-stainless-package-version',
+  'x-stainless-retry-count',
+  'x-stainless-runtime',
+  'x-stainless-runtime-version',
+  'x-stainless-timeout',
+]);
+
 export function claudeCodeForwardedServerId(
   seed = process.env.BETTER_AUTH_URL ??
     process.env.MANIFEST_PUBLIC_URL ??
@@ -88,10 +106,9 @@ export const buildClaudeCodeSubscriptionHeaders = (
   'user-agent': CLAUDE_CODE_USER_AGENT,
   'x-app': 'cli',
   'x-forwarded-server': claudeCodeForwardedServerId(),
-  'x-stainless-arch': claudeCodeStainlessArch(),
-  'x-stainless-helper-method': 'stream',
+  'x-stainless-arch': 'arm64',
   'x-stainless-lang': 'js',
-  'x-stainless-os': claudeCodeStainlessOs(),
+  'x-stainless-os': 'MacOS',
   'x-stainless-package-version': CLAUDE_CODE_STAINLESS_PACKAGE_VERSION,
   'x-stainless-retry-count': '0',
   'x-stainless-runtime': 'node',
