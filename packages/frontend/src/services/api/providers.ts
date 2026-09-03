@@ -138,6 +138,77 @@ export function getProviderUsage() {
   return fetchJson<ProviderUsageResponse>('/providers/usage');
 }
 
+export type ProviderPlanUsageStatus =
+  'live' | 'cached' | 'unavailable' | 'unsupported' | 'needs_reconnect';
+
+export interface ProviderPlanUsageWindow {
+  name: string;
+  usedPercent?: number;
+  remainingPercent?: number;
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  resetAt?: string;
+  unit?: string;
+}
+
+export interface ProviderPlanUsageBalance {
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  unit: string;
+  unlimited?: boolean;
+}
+
+export interface ProviderPlanUsageQuota {
+  status: ProviderPlanUsageStatus;
+  source: string;
+  fetchedAt: string | null;
+  planName?: string;
+  windows: ProviderPlanUsageWindow[];
+  balance?: ProviderPlanUsageBalance;
+  overage?: {
+    enabled?: boolean;
+    exhausted?: boolean;
+    used?: number;
+  };
+  message?: string;
+  stale?: boolean;
+}
+
+export interface ProviderPlanUsageObserved {
+  requests: number;
+  tokens: number;
+  estimated_cost_usd: number;
+  attempts: number;
+  succeeded: number;
+  success_rate: number | null;
+  last_used_at: string | null;
+}
+
+export interface ProviderPlanUsage {
+  tenant_provider_id: string;
+  provider: string;
+  auth_type: AuthType;
+  label: string;
+  is_active: boolean;
+  connected_at: string;
+  observed_30d: ProviderPlanUsageObserved;
+  quota: ProviderPlanUsageQuota;
+}
+
+export interface ProviderPlanUsageResponse {
+  connections: ProviderPlanUsage[];
+}
+
+export function getProviderPlanUsage(connectionId?: string) {
+  return fetchJson<ProviderPlanUsageResponse>(
+    '/providers/plan-usage',
+    connectionId ? { connectionId } : undefined,
+    { cache: false },
+  );
+}
+
 const USAGE_ZERO: Omit<TenantProviderUsage, 'provider' | 'auth_type'> = {
   key_label: 'Default',
   consumption_tokens: 0,

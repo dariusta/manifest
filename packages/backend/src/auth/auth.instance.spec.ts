@@ -159,6 +159,16 @@ describe('auth.instance', () => {
 
       const config = mockBetterAuth.mock.calls[0][0];
       expect(config.trustedOrigins).toContain('https://app.example.com');
+      expect(config.trustedOrigins).toContain('http://app.example.com');
+    });
+
+    it('trusts both http and https for a public_url that Stackdome reports as http', () => {
+      process.env['BETTER_AUTH_URL'] = 'http://manifest.example.nip.io';
+      loadModule();
+
+      const config = mockBetterAuth.mock.calls[0][0];
+      expect(config.trustedOrigins).toContain('http://manifest.example.nip.io');
+      expect(config.trustedOrigins).toContain('https://manifest.example.nip.io');
     });
 
     it('includes CORS_ORIGIN when set', () => {

@@ -234,6 +234,14 @@ export class ProxyController {
     await this.handleProxyRequest(req, res, 'messages');
   }
 
+  @Post('messages/count_tokens')
+  async countTokens(
+    @Req() req: Request & { ingestionContext: IngestionContext },
+    @Res() res: ExpressResponse,
+  ): Promise<void> {
+    await this.handleProxyRequest(req, res, 'count_tokens');
+  }
+
   private async handleProxyRequest(
     req: Request & { ingestionContext: IngestionContext },
     res: ExpressResponse,

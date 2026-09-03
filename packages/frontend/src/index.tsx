@@ -46,6 +46,7 @@ const Subscriptions = lazyReload(() => import('./pages/providers/Subscriptions.j
 const Byok = lazyReload(() => import('./pages/providers/Byok.jsx'));
 const LocalProviders = lazyReload(() => import('./pages/providers/Local.jsx'));
 const ConnectionDetail = lazyReload(() => import('./pages/providers/ConnectionDetail.jsx'));
+const PlanUsage = lazyReload(() => import('./pages/providers/PlanUsage.jsx'));
 
 const GuestLayout: ParentComponent = (props) => (
   <GuestGuard>
@@ -96,6 +97,7 @@ render(
           <Route path="/providers/subscriptions" component={Subscriptions} />
           <Route path="/providers/usage-based" component={Byok} />
           <Route path="/providers/local" component={LocalProviders} />
+          <Route path="/providers/plan-usage" component={PlanUsage} />
           <Route path="/providers/connections/:connectionId" component={ConnectionDetail} />
           <Route path="/harnesses/:agentName" component={AgentGuard}>
             {/* Redirects: /limits → /guardrails, /messages → global /messages */}

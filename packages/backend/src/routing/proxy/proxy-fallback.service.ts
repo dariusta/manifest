@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import type { IncomingHttpHeaders } from 'http';
 import type { AuthType, ModelRoute } from 'manifest-shared';
 import { applyRequestParamDefaults } from 'manifest-shared';
 import { AgentModelParamsService } from '../routing-core/agent-model-params.service';
@@ -44,6 +45,7 @@ interface ForwardProviderOptions {
   paramMergeContext?: ParamMergeContext;
   tenantProviderId?: string | null;
   startProviderAttempt?: StartProviderAttempt;
+  inboundHeaders?: IncomingHttpHeaders;
 }
 
 import { ProviderKeyService } from '../routing-core/provider-key.service';
@@ -62,6 +64,7 @@ import { resolveEndpointKey } from './provider-endpoints';
 import { CopilotTokenService } from './copilot-token.service';
 import { ReasoningContentCache } from './reasoning-content-cache';
 import { buildProviderExtraHeaders } from './provider-hooks';
+import { extractHarnessIdentityHeaders } from './request-headers';
 import { shouldTriggerFallback } from './fallback-status-codes';
 import { inferProviderFromModelName } from '../../common/utils/provider-aliases';
 import { normalizeAnthropicShortModelId } from '../../common/utils/anthropic-model-id';
@@ -216,6 +219,7 @@ export class ProxyFallbackService {
     /** Dashboard URL embedded in mid-chain M100/M102 credential failure bodies. */
     credentialDashboardUrl?: string,
     providerCacheKey?: string,
+    inboundHeaders?: IncomingHttpHeaders,
   ): Promise<{
     success: {
       forward: ForwardResult;
@@ -352,6 +356,7 @@ export class ProxyFallbackService {
         paramMergeContext,
         tenantProviderId,
         startProviderAttempt,
+        inboundHeaders,
       });
 
       if (forward.response.ok) {
@@ -691,7 +696,11 @@ export class ProxyFallbackService {
       authType,
       opts.model,
     );
-    const extraHeaders = buildProviderExtraHeaders(provider, opts.providerCacheKey);
+    const extraHeaders = {
+      ...extractHarnessIdentityHeaders(opts.inboundHeaders),
+      ...buildProviderExtraHeaders(provider, opts.providerCacheKey),
+    };
+    const mergedExtraHeaders = Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined;
 
     // Copilot: exchange the stored GitHub OAuth token for a short-lived API token
     let effectiveKey = opts.apiKey;
@@ -781,7 +790,7 @@ export class ProxyFallbackService {
         resolveChatBody,
         stream,
         signal,
-        extraHeaders,
+        extraHeaders: mergedExtraHeaders,
         customEndpoint,
         authType,
         apiMode: opts.apiMode,

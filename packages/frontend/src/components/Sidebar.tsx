@@ -129,6 +129,14 @@ const Sidebar: Component<SidebarProps> = (props) => {
       >
         Subscriptions
       </A>
+      <A
+        href="/providers/plan-usage"
+        class="sidebar__link"
+        classList={{ active: isGlobalActive('/providers/plan-usage') }}
+        aria-current={isGlobalActive('/providers/plan-usage') ? 'page' : undefined}
+      >
+        Plan Usage
+      </A>
 
       {/* Harnesses — collapsible section with a + create button.
           The collapse toggle and the create button are sibling buttons (never

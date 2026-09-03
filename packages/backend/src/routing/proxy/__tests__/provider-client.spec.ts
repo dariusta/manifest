@@ -1560,6 +1560,31 @@ describe('ProviderClient', () => {
       expect(result.isGoogle).toBe(false);
     });
 
+    it('forwards count_tokens requests to Anthropic /v1/messages/count_tokens', async () => {
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ input_tokens: 12 }), { status: 200 }),
+      );
+
+      await client.forward({
+        provider: 'anthropic',
+        apiKey: 'sk-ant-test',
+        model: 'claude-sonnet-4-20250514',
+        body: {
+          model: 'claude-sonnet-4-20250514',
+          messages: [{ role: 'user', content: 'hi' }],
+        },
+        stream: false,
+        apiMode: 'count_tokens',
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.anthropic.com/v1/messages/count_tokens',
+        expect.objectContaining({ method: 'POST' }),
+      );
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.stream).toBeUndefined();
+    });
+
     it('does not include anthropic-beta header (caching is GA)', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 

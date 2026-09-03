@@ -760,7 +760,7 @@ export async function handleNonStreamResponse(
     // Always strip the internal side-channel — it must never reach the client,
     // even if the cache wasn't provided for this request.
     delete (responseBody as Record<string, unknown>)._extractedSignatures;
-  } else if (apiMode === 'messages' && forward.isAnthropic) {
+  } else if ((apiMode === 'messages' || apiMode === 'count_tokens') && forward.isAnthropic) {
     // Anthropic Messages inbound + Anthropic upstream: pass the response
     // body through unchanged so Anthropic-only content blocks
     // (`server_tool_use`, `web_search_tool_result`, etc.) survive. The

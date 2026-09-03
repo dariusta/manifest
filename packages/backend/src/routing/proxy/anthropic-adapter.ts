@@ -112,15 +112,39 @@ function hasOneHourCacheControl(value: unknown): boolean {
 }
 
 function tryAddCacheControl(
-  block: { cache_control?: unknown } | undefined,
+  block: { cache_control?: unknown; defer_loading?: unknown } | undefined,
   budget: { remaining: number },
 ): void {
-  if (!block || block.cache_control || budget.remaining <= 0) return;
+  if (!block || isDeferredTool(block) || block.cache_control || budget.remaining <= 0) return;
   block.cache_control = CACHE;
   budget.remaining -= 1;
 }
 
+function isDeferredTool(block: Record<string, unknown> | undefined): boolean {
+  return block?.defer_loading === true;
+}
+
+const EMPTY_LIST_TOOL_FILTERS = ['allowed_domains', 'blocked_domains'] as const;
+
+function stripEmptyDomainFilters(tool: Record<string, unknown>): void {
+  for (const key of EMPTY_LIST_TOOL_FILTERS) {
+    const value = tool[key];
+    if (Array.isArray(value) && value.length === 0) delete tool[key];
+  }
+}
+
+function hasDeferredTools(body: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(body.tools) &&
+    (body.tools as unknown[]).some((tool) => isObjectRecord(tool) && isDeferredTool(tool))
+  );
+}
+
 export function applyAnthropicAutomaticCacheControl(body: Record<string, unknown>): void {
+  if (hasDeferredTools(body)) {
+    delete body.cache_control;
+    return;
+  }
   if (body.cache_control !== undefined) return;
   if (countCacheControlBlocks(body) >= MAX_CACHE_CONTROL_BLOCKS) return;
   // Anthropic rejects a default five-minute automatic breakpoint when the
@@ -473,6 +497,11 @@ export function applyAnthropicMessagesMutations(
   const result: Record<string, unknown> = { ...body };
   result.max_tokens = resolveAnthropicMaxTokens(body);
   delete result.max_completion_tokens;
+  // Anthropic API keys reject Claude Code's `context_management` payload.
+  // Subscription OAuth still accepts it, so only strip on the API-key path.
+  if (!options?.injectSubscriptionIdentity) {
+    delete result.context_management;
+  }
   if (body.thinking !== undefined) {
     result.thinking = normalizeAnthropicThinking(body.thinking);
   }
@@ -509,7 +538,11 @@ export function applyAnthropicMessagesMutations(
   // doesn't bleed back into the inbound body. Server tools' `type` tag and
   // custom tools' `input_schema` both survive unchanged.
   if (Array.isArray(body.tools)) {
-    const tools = (body.tools as Array<Record<string, unknown>>).map((t) => ({ ...t }));
+    const tools = (body.tools as Array<Record<string, unknown>>).map((t) => {
+      const cloned = { ...t };
+      stripEmptyDomainFilters(cloned);
+      return cloned;
+    });
     tryAddCacheControl(tools[tools.length - 1], cacheBudget);
     result.tools = tools;
   }

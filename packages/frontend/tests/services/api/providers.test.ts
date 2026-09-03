@@ -4,6 +4,7 @@ import {
   connectionUsage,
   ensureManagedFreeProvider,
   getProviders,
+  getProviderPlanUsage,
   getProviderUsage,
   mergeUsage,
   type TenantProviderConfig,
@@ -157,6 +158,29 @@ describe('providers API client', () => {
     expect(api.getGlobalProviders).toBe(getProviders);
     expect(api.getGlobalProviderUsage).toBe(getProviderUsage);
     expect(api.mergeUsage).toBe(mergeUsage);
+    expect(api.getProviderPlanUsage).toBe(getProviderPlanUsage);
+  });
+
+  it('GETs plan usage from the dedicated endpoint', async () => {
+    const response = { connections: [] };
+    const fetchMock = setupFetch(response);
+
+    await expect(getProviderPlanUsage()).resolves.toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/providers/plan-usage');
+    expect(String(url)).not.toContain('connectionId=');
+    expect((init as RequestInit).credentials).toBe('include');
+  });
+
+  it('refreshes a single plan-usage connection by id', async () => {
+    const response = { connections: [{ tenant_provider_id: 'tp-1' }] };
+    const fetchMock = setupFetch(response);
+
+    await expect(getProviderPlanUsage('tp-1')).resolves.toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/providers/plan-usage');
+    expect(String(url)).toContain('connectionId=tp-1');
+    expect((init as RequestInit).credentials).toBe('include');
   });
 });
 

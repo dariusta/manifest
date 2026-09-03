@@ -106,6 +106,7 @@ function wireFormat(endpoint: ProviderEndpoint): ProviderWireFormat | undefined 
 const INPUT_WIRE_FORMATS: Record<ProxyApiMode, ProviderWireFormat> = {
   chat_completions: 'openai_chat_completions',
   messages: 'anthropic_messages',
+  count_tokens: 'anthropic_messages',
   responses: 'openai_responses',
 };
 
@@ -685,7 +686,7 @@ export class ProviderClient {
       // bugs that previously dropped Anthropic-native fields (server tool
       // `type` tags, cache_control placement, etc.) — see #1886.
       const requestBody =
-        ctx.apiMode === 'messages'
+        ctx.apiMode === 'messages' || ctx.apiMode === 'count_tokens'
           ? applyAnthropicMessagesMutations(body, {
               injectSubscriptionIdentity,
               thinkingLookup: ctx.thinkingLookup,
@@ -702,12 +703,19 @@ export class ProviderClient {
           ? structuredOutputToolName(requestSource, requestBody)
           : undefined;
       requestBody.model = bareModel;
-      if (stream) requestBody.stream = true;
+      if (stream && ctx.apiMode !== 'count_tokens') requestBody.stream = true;
       if (shouldApplyAnthropicAutomaticCacheControl(endpointKey)) {
         applyAnthropicAutomaticCacheControl(requestBody);
       }
+      const messagesPath = endpoint.buildPath(bareModel);
+      const path =
+        ctx.apiMode === 'count_tokens'
+          ? messagesPath.endsWith('/messages')
+            ? `${messagesPath}/count_tokens`
+            : '/v1/messages/count_tokens'
+          : messagesPath;
       return {
-        url: `${endpoint.baseUrl}${endpoint.buildPath(bareModel)}`,
+        url: `${endpoint.baseUrl}${path}`,
         headers: endpoint.buildHeaders(apiKey, authType),
         requestBody,
         structuredOutputToolName: syntheticToolName,

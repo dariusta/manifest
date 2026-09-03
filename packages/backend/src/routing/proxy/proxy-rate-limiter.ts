@@ -1,6 +1,5 @@
 import { Injectable, OnModuleDestroy, HttpStatus } from '@nestjs/common';
 import { ManifestError } from '../../common/errors/manifest-error';
-import { optionalPositiveInteger } from '../../config/env.util';
 
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_ENTRIES = 50_000;
@@ -8,7 +7,8 @@ const CLEANUP_INTERVAL_MS = 60_000;
 
 export const DEFAULT_RATE_MAX_REQUESTS = 200;
 export const DEFAULT_IP_RATE_MAX_REQUESTS = 500;
-export const DEFAULT_CONCURRENCY_MAX = 10;
+/** Always unlimited. Concurrent Claude/Cursor streams must not 429 with M203. */
+export const DEFAULT_CONCURRENCY_MAX = Infinity;
 
 /**
  * Resolve one proxy limit from the environment.
@@ -55,12 +55,7 @@ export class ProxyRateLimiter implements OnModuleDestroy {
       process.env['PROXY_IP_RATE_MAX_REQUESTS'],
       DEFAULT_IP_RATE_MAX_REQUESTS,
     );
-    const proxyConcurrencyMax = process.env['PROXY_CONCURRENCY_MAX'];
-    this.concurrencyMax =
-      proxyConcurrencyMax !== undefined
-        ? parseProxyLimit(proxyConcurrencyMax, DEFAULT_CONCURRENCY_MAX)
-        : (optionalPositiveInteger(process.env['MANIFEST_CONCURRENCY_MAX']) ??
-          DEFAULT_CONCURRENCY_MAX);
+    this.concurrencyMax = Infinity;
     this.cleanupTimer = setInterval(() => this.evictExpired(), CLEANUP_INTERVAL_MS);
     if (typeof this.cleanupTimer === 'object' && 'unref' in this.cleanupTimer) {
       this.cleanupTimer.unref();

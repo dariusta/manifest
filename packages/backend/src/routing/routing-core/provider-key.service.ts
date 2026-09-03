@@ -197,6 +197,27 @@ export class ProviderKeyService {
     return keys.length > 0;
   }
 
+  /**
+   * Decrypt one exact connection owned by the acting tenant. This seam is for
+   * backend-only provider probes that must never fall through to a sibling or
+   * borrowed credential.
+   */
+  async getOwnedProviderCredentialById(
+    tenantId: string,
+    tenantProviderId: string,
+  ): Promise<string | null> {
+    const record = await this.providerRepo.findOne({
+      where: { id: tenantProviderId, tenant_id: tenantId },
+      select: { id: true, tenant_id: true, api_key_encrypted: true },
+    });
+    if (!record?.api_key_encrypted) return null;
+    try {
+      return decrypt(record.api_key_encrypted, getEncryptionSecret());
+    } catch {
+      return null;
+    }
+  }
+
   async getProviderApiKey(
     tenantId: string,
     provider: string,

@@ -1,4 +1,4 @@
-import { sanitizeRequestHeaders } from './request-headers';
+import { extractHarnessIdentityHeaders, sanitizeRequestHeaders } from './request-headers';
 
 describe('sanitizeRequestHeaders', () => {
   it('returns null when no headers are provided', () => {
@@ -49,6 +49,8 @@ describe('sanitizeRequestHeaders', () => {
       'X-Forwarded-Host': 'app.manifest.build',
       'X-Forwarded-Proto': 'https',
       'X-Forwarded-Port': '443',
+      'X-Forwarded-Server': 'stackdome-agent-traefik-5b6689f9fb-ptc8x',
+      'X-Forwarded-Prefix': '/',
       'X-Real-Ip': '193.33.57.199',
       'X-Request-Start': '1779377596677',
       'X-Envoy-External-Address': '193.33.57.199',
@@ -129,5 +131,23 @@ describe('sanitizeRequestHeaders', () => {
     expect(serialized).toBeLessThanOrEqual(8192);
     expect(Object.keys(result!).length).toBeLessThan(20);
     expect(Object.keys(result!).length).toBeGreaterThan(0);
+  });
+});
+
+describe('extractHarnessIdentityHeaders', () => {
+  it('keeps Claude Code identity headers and drops auth', () => {
+    expect(
+      extractHarnessIdentityHeaders({
+        authorization: 'Bearer mnfst_secret',
+        'user-agent': 'claude-cli/2.1.258 (external, cli)',
+        'x-app': 'cli',
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+        'x-forwarded-for': '1.1.1.1',
+      }),
+    ).toEqual({
+      'user-agent': 'claude-cli/2.1.258 (external, cli)',
+      'x-app': 'cli',
+      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+    });
   });
 });

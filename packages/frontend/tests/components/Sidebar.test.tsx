@@ -125,6 +125,7 @@ describe("Sidebar — global nav links", () => {
     expect(screen.getByText("PROVIDERS")).toBeDefined();
     expect(screen.getByText("Subscriptions")).toBeDefined();
     expect(screen.getByText("Usage-based")).toBeDefined();
+    expect(screen.getByText("Plan Usage")).toBeDefined();
     await waitFor(() => expect(screen.getByText("Local")).toBeDefined());
   });
 
@@ -162,6 +163,7 @@ describe("Sidebar — global nav links", () => {
     expect(container.querySelector('a[href="/messages"]')).not.toBeNull();
     expect(container.querySelector('a[href="/providers/subscriptions"]')).not.toBeNull();
     expect(container.querySelector('a[href="/providers/usage-based"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/providers/plan-usage"]')).not.toBeNull();
     await waitFor(() =>
       expect(container.querySelector('a[href="/providers/local"]')).not.toBeNull(),
     );
@@ -182,6 +184,7 @@ describe("Sidebar — global nav links", () => {
       "/providers/local",
       "/providers/usage-based",
       "/providers/subscriptions",
+      "/providers/plan-usage",
       "/playground",
     ]);
     // The collapsible section replaces the old static link — there is no
@@ -215,6 +218,13 @@ describe("Sidebar — global nav active state", () => {
     mockPathname = "/providers/subscriptions";
     const { container } = render(() => <Sidebar />);
     const link = container.querySelector('a[href="/providers/subscriptions"]');
+    expect(link?.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("marks Plan Usage active on /providers/plan-usage", () => {
+    mockPathname = "/providers/plan-usage";
+    const { container } = render(() => <Sidebar />);
+    const link = container.querySelector('a[href="/providers/plan-usage"]');
     expect(link?.getAttribute("aria-current")).toBe("page");
   });
 

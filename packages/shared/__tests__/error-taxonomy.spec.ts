@@ -267,6 +267,23 @@ describe('isAnthropicExtraUsageError', () => {
     ).toBe(true);
   });
 
+  it('matches the third-party extra-usage billing envelope', () => {
+    expect(
+      isAnthropicExtraUsageError({
+        provider: 'anthropic',
+        httpStatus: 400,
+        errorBody: JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message:
+              'Third-party apps now draw from your extra usage, not your plan limits. Add more at claude.ai/settings/usage and keep going.',
+          },
+        }),
+      }),
+    ).toBe(true);
+  });
+
   it.each([
     ['openai', 400, errorBody],
     ['anthropic', 429, errorBody],

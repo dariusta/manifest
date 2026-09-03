@@ -89,6 +89,30 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     expect(sentHeaders).not.toHaveProperty('x-api-key');
   });
 
+  it('forwards Claude Code identity headers over the synthetic defaults', async () => {
+    mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+    await client.forward({
+      provider: 'anthropic',
+      apiKey: '«reda...…»',
+      model: 'claude-sonnet-4-20250514',
+      body,
+      stream: false,
+      authType: 'subscription',
+      extraHeaders: {
+        'user-agent': 'claude-cli/2.1.300 (external, cli)',
+        'x-app': 'cli',
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+      },
+    });
+
+    const sentHeaders = mockFetch.mock.calls[0][1].headers as Record<string, string>;
+    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.300 (external, cli)');
+    expect(sentHeaders['x-app']).toBe('cli');
+    expect(sentHeaders.Authorization).toBe('Bearer «reda...…»');
+    expect(sentHeaders).not.toHaveProperty('x-api-key');
+  });
+
   it('OpenAI api_key path sends exactly Authorization Bearer (and never x-api-key)', async () => {
     mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 

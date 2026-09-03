@@ -2508,6 +2508,64 @@
         "auth.css"
       ]
     },
+    "plan-usage-badge": {
+      "classes": [
+        "plan-usage-badge",
+        "plan-usage-badge--cached",
+        "plan-usage-badge--live",
+        "plan-usage-badge--needs_reconnect",
+        "plan-usage-badge--unavailable",
+        "plan-usage-badge--unsupported"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-card": {
+      "classes": [
+        "plan-usage-card",
+        "plan-usage-card__header",
+        "plan-usage-card__identity",
+        "plan-usage-card__label",
+        "plan-usage-card__name"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-grid": {
+      "classes": [
+        "plan-usage-grid"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-message": {
+      "classes": [
+        "plan-usage-message"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-observed": {
+      "classes": [
+        "plan-usage-observed"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-window": {
+      "classes": [
+        "plan-usage-window",
+        "plan-usage-window__meta"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
     "playground": {
       "classes": [
         "playground",
@@ -5059,6 +5117,7 @@
       "components/AutofixKpiCards.tsx",
       "pages/GlobalOverview.tsx",
       "pages/providers/ConnectionDetail.tsx",
+      "pages/providers/PlanUsage.tsx",
       "pages/providers/ProviderConnectionsPage.tsx"
     ],
     "discovery.css": [
@@ -5078,6 +5137,9 @@
       "pages/GlobalOverview.tsx",
       "pages/MessageLog.tsx",
       "pages/Overview.tsx"
+    ],
+    "plan-usage.css": [
+      "pages/providers/PlanUsage.tsx"
     ],
     "playground.css": [
       "pages/Playground.tsx"
@@ -5129,8 +5191,8 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 316,
-    "classes": 1717,
+    "blocks": 322,
+    "classes": 1733,
     "canonicalRules": 47,
     "ghostRules": 47
   }

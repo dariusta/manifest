@@ -63,6 +63,7 @@ import { toChatCompletionsRequest } from './responses-adapter';
 import { messagesToChatCompletionsRequest } from './anthropic-messages-adapter';
 import { isResponsesShapedChatBody } from './cursor-compat';
 import { effectiveRoutesForResponseMode } from '../routing-core/response-mode-guard';
+import { subscriptionPreferredRoute } from '../routing-core/route-helpers';
 import {
   explicitModelRouteCandidate,
   OPENAI_MODEL_ID_AUTO,
@@ -406,6 +407,7 @@ export class ProxyService {
           primaryKeyLabel: route.keyLabel ?? undefined,
           startProviderAttempt,
           credentialDashboardUrl: dashboardUrl,
+          inboundHeaders: headers,
         });
         if (fallbackResult) return fallbackResult;
       }
@@ -443,6 +445,7 @@ export class ProxyService {
       paramMergeContext,
       tenantProviderId: credentials.tenantProviderId,
       startProviderAttempt,
+      inboundHeaders: headers,
     });
     const autofixOriginalAttempt = forward.attempt;
     const autofixOriginalProviderCallStarted = forward.providerCallStarted;
@@ -527,6 +530,7 @@ export class ProxyService {
         primaryKeyLabel: credentials.keyLabel,
         startProviderAttempt,
         credentialDashboardUrl: dashboardUrl,
+        inboundHeaders: headers,
       });
       if (fallbackResult) {
         return {
@@ -633,6 +637,7 @@ export class ProxyService {
           primaryKeyLabel: credentials.keyLabel,
           startProviderAttempt,
           credentialDashboardUrl: dashboardUrl,
+          inboundHeaders: headers,
         });
         if (fallbackResult) {
           return {
@@ -700,7 +705,9 @@ export class ProxyService {
     body: Record<string, unknown>,
   ): Record<string, unknown> | undefined {
     if (apiMode === 'responses') return toChatCompletionsRequest(body);
-    if (apiMode === 'messages') return messagesToChatCompletionsRequest(body);
+    if (apiMode === 'messages' || apiMode === 'count_tokens') {
+      return messagesToChatCompletionsRequest(body);
+    }
     // Cursor's Agent and Plan modes POST a Responses-shaped body to
     // /chat/completions (see cursor-compat.ts). Translating it here gives the
     // scorer real `messages` to route on and hands the provider a body it
@@ -821,6 +828,7 @@ export class ProxyService {
       paramMergeContext: explicitModelOverride ? undefined : { agentId: ctx.agentId, scopeKey },
       tenantProviderId: credentials.tenantProviderId,
       startProviderAttempt: ctx.startProviderAttempt,
+      inboundHeaders: ctx.headers,
     });
   }
 
@@ -892,7 +900,7 @@ export class ProxyService {
       // row lands in agent_messages blamed on the provider.
       throw new ManifestError('M300', HttpStatus.BAD_REQUEST);
     }
-    if (apiMode === 'chat_completions') {
+    if (apiMode === 'chat_completions' || apiMode === 'messages' || apiMode === 'count_tokens') {
       sanitizeNullContent(messages as Record<string, unknown>[]);
     }
   }
@@ -1004,6 +1012,14 @@ export class ProxyService {
     const models = await this.modelDiscovery.getModelsForAgent(tenantId, agentId);
     const catalogRoute = routeForOpenAiModelId(requestedModel, models);
     if (catalogRoute) return this.explicitRouting(agentId, tenantId, catalogRoute);
+
+    // A bare ID served by both the subscription and api_key connections of
+    // one provider is not ambiguous: the flat-fee subscription already covers
+    // the request, so route it there instead of silently metering the key.
+    if (!requestedModel.includes('/')) {
+      const preferred = subscriptionPreferredRoute(requestedModel, models);
+      if (preferred) return this.explicitRouting(agentId, tenantId, preferred);
+    }
 
     // A bare ID already present under multiple connections is ambiguous, not
     // undiscovered. Preserve M302 instead of silently picking an auth type.
@@ -1171,6 +1187,7 @@ export class ProxyService {
     startProviderAttempt?: StartProviderAttempt;
     /** Dashboard URL embedded in mid-chain M100/M102 credential failure bodies. */
     credentialDashboardUrl?: string;
+    inboundHeaders?: ProxyRequestOptions['headers'];
   }): Promise<ProxyResult | null> {
     const {
       agentId,
@@ -1221,6 +1238,7 @@ export class ProxyService {
       args.startProviderAttempt,
       args.credentialDashboardUrl,
       providerCacheKey,
+      args.inboundHeaders,
     );
 
     this.recordTierIfScoring(sessionMomentumKey, resolved.tier);

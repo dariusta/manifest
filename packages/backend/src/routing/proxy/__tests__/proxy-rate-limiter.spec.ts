@@ -10,9 +10,11 @@ import {
 describe('ProxyRateLimiter', () => {
   let limiter: ProxyRateLimiter;
   const originalConcurrencyMax = process.env.MANIFEST_CONCURRENCY_MAX;
+  const originalProxyConcurrencyMax = process.env.PROXY_CONCURRENCY_MAX;
 
   beforeEach(() => {
     delete process.env.MANIFEST_CONCURRENCY_MAX;
+    delete process.env.PROXY_CONCURRENCY_MAX;
     limiter = new ProxyRateLimiter();
   });
 
@@ -22,6 +24,11 @@ describe('ProxyRateLimiter', () => {
       delete process.env.MANIFEST_CONCURRENCY_MAX;
     } else {
       process.env.MANIFEST_CONCURRENCY_MAX = originalConcurrencyMax;
+    }
+    if (originalProxyConcurrencyMax === undefined) {
+      delete process.env.PROXY_CONCURRENCY_MAX;
+    } else {
+      process.env.PROXY_CONCURRENCY_MAX = originalProxyConcurrencyMax;
     }
   });
 
@@ -301,10 +308,9 @@ describe('ProxyRateLimiter', () => {
       process.env.MANIFEST_CONCURRENCY_MAX = '40';
       limiter = new ProxyRateLimiter();
 
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 50; i++) {
         expect(() => limiter.acquireSlot('tenant-1')).not.toThrow();
       }
-      expect(() => limiter.acquireSlot('tenant-1')).toThrow(HttpException);
     });
 
     it.each([
@@ -318,46 +324,30 @@ describe('ProxyRateLimiter', () => {
       '0b101',
       '2e1',
       ' 40 ',
-    ])('falls back to 10 when MANIFEST_CONCURRENCY_MAX is %p', (configuredValue) => {
+    ])('leaves concurrency unlimited when MANIFEST_CONCURRENCY_MAX is %p', (configuredValue) => {
       limiter.onModuleDestroy();
       process.env.MANIFEST_CONCURRENCY_MAX = configuredValue;
       limiter = new ProxyRateLimiter();
 
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 50; i++) {
         expect(() => limiter.acquireSlot('tenant-1')).not.toThrow();
       }
-      expect(() => limiter.acquireSlot('tenant-1')).toThrow(HttpException);
     });
 
-    it('allows up to 10 concurrent slots', () => {
-      for (let i = 0; i < 10; i++) {
+    it('does not cap concurrent slots by default', () => {
+      for (let i = 0; i < 50; i++) {
         expect(() => limiter.acquireSlot('user-1')).not.toThrow();
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(((limiter as any).concurrency as Map<string, number>).size).toBe(0);
     });
 
-    it('throws 429 when concurrency limit reached', () => {
-      for (let i = 0; i < 10; i++) {
-        limiter.acquireSlot('user-1');
-      }
-
-      expect(() => limiter.acquireSlot('user-1')).toThrow(HttpException);
-    });
-
-    it('throws with correct status and message on concurrency exceeded', () => {
-      for (let i = 0; i < 10; i++) {
-        limiter.acquireSlot('user-1');
-      }
-
-      try {
-        limiter.acquireSlot('user-1');
-        fail('Expected HttpException');
-      } catch (err) {
-        expect(err).toBeInstanceOf(HttpException);
-        expect((err as HttpException).getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
-        expect((err as HttpException).message).toContain('[🦚 Manifest M203]');
-        expect((err as HttpException).message).toContain(
-          'Too many concurrent requests. Give it a moment.',
-        );
+    it('ignores PROXY_CONCURRENCY_MAX and never emits M203', () => {
+      limiter.onModuleDestroy();
+      process.env.PROXY_CONCURRENCY_MAX = '10';
+      limiter = new ProxyRateLimiter();
+      for (let i = 0; i < 50; i++) {
+        expect(() => limiter.acquireSlot('user-1')).not.toThrow();
       }
     });
 
@@ -376,7 +366,7 @@ describe('ProxyRateLimiter', () => {
         limiter.acquireSlot('user-1');
       }
 
-      expect(() => limiter.acquireSlot('user-1')).toThrow(HttpException);
+      expect(() => limiter.acquireSlot('user-1')).not.toThrow();
       expect(() => limiter.acquireSlot('user-2')).not.toThrow();
     });
 
@@ -401,7 +391,6 @@ describe('ProxyRateLimiter', () => {
       for (let i = 0; i < 10; i++) {
         expect(() => limiter.acquireSlot('user-1')).not.toThrow();
       }
-      expect(() => limiter.acquireSlot('user-1')).toThrow(HttpException);
     });
   });
 
@@ -500,7 +489,7 @@ describe('ProxyRateLimiter env overrides', () => {
     process.env['PROXY_CONCURRENCY_MAX'] = '0';
     limiter = new ProxyRateLimiter();
 
-    for (let i = 0; i < DEFAULT_CONCURRENCY_MAX * 100; i++) {
+    for (let i = 0; i < 200; i++) {
       expect(() => limiter!.acquireSlot('user-1')).not.toThrow();
     }
     // Nothing is counted, so nothing is stored either.
@@ -538,9 +527,9 @@ describe('ProxyRateLimiter env overrides', () => {
     process.env['PROXY_IP_RATE_MAX_REQUESTS'] = '4';
     limiter = new ProxyRateLimiter();
 
-    limiter.acquireSlot('user-1');
-    limiter.acquireSlot('user-1');
-    expect(() => limiter!.acquireSlot('user-1')).toThrow(HttpException);
+    for (let i = 0; i < 20; i++) {
+      expect(() => limiter!.acquireSlot('user-1')).not.toThrow();
+    }
 
     for (let i = 0; i < 3; i++) limiter.checkLimit('user-1');
     expect(() => limiter!.checkLimit('user-1')).toThrow(HttpException);
@@ -549,13 +538,13 @@ describe('ProxyRateLimiter env overrides', () => {
     expect(() => limiter!.checkIpLimit('10.0.0.1')).toThrow(HttpException);
   });
 
-  it('prefers PROXY_CONCURRENCY_MAX when both concurrency variables are set', () => {
+  it('prefers unlimited concurrency even when both concurrency variables are set', () => {
     process.env['MANIFEST_CONCURRENCY_MAX'] = '40';
     process.env['PROXY_CONCURRENCY_MAX'] = '2';
     limiter = new ProxyRateLimiter();
 
-    limiter.acquireSlot('user-1');
-    limiter.acquireSlot('user-1');
-    expect(() => limiter!.acquireSlot('user-1')).toThrow(HttpException);
+    for (let i = 0; i < 20; i++) {
+      expect(() => limiter!.acquireSlot('user-1')).not.toThrow();
+    }
   });
 });

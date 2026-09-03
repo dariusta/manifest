@@ -1414,21 +1414,23 @@ describe('ProxyService — orchestration', () => {
       expect(autofixService.maybeHeal).not.toHaveBeenCalled();
     });
 
-    it('returns model-not-available when two connections carry the same bare name', async () => {
+    it('returns model-not-available when two providers carry the same bare name', async () => {
       modelDiscovery.getModelsForAgent.mockResolvedValue([
-        discoveredModel({ id: 'gpt-4o', provider: 'openai', authType: 'api_key' }),
-        discoveredModel({ id: 'gpt-4o', provider: 'openai', authType: 'subscription' }),
+        discoveredModel({ id: 'claude-sonnet-4', provider: 'anthropic', authType: 'subscription' }),
+        discoveredModel({ id: 'claude-sonnet-4', provider: 'openrouter', authType: 'api_key' }),
       ]);
 
       const result = await svc.proxyRequest(
-        baseOpts({ body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] } }),
+        baseOpts({
+          body: { model: 'claude-sonnet-4', messages: [{ role: 'user', content: 'hi' }] },
+        }),
       );
       const body = await result.forward.response.text();
 
       expect(resolveService.resolve).not.toHaveBeenCalled();
       expect(fallbackService.tryForwardToProvider).not.toHaveBeenCalled();
       expect(body).toContain('M302');
-      expect(body).toContain('gpt-4o');
+      expect(body).toContain('claude-sonnet-4');
     });
 
     it('forwards an uncatalogued provider-qualified model through a connected provider', async () => {
@@ -1532,6 +1534,34 @@ describe('ProxyService — orchestration', () => {
           provider: 'anthropic',
           authType: 'subscription',
           model: 'claude-new',
+        }),
+      );
+    });
+
+    it('routes a catalogued bare model to the subscription when the same provider also has an api_key', async () => {
+      modelDiscovery.getModelsForAgent.mockResolvedValue([
+        discoveredModel({ id: 'gpt-4o', provider: 'openai', authType: 'api_key' }),
+        discoveredModel({ id: 'gpt-4o', provider: 'openai', authType: 'subscription' }),
+      ]);
+      providerKeyService.selectProviderKey.mockResolvedValue({
+        apiKey: 'oat-token',
+        id: 'tp-sub',
+        region: null,
+        label: 'Personal',
+        priority: 0,
+      });
+
+      await svc.proxyRequest(
+        baseOpts({
+          body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
+        }),
+      );
+
+      expect(fallbackService.tryForwardToProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openai',
+          authType: 'subscription',
+          model: 'gpt-4o',
         }),
       );
     });

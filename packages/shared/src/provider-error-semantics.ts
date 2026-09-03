@@ -4,7 +4,8 @@ export interface ProviderErrorSignals {
   errorBody?: string | null;
 }
 
-const ANTHROPIC_EXTRA_USAGE_MESSAGE = /\byou(?: are|['’]re) out of extra usage\b/i;
+const ANTHROPIC_EXTRA_USAGE_MESSAGE =
+  /\b(?:you(?: are|['’]re) out of extra usage|third-party apps now draw from your extra usage)\b/i;
 
 /**
  * Anthropic reports exhausted Claude subscription extra usage as a 400

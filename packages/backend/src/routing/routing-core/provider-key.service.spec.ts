@@ -197,6 +197,51 @@ describe('ProviderKeyService — selection projections', () => {
     });
   });
 
+  describe('getOwnedProviderCredentialById', () => {
+    it('decrypts only the exact connection owned by the tenant', async () => {
+      const secret = process.env['BETTER_AUTH_SECRET'] as string;
+      const providerRepo = {
+        findOne: jest.fn().mockResolvedValue({
+          id: 'tp-owned',
+          tenant_id: 'tenant-1',
+          api_key_encrypted: encrypt('exact-secret', secret),
+        }),
+      };
+      svc = new ProviderKeyService(
+        providerRepo as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        null,
+      );
+
+      await expect(svc.getOwnedProviderCredentialById('tenant-1', 'tp-owned')).resolves.toBe(
+        'exact-secret',
+      );
+      expect(providerRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'tp-owned', tenant_id: 'tenant-1' },
+        select: { id: true, tenant_id: true, api_key_encrypted: true },
+      });
+    });
+
+    it('returns null without decrypting when the exact tenant-owned row is absent', async () => {
+      const providerRepo = { findOne: jest.fn().mockResolvedValue(null) };
+      svc = new ProviderKeyService(
+        providerRepo as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        null,
+      );
+
+      await expect(
+        svc.getOwnedProviderCredentialById('tenant-1', 'borrowed-id'),
+      ).resolves.toBeNull();
+    });
+  });
+
   describe('getProviderApiKey / getProviderRegion projections', () => {
     it('getProviderApiKey returns the selected key apiKey', async () => {
       jest.spyOn(svc, 'getProviderKeys').mockResolvedValue([key({ apiKey: 'sk-x' })]);

@@ -513,12 +513,17 @@ describe('LocalServerDetailView', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(mockUpdate).toHaveBeenCalledWith('a1', 'cp-42', {
-        models: expect.arrayContaining([
-          expect.objectContaining({ model_name: 'alpha' }),
-          expect.objectContaining({ model_name: 'beta' }),
-        ]),
-      });
+      expect(mockUpdate).toHaveBeenCalledWith(
+        'a1',
+        'cp-42',
+        expect.objectContaining({
+          base_url: expect.any(String),
+          models: expect.arrayContaining([
+            expect.objectContaining({ model_name: 'alpha' }),
+            expect.objectContaining({ model_name: 'beta' }),
+          ]),
+        }),
+      );
       expect(onConnected).toHaveBeenCalled();
       expect(mockToast.success).toHaveBeenCalledWith(expect.stringContaining('updated'));
     });
@@ -820,6 +825,89 @@ describe('LocalServerDetailView', () => {
 
     await waitFor(() => {
       expect(container.querySelector('.provider-detail__caveat')!.textContent).toContain('--bind 0.0.0.0');
+    });
+  });
+
+  it('probes and connects a remote LM Studio URL entered by the user', async () => {
+    mockProbe.mockResolvedValue({ models: [{ model_name: 'remote-model' }] });
+    mockCreate.mockResolvedValue({ id: 'cp-remote' });
+
+    const { container } = render(() => (
+      <LocalServerDetailView
+        agentName="a1"
+        provider={lmsProv}
+        onConnected={vi.fn()}
+        onBack={vi.fn()}
+      />
+    ));
+
+    const input = await waitFor(() => {
+      const field = container.querySelector('input[aria-label="Base URL"]') as HTMLInputElement | null;
+      if (!field) throw new Error('base url input missing');
+      return field;
+    });
+    fireEvent.input(input, { target: { value: 'http://192.168.1.20:1234/v1' } });
+
+    await waitFor(() => {
+      expect(mockProbe).toHaveBeenCalledWith('a1', 'http://192.168.1.20:1234/v1');
+    });
+
+    const btn = await waitFor(() => {
+      const b = Array.from(container.querySelectorAll('button')).find((x) =>
+        x.textContent?.includes('Connect 1 model'),
+      );
+      if (!b) throw new Error('connect button missing');
+      return b as HTMLButtonElement;
+    });
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(mockCreate).toHaveBeenCalledWith(
+        'a1',
+        expect.objectContaining({ base_url: 'http://192.168.1.20:1234/v1' }),
+      );
+    });
+  });
+
+  it('saves an edited remote base URL for an existing LM Studio provider', async () => {
+    mockProbe.mockResolvedValue({ models: [{ model_name: 'kept' }] });
+    mockUpdate.mockResolvedValue({ id: 'cp-1' });
+
+    const { container } = render(() => (
+      <LocalServerDetailView
+        agentName="a1"
+        provider={lmsProv}
+        editData={{
+          id: 'cp-1',
+          name: 'LM Studio',
+          base_url: 'http://localhost:1234/v1',
+          models: [{ model_name: 'kept', input_price_per_million_tokens: 0, output_price_per_million_tokens: 0 }],
+        } as never}
+        onConnected={vi.fn()}
+        onBack={vi.fn()}
+      />
+    ));
+
+    const input = await waitFor(() => {
+      const field = container.querySelector('input[aria-label="Base URL"]') as HTMLInputElement | null;
+      if (!field) throw new Error('base url input missing');
+      return field;
+    });
+    fireEvent.input(input, { target: { value: 'http://10.0.0.8:1234/v1' } });
+
+    const save = await waitFor(() => {
+      const b = Array.from(container.querySelectorAll('button')).find((x) => x.textContent === 'Save changes');
+      if (!b) throw new Error('save missing');
+      return b as HTMLButtonElement;
+    });
+    fireEvent.click(save);
+
+    await waitFor(() => {
+      expect(mockUpdate).toHaveBeenCalledWith(
+        'a1',
+        'cp-1',
+        expect.objectContaining({ base_url: 'http://10.0.0.8:1234/v1' }),
+      );
     });
   });
 });

@@ -44,14 +44,23 @@ if (nodeEnv !== 'test' && (!betterAuthSecret || betterAuthSecret.length < 32)) {
   throw new Error('BETTER_AUTH_SECRET must be set to a value of at least 32 characters');
 }
 
+function addTrustedOrigin(origins: string[], value: string | undefined): void {
+  if (!value) return;
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) return;
+  origins.push(trimmed);
+  try {
+    const parsed = new URL(trimmed);
+    origins.push(`https://${parsed.host}`, `http://${parsed.host}`);
+  } catch {
+    // Keep the raw value; Better Auth still needs an exact origin match.
+  }
+}
+
 function buildTrustedOrigins(): string[] {
   const origins: string[] = [];
-  if (process.env['BETTER_AUTH_URL']) {
-    origins.push(process.env['BETTER_AUTH_URL']);
-  }
-  if (process.env['CORS_ORIGIN']) {
-    origins.push(process.env['CORS_ORIGIN']);
-  }
+  addTrustedOrigin(origins, process.env['BETTER_AUTH_URL']);
+  addTrustedOrigin(origins, process.env['CORS_ORIGIN']);
   if (isDev) {
     origins.push(
       `http://localhost:3000`,

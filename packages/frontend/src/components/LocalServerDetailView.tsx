@@ -1,4 +1,4 @@
-import { createResource, createSignal, For, Show, type Component } from 'solid-js';
+import { createEffect, createResource, createSignal, For, Show, type Component } from 'solid-js';
 import { LOCAL_SERVER_HINTS, type LocalServerHint } from 'manifest-shared';
 import type { ProviderDef } from '../services/providers.js';
 import {
@@ -38,12 +38,15 @@ const LocalServerDetailView: Component<Props> = (props) => {
   const hint = (): LocalServerHint | undefined => LOCAL_SERVER_HINTS[props.provider.id];
 
   const [hostResource] = createResource(() => checkLocalLlmHost());
-  // `defaultLocalPort` is the gate that routes the tile click here in
-  // the first place (see ProviderApiKeyTab), so it's always defined.
-  const resolvedBaseUrl = () => {
-    if (props.editData) return props.editData.base_url;
-    return `http://${hostResource() ?? 'localhost'}:${props.provider.defaultLocalPort!}/v1`;
-  };
+  const defaultBaseUrl = () =>
+    `http://${hostResource() ?? 'localhost'}:${props.provider.defaultLocalPort!}/v1`;
+  const [baseUrlDraft, setBaseUrlDraft] = createSignal(props.editData?.base_url ?? '');
+  createEffect(() => {
+    if (!props.editData && !baseUrlDraft() && hostResource()) {
+      setBaseUrlDraft(defaultBaseUrl());
+    }
+  });
+  const resolvedBaseUrl = () => baseUrlDraft().trim() || defaultBaseUrl();
 
   // In edit mode, pre-select only the models that are already connected.
   const initialSelected = () =>
@@ -103,6 +106,7 @@ const LocalServerDetailView: Component<Props> = (props) => {
     try {
       if (props.editData) {
         await updateCustomProvider(props.agentName, props.editData.id, {
+          base_url: resolvedBaseUrl(),
           models: picked.map((name) => ({
             model_name: name,
             input_price_per_million_tokens: 0,
@@ -115,7 +119,7 @@ const LocalServerDetailView: Component<Props> = (props) => {
       } else {
         await createCustomProvider(props.agentName, {
           name: props.provider.name,
-          base_url: state.baseUrl,
+          base_url: resolvedBaseUrl(),
           models: picked.map((name) => ({
             model_name: name,
             input_price_per_million_tokens: 0,
@@ -197,6 +201,18 @@ const LocalServerDetailView: Component<Props> = (props) => {
       <div class="routing-modal__subtitle" style="margin-bottom: 20px;">
         {props.provider.subtitle}
       </div>
+
+      <label class="field" style="display: grid; gap: 6px; margin-bottom: 16px;">
+        <span>Base URL</span>
+        <input
+          class="input"
+          aria-label="Base URL"
+          value={baseUrlDraft()}
+          placeholder={defaultBaseUrl()}
+          onInput={(event) => setBaseUrlDraft(event.currentTarget.value)}
+          onChange={() => retry()}
+        />
+      </label>
 
       <Show
         when={!probe.loading || probe()}

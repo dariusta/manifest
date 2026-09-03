@@ -14,6 +14,7 @@ export * from './api/workspaces.js';
 export {
   getProviders as getGlobalProviders,
   getProviderUsage as getGlobalProviderUsage,
+  getProviderPlanUsage,
   mergeUsage,
   type ProvidersResponse,
   type ProviderUsageResponse,

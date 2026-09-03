@@ -2220,6 +2220,31 @@ describe('Anthropic Adapter', () => {
   });
 
   describe('applyAnthropicMessagesMutations', () => {
+    it('strips context_management for API-key Anthropic requests', () => {
+      const inbound = {
+        messages: [{ role: 'user', content: 'hi' }],
+        context_management: { edits: [] },
+      };
+
+      const result = applyAnthropicMessagesMutations(inbound);
+
+      expect(result.context_management).toBeUndefined();
+      expect(inbound.context_management).toEqual({ edits: [] });
+    });
+
+    it('keeps context_management on the subscription identity path', () => {
+      const inbound = {
+        messages: [{ role: 'user', content: 'hi' }],
+        context_management: { edits: [] },
+      };
+
+      const result = applyAnthropicMessagesMutations(inbound, {
+        injectSubscriptionIdentity: true,
+      });
+
+      expect(result.context_management).toEqual({ edits: [] });
+    });
+
     it('drops the manual budget from native adaptive thinking without mutating the body', () => {
       const inbound = {
         messages: [{ role: 'user', content: 'hi' }],
@@ -2273,6 +2298,15 @@ describe('Anthropic Adapter', () => {
       });
       // Inbound array isn't mutated.
       expect((inbound.tools[2] as Record<string, unknown>).cache_control).toBeUndefined();
+    });
+
+    it('strips empty Anthropic domain filters that the API rejects', () => {
+      const result = applyAnthropicMessagesMutations({
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [{ type: 'web_search_20250305', name: 'web_search', allowed_domains: [] }],
+      });
+      const tools = result.tools as Array<Record<string, unknown>>;
+      expect(tools[0].allowed_domains).toBeUndefined();
     });
 
     it('places cache_control on the last system block when system is an array', () => {

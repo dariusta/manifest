@@ -6,6 +6,7 @@ import {
   readOverrideRoute,
   routeMatches,
   unambiguousRoute,
+  subscriptionPreferredRoute,
 } from '../route-helpers';
 import type { ModelRoute } from 'manifest-shared';
 import type { DiscoveredModel } from '../../../model-discovery/model-fetcher';
@@ -123,6 +124,32 @@ describe('route-helpers', () => {
     it('returns null when matched model has no authType', () => {
       const list = [discovered('gpt-4o', 'openai', undefined as never)];
       expect(unambiguousRoute('gpt-4o', list)).toBeNull();
+    });
+  });
+
+  describe('subscriptionPreferredRoute', () => {
+    it('prefers the subscription when the same provider also has an api_key', () => {
+      const list = [
+        discovered('gpt-4o', 'openai', 'api_key'),
+        discovered('gpt-4o', 'openai', 'subscription'),
+      ];
+      expect(subscriptionPreferredRoute('gpt-4o', list)).toEqual(
+        route('openai', 'subscription', 'gpt-4o'),
+      );
+    });
+    it('returns null for a cross-provider collision', () => {
+      const list = [
+        discovered('claude-sonnet-4', 'anthropic', 'subscription'),
+        discovered('claude-sonnet-4', 'openrouter', 'api_key'),
+      ];
+      expect(subscriptionPreferredRoute('claude-sonnet-4', list)).toBeNull();
+    });
+    it('returns null when a local route is involved', () => {
+      const list = [
+        discovered('llama3', 'ollama', 'local'),
+        discovered('llama3', 'ollama', 'api_key'),
+      ];
+      expect(subscriptionPreferredRoute('llama3', list)).toBeNull();
     });
   });
 

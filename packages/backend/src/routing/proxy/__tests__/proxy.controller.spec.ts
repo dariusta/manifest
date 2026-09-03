@@ -1207,6 +1207,43 @@ describe('ProxyController', () => {
     expect(json.usage).toMatchObject({ input_tokens: 4, output_tokens: 2 });
   });
 
+  it('should expose /v1/messages/count_tokens for Claude Code', async () => {
+    const responseBody = { input_tokens: 42 };
+    const mockProviderResp = new Response(JSON.stringify(responseBody), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    proxyService.proxyRequest.mockResolvedValue({
+      forward: {
+        response: mockProviderResp,
+        isGoogle: false,
+        isAnthropic: true,
+        isChatGpt: false,
+      },
+      meta: {
+        tier: 'direct',
+        model: 'claude-sonnet-4',
+        provider: 'anthropic',
+        confidence: 1,
+        reason: 'direct',
+      },
+    });
+
+    const req = mockRequest({
+      model: 'claude-sonnet-4',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    const { res } = mockResponse();
+
+    await controller.countTokens(req as never, res as never);
+
+    expect(proxyService.proxyRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ apiMode: 'count_tokens' }),
+    );
+    expect((res.json as jest.Mock).mock.calls[0][0]).toEqual({ input_tokens: 42 });
+  });
+
   it('preserves an Anthropic 400 diagnostic on /v1/messages in production', async () => {
     const originalEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
