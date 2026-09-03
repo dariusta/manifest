@@ -13,6 +13,7 @@ resources:
         protocol: HTTP
         public: true
         subdomain: manifest
+        tls: true
     env:
       PORT: '2099'
       BIND_ADDRESS: 0.0.0.0
