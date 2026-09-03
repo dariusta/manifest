@@ -195,6 +195,8 @@ export interface ProviderPlanUsage {
   connected_at: string;
   observed_30d: ProviderPlanUsageObserved;
   quota: ProviderPlanUsageQuota;
+  /** Configured manual allowance independent of the effective quota. */
+  manual_usage_limit_usd?: number | null;
 }
 
 export interface ProviderPlanUsageResponse {

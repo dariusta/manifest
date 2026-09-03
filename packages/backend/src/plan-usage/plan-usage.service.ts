@@ -42,6 +42,12 @@ export interface PlanUsageRow {
   connected_at: string;
   observed_30d: ObservedPlanUsage;
   quota: PlanUsageQuota;
+  /**
+   * Operator-configured manual allowance, independent of which quota is
+   * currently effective. The UI needs this even when live/cached provider
+   * data is authoritative, so a stored limit stays visible and clearable.
+   */
+  manual_usage_limit_usd: number | null;
 }
 
 interface CacheEntry {
@@ -193,6 +199,10 @@ export class PlanUsageService {
           connected_at: connection.connected_at,
           observed_30d: observed,
           quota,
+          manual_usage_limit_usd:
+            connection.manual_usage_limit_usd != null
+              ? Number(connection.manual_usage_limit_usd)
+              : null,
         };
       },
     );

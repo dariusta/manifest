@@ -172,6 +172,7 @@ describe('Plan Usage page', () => {
       connections: [
         {
           ...unsupportedOpenAI,
+          manual_usage_limit_usd: 125.5,
           quota: {
             status: 'manual',
             source: 'manual',

@@ -238,10 +238,11 @@ const PlanUsage: Component = () => {
 const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> = (props) => {
   const observed = () => props.row.observed_30d;
   const quota = () => props.row.quota;
+  // Seed from the configured limit (independent of the effective quota) so a
+  // stored allowance stays visible and clearable even while live/cached
+  // provider data is authoritative.
   const [manualLimit, setManualLimit] = createSignal(
-    props.row.quota.status === 'manual' && props.row.quota.balance?.limit != null
-      ? String(props.row.quota.balance.limit)
-      : '',
+    props.row.manual_usage_limit_usd != null ? String(props.row.manual_usage_limit_usd) : '',
   );
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal<string | null>(null);
@@ -361,7 +362,7 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> 
             >
               Save
             </button>
-            <Show when={quota().status === 'manual'}>
+            <Show when={props.row.manual_usage_limit_usd != null}>
               <button
                 class="btn btn--ghost btn--sm"
                 type="button"
