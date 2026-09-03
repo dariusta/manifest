@@ -13,6 +13,7 @@ resources:
         protocol: HTTP
         public: true
         subdomain: manifest
+        domain: stackdome.62.146.175.26.nip.io
         tls: true
     env:
       PORT: '2099'
