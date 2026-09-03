@@ -90,31 +90,9 @@ import {
 } from './route-credentials';
 import { recordingResponseFromText } from './attempt-recording-capture';
 
-// Fallback cooldown applied when an upstream rejection carries no usable
-// Retry-After. Kept short (15s) on purpose: many providers rate-limit on brief
-// RPM/burst windows and omit Retry-After entirely, so a long blackout would
-// sideline a route that recovered seconds later. Explicit Retry-After values are
-// always honored (capped at MAX) regardless of this default.
-const RATE_LIMIT_COOLDOWN_DEFAULT_MS = 15_000;
-const RATE_LIMIT_COOLDOWN_MAX_MS = 5 * 60_000;
-const MAX_RATE_LIMIT_COOLDOWNS = 2_000;
-
-// Upstream statuses that put a route into cooldown. 429 is the provider
-// rejecting us on our own quota; 529 is Anthropic shedding load service-wide.
-// A 529 is the provider explicitly asking us to come back later, so re-dialling
-// the route on the very next request is the one response guaranteed not to
-// help — it was previously the only rejection that earned no backoff at all.
-const COOLDOWN_TRIGGER_STATUSES = new Set([429, 529]);
-
-interface RateLimitCooldown {
-  expiresAt: number;
-  /**
-   * The upstream status that armed this cooldown. Echoed back to the caller so
-   * a route sidelined by a 529 does not report itself as a 429 — the two mean
-   * different things to a client deciding whether to retry.
-   */
-  status: number;
-}
+// NOTE: the provider rate-limit cooldown was removed deliberately. Manifest
+// always dials the provider and surfaces the provider's own 429/529 verbatim;
+// any Retry-After header is passed through untouched for the caller to honor.
 
 const PROVIDER_ATTEMPT_REF = Symbol('providerAttemptRef');
 
@@ -149,7 +127,6 @@ export interface FailedFallback {
 @Injectable()
 export class ProxyFallbackService {
   private readonly logger = new Logger(ProxyFallbackService.name);
-  private readonly rateLimitCooldowns = new Map<string, RateLimitCooldown>();
 
   constructor(
     private readonly providerKeyService: ProviderKeyService,
@@ -418,15 +395,9 @@ export class ProxyFallbackService {
   }
 
   async tryForwardToProvider(opts: ForwardProviderOptions): Promise<ForwardResult> {
-    const cooldown = this.getActiveRateLimitCooldown(opts);
-    if (cooldown) {
-      return this.buildRateLimitCooldownForward(opts, cooldown);
-    }
-
     try {
       const forward = await this.forwardToProvider(opts);
       const result = await this.retryOAuthSubscriptionAfterRejectedToken(opts, forward);
-      this.recordRateLimitCooldown(opts, result.response);
       return result;
     } catch (error) {
       if (opts.signal?.aborted) throw error;
@@ -500,113 +471,6 @@ export class ProxyFallbackService {
         isChatGpt: false,
       };
     }
-  }
-
-  private getActiveRateLimitCooldown(opts: ForwardProviderOptions): RateLimitCooldown | null {
-    const key = this.rateLimitCooldownKey(opts);
-    if (!key) return null;
-    const cooldown = this.rateLimitCooldowns.get(key);
-    if (!cooldown) return null;
-    if (cooldown.expiresAt <= Date.now()) {
-      this.rateLimitCooldowns.delete(key);
-      return null;
-    }
-    return cooldown;
-  }
-
-  private buildRateLimitCooldownForward(
-    opts: ForwardProviderOptions,
-    cooldown: RateLimitCooldown,
-  ): ForwardResult {
-    const attempt = opts.startProviderAttempt?.({
-      provider: opts.provider,
-      model: opts.model,
-      authType: opts.authType,
-      tenantProviderId: opts.tenantProviderId,
-      keyLabel: opts.providerKeyLabel,
-      providerCallStarted: false,
-    });
-    if (attempt) attempt.completedAtMs = Date.now();
-    const retryAfterSeconds = Math.max(1, Math.ceil((cooldown.expiresAt - Date.now()) / 1000));
-    const message =
-      `Provider route temporarily cooling down after an upstream ${cooldown.status}: ` +
-      `${opts.provider}/${opts.model}. Retry in ${retryAfterSeconds}s.`;
-    return {
-      response: new Response(JSON.stringify({ error: { message } }), {
-        status: cooldown.status,
-        headers: {
-          'content-type': 'application/json',
-          'retry-after': String(retryAfterSeconds),
-        },
-      }),
-      isGoogle: false,
-      isAnthropic: false,
-      isChatGpt: false,
-      providerCallStarted: false,
-      attempt,
-    };
-  }
-
-  private recordRateLimitCooldown(opts: ForwardProviderOptions, response: Response): void {
-    if (!COOLDOWN_TRIGGER_STATUSES.has(response.status)) return;
-    const key = this.rateLimitCooldownKey(opts);
-    if (!key) return;
-    if (this.rateLimitCooldowns.size >= MAX_RATE_LIMIT_COOLDOWNS) {
-      this.evictExpiredRateLimitCooldowns();
-      if (this.rateLimitCooldowns.size >= MAX_RATE_LIMIT_COOLDOWNS) {
-        this.evictOldestRateLimitCooldown();
-      }
-    }
-    const ttlMs = this.parseRetryAfterMs(response.headers.get('retry-after'));
-    this.rateLimitCooldowns.set(key, {
-      expiresAt: Date.now() + ttlMs,
-      status: response.status,
-    });
-  }
-
-  private evictExpiredRateLimitCooldowns(now = Date.now()): void {
-    for (const [key, cooldown] of this.rateLimitCooldowns) {
-      if (cooldown.expiresAt <= now) this.rateLimitCooldowns.delete(key);
-    }
-  }
-
-  private evictOldestRateLimitCooldown(): void {
-    let oldestKey: string | null = null;
-    let oldestExpiresAt = Number.POSITIVE_INFINITY;
-    for (const [key, cooldown] of this.rateLimitCooldowns) {
-      if (cooldown.expiresAt >= oldestExpiresAt) continue;
-      oldestKey = key;
-      oldestExpiresAt = cooldown.expiresAt;
-    }
-    if (oldestKey) this.rateLimitCooldowns.delete(oldestKey);
-  }
-
-  private parseRetryAfterMs(retryAfter: string | null): number {
-    if (!retryAfter) return RATE_LIMIT_COOLDOWN_DEFAULT_MS;
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      return Math.min(seconds * 1000, RATE_LIMIT_COOLDOWN_MAX_MS);
-    }
-    // HTTP-date form (RFC 9110): honor the provider's stated instant the same
-    // way as the numeric-seconds form — respect the actual delta, capped at
-    // MAX, with no artificial floor. A past or nonsensical date carries no
-    // usable duration, so fall back to the short default.
-    const retryAt = Date.parse(retryAfter);
-    if (Number.isNaN(retryAt)) return RATE_LIMIT_COOLDOWN_DEFAULT_MS;
-    const deltaMs = retryAt - Date.now();
-    if (deltaMs <= 0) return RATE_LIMIT_COOLDOWN_DEFAULT_MS;
-    return Math.min(deltaMs, RATE_LIMIT_COOLDOWN_MAX_MS);
-  }
-
-  private rateLimitCooldownKey(opts: ForwardProviderOptions): string | null {
-    if (!opts.agentId || !opts.authType) return null;
-    return [
-      opts.agentId,
-      opts.provider.toLowerCase(),
-      opts.authType,
-      opts.providerKeyLabel ?? '',
-      opts.model.toLowerCase(),
-    ].join('\u0000');
   }
 
   private async retryOAuthSubscriptionAfterRejectedToken(

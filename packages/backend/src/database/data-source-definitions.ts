@@ -162,6 +162,7 @@ import { AddRequestsAndProviderAttempts1801000000000 } from './migrations/180100
 import { AddProviderAttemptOrdering1801100000000 } from './migrations/1801100000000-AddProviderAttemptOrdering';
 import { AddBetterAuthAccountIssuer1802200000000 } from './migrations/1802200000000-AddBetterAuthAccountIssuer';
 import { AddManualUsageLimit1802300000000 } from './migrations/1802300000000-AddManualUsageLimit';
+import { RelaxAccountIssuerNullable1802400000000 } from './migrations/1802400000000-RelaxAccountIssuerNullable';
 
 export const entities = [
   AgentMessage,
@@ -326,4 +327,5 @@ export const migrations = [
   AddTenantMembers1802100000000,
   AddBetterAuthAccountIssuer1802200000000,
   AddManualUsageLimit1802300000000,
+  RelaxAccountIssuerNullable1802400000000,
 ];

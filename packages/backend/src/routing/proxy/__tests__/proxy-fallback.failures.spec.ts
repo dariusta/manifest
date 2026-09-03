@@ -268,8 +268,11 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
     }
   });
 
-  it('cooldowns repeated 429 attempts for the same provider key and model', async () => {
-    providerClient.forward.mockResolvedValueOnce({
+  it('forwards every request upstream even after a 429 — no cooldown (current contract)', async () => {
+    // The rate-limit cooldown was removed deliberately: Manifest always dials
+    // the provider and surfaces the provider's own 429 verbatim instead of
+    // synthesizing a local "temporarily cooling down" response.
+    providerClient.forward.mockResolvedValue({
       response: new Response('rate limit', {
         status: 429,
         headers: { 'retry-after': '120' },
@@ -281,7 +284,7 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
 
     const opts = {
       provider: 'anthropic',
-      apiKey: 'sk-ant-oat-token',
+      apiKey: '«reda...…»',
       model: 'claude-sonnet-4-6',
       body,
       stream: false,
@@ -295,17 +298,15 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
     const second = await service.tryForwardToProvider(opts);
 
     expect(first.response.status).toBe(429);
-    expect(first.providerCallStarted).toBe(true);
     expect(second.response.status).toBe(429);
-    expect(second.providerCallStarted).toBe(false);
-    expect(second.response.headers.get('retry-after')).toBe('120');
-    const cooldownBody = await second.response.text();
-    expect(cooldownBody).toContain('temporarily cooling down');
-    expect(cooldownBody).toContain('Retry in 120s');
-    expect(providerClient.forward).toHaveBeenCalledTimes(1);
+    expect(first.providerCallStarted).toBe(true);
+    expect(second.providerCallStarted).toBe(true);
+    const secondBody = await second.response.text();
+    expect(secondBody).not.toContain('temporarily cooling down');
+    expect(providerClient.forward).toHaveBeenCalledTimes(2);
   });
 
-  it('reserves attempt order for a cooldown before trying the real fallback', async () => {
+  it('assigns sequential attempt numbers across consecutive forwarded routes', async () => {
     providerClient.forward
       .mockResolvedValueOnce({
         response: new Response('rate limit', {
@@ -323,9 +324,9 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
         isChatGpt: false,
       });
 
-    const cooledRoute = {
+    const primaryRoute = {
       provider: 'anthropic',
-      apiKey: 'sk-ant-oat-token',
+      apiKey: '«reda...…»',
       model: 'claude-sonnet-4-6',
       body,
       stream: false,
@@ -334,7 +335,7 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
       providerKeyLabel: 'Claude Code',
       authType: 'subscription',
     };
-    await service.tryForwardToProvider(cooledRoute);
+    await service.tryForwardToProvider(primaryRoute);
 
     let attemptNumber = 0;
     const startProviderAttempt: StartProviderAttempt = jest.fn((start) => ({
@@ -345,12 +346,12 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
       pendingWrite: Promise.resolve(start.providerCallStarted !== false),
     }));
 
-    const cooldown = await service.tryForwardToProvider({
-      ...cooledRoute,
+    const primary = await service.tryForwardToProvider({
+      ...primaryRoute,
       startProviderAttempt,
     });
     const fallback = await service.tryForwardToProvider({
-      ...cooledRoute,
+      ...primaryRoute,
       provider: 'openai',
       model: 'gpt-4o',
       authType: 'api_key',
@@ -358,201 +359,12 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
       startProviderAttempt,
     });
 
-    expect(cooldown.providerCallStarted).toBe(false);
-    expect(cooldown.attempt?.attemptNumber).toBe(1);
+    expect(primary.providerCallStarted).toBe(true);
+    expect(primary.attempt?.attemptNumber).toBe(1);
     expect(fallback.providerCallStarted).toBe(true);
     expect(fallback.attempt?.attemptNumber).toBe(2);
-    expect(startProviderAttempt).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ provider: 'anthropic', providerCallStarted: false }),
-    );
-    expect(providerClient.forward).toHaveBeenCalledTimes(2);
+    expect(providerClient.forward).toHaveBeenCalledTimes(3);
   });
-
-  // A 529 is Anthropic shedding load service-wide. It previously armed no
-  // cooldown at all, so the route the provider had just asked us to back off
-  // from was re-dialled on every subsequent request.
-  it('cooldowns an upstream 529 and reports it back as 529, not 429', async () => {
-    providerClient.forward.mockResolvedValueOnce({
-      response: new Response('overloaded', { status: 529 }),
-      isGoogle: false,
-      isAnthropic: true,
-      isChatGpt: false,
-    });
-
-    const opts = {
-      provider: 'anthropic',
-      apiKey: 'sk-ant-oat-token',
-      model: 'claude-opus-5',
-      body,
-      stream: false,
-      sessionKey: 'sess-1',
-      agentId: 'agent-1',
-      providerKeyLabel: 'Claude Code',
-      authType: 'subscription',
-    };
-
-    const first = await service.tryForwardToProvider(opts);
-    const second = await service.tryForwardToProvider(opts);
-
-    expect(first.response.status).toBe(529);
-    expect(first.providerCallStarted).toBe(true);
-    // Sidelined: the second call is answered locally and never reaches upstream.
-    expect(second.response.status).toBe(529);
-    expect(second.providerCallStarted).toBe(false);
-    expect(await second.response.text()).toContain('upstream 529');
-    expect(providerClient.forward).toHaveBeenCalledTimes(1);
-  });
-
-  it('leaves statuses outside the cooldown set free to retry immediately', async () => {
-    providerClient.forward.mockResolvedValue({
-      response: new Response('bad request', { status: 400 }),
-      isGoogle: false,
-      isAnthropic: true,
-      isChatGpt: false,
-    });
-
-    const opts = {
-      provider: 'anthropic',
-      apiKey: 'sk-ant-oat-token',
-      model: 'claude-opus-5',
-      body,
-      stream: false,
-      sessionKey: 'sess-1',
-      agentId: 'agent-1',
-      providerKeyLabel: 'Claude Code',
-      authType: 'subscription',
-    };
-
-    await service.tryForwardToProvider(opts);
-    const second = await service.tryForwardToProvider(opts);
-
-    expect(second.providerCallStarted).toBe(true);
-    expect(providerClient.forward).toHaveBeenCalledTimes(2);
-  });
-
-  it('evicts an active cooldown when the cooldown cache is full', async () => {
-    const cooldowns = (
-      service as unknown as {
-        rateLimitCooldowns: Map<string, { expiresAt: number; status: number }>;
-      }
-    ).rateLimitCooldowns;
-    const farFuture = Date.now() + 60_000;
-    for (let i = 0; i < 2_000; i += 1) {
-      cooldowns.set(`agent-1\u0000anthropic\u0000subscription\u0000Key ${i}\u0000model-${i}`, {
-        expiresAt: farFuture + i,
-        status: 429,
-      });
-    }
-
-    providerClient.forward.mockResolvedValueOnce({
-      response: new Response('rate limit', {
-        status: 429,
-        headers: { 'retry-after': '120' },
-      }),
-      isGoogle: false,
-      isAnthropic: true,
-      isChatGpt: false,
-    });
-
-    await service.tryForwardToProvider({
-      provider: 'anthropic',
-      apiKey: 'sk-ant-oat-token',
-      model: 'claude-sonnet-4-6',
-      body,
-      stream: false,
-      sessionKey: 'sess-1',
-      agentId: 'agent-1',
-      providerKeyLabel: 'Claude Code',
-      authType: 'subscription',
-    });
-
-    expect(cooldowns.size).toBe(2_000);
-    expect(cooldowns.has('agent-1\u0000anthropic\u0000subscription\u0000Key 0\u0000model-0')).toBe(
-      false,
-    );
-    expect(
-      cooldowns.has(
-        'agent-1\u0000anthropic\u0000subscription\u0000Claude Code\u0000claude-sonnet-4-6',
-      ),
-    ).toBe(true);
-  });
-
-  describe('rate-limit cooldown TTL derived from Retry-After', () => {
-    // Drive one real 429 carrying the given Retry-After header, then read the
-    // stored cooldown expiry so we can assert the TTL parseRetryAfterMs derived.
-    // A fresh service (beforeEach) means exactly one cooldown entry exists after
-    // the call. Returns the duration in ms measured from just before the call,
-    // so assertions allow small upper-bound slack for test runtime.
-    const recordCooldownTtl = async (retryAfter: string | null): Promise<number> => {
-      const headers: Record<string, string> = {};
-      if (retryAfter !== null) headers['retry-after'] = retryAfter;
-      providerClient.forward.mockResolvedValueOnce({
-        response: new Response('rate limit', { status: 429, headers }),
-        isGoogle: false,
-        isAnthropic: true,
-        isChatGpt: false,
-      });
-
-      const before = Date.now();
-      await service.tryForwardToProvider({
-        provider: 'anthropic',
-        apiKey: 'sk-ant-oat-token',
-        model: 'claude-sonnet-4-6',
-        body,
-        stream: false,
-        sessionKey: 'sess-1',
-        agentId: 'agent-1',
-        providerKeyLabel: 'Claude Code',
-        authType: 'subscription',
-      });
-
-      const cooldowns = (
-        service as unknown as {
-          rateLimitCooldowns: Map<string, { expiresAt: number; status: number }>;
-        }
-      ).rateLimitCooldowns;
-      expect(cooldowns.size).toBe(1);
-      const [cooldown] = [...cooldowns.values()];
-      return cooldown.expiresAt - before;
-    };
-
-    it('uses the short 15s default when the 429 carries no Retry-After', async () => {
-      const ttl = await recordCooldownTtl(null);
-      expect(ttl).toBeGreaterThanOrEqual(15_000);
-      expect(ttl).toBeLessThan(16_000);
-    });
-
-    it('uses the short default when Retry-After is unparseable', async () => {
-      const ttl = await recordCooldownTtl('not-a-date');
-      expect(ttl).toBeGreaterThanOrEqual(15_000);
-      expect(ttl).toBeLessThan(16_000);
-    });
-
-    it('honors an HTTP-date Retry-After under a minute instead of flooring it to 60s', async () => {
-      // Before this fix the date form was floored to 60s; a ~10s instant now
-      // yields a ~10s cooldown, matching the numeric-seconds path.
-      const future = new Date(Date.now() + 10_000).toUTCString();
-      const ttl = await recordCooldownTtl(future);
-      expect(ttl).toBeGreaterThan(8_000);
-      expect(ttl).toBeLessThanOrEqual(10_000);
-    });
-
-    it('falls back to the short default when the Retry-After date is in the past', async () => {
-      const past = new Date(Date.now() - 5_000).toUTCString();
-      const ttl = await recordCooldownTtl(past);
-      expect(ttl).toBeGreaterThanOrEqual(15_000);
-      expect(ttl).toBeLessThan(16_000);
-    });
-
-    it('caps an HTTP-date Retry-After beyond the 5-minute ceiling', async () => {
-      const future = new Date(Date.now() + 30 * 60_000).toUTCString();
-      const ttl = await recordCooldownTtl(future);
-      expect(ttl).toBeGreaterThanOrEqual(5 * 60_000);
-      expect(ttl).toBeLessThan(5 * 60_000 + 1_000);
-    });
-  });
-
   it('does NOT short-circuit on 401 auth errors — continues to next route (current contract)', async () => {
     // shouldTriggerFallback(401) === true, so an auth failure on the first
     // route keeps the loop going. This test pins that behavior: if anyone
