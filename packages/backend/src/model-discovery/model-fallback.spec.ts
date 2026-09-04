@@ -145,6 +145,8 @@ describe('buildFallbackModels', () => {
 
   it('should limit Meta fallback discovery to the shared Muse Spark catalog', () => {
     const cache = new Map([
+      ['meta/muse-spark-1.3', { input: 0.0000004, output: 0.0000016 }],
+      ['meta/muse-spark-1.3-contributor', { input: 0.0000002, output: 0.0000008 }],
       ['meta/muse-spark-1.2', { input: 0.0000004, output: 0.0000016 }],
       ['meta/muse-spark-1.2-contributor', { input: 0.0000002, output: 0.0000008 }],
       ['meta/muse-spark-1.1', { input: 0.0000004, output: 0.0000016 }],
@@ -154,12 +156,14 @@ describe('buildFallbackModels', () => {
     const result = buildFallbackModels(makePricingSync(cache), 'meta');
 
     expect(result.map((model) => model.id)).toEqual([
+      'muse-spark-1.3',
+      'muse-spark-1.3-contributor',
       'muse-spark-1.2',
       'muse-spark-1.2-contributor',
       'muse-spark-1.1',
     ]);
     expect(result[1]).toMatchObject({
-      displayName: 'Muse Spark 1.2 Contributor (inputs and outputs may train Meta)',
+      displayName: 'Muse Spark 1.3 Contributor (inputs and outputs may train Meta)',
       contextWindow: 1_048_576,
       capabilityReasoning: true,
       capabilityCode: true,

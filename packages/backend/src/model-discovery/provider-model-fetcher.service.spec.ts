@@ -782,6 +782,8 @@ describe('ProviderModelFetcherService', () => {
         ok: true,
         json: async () => ({
           data: [
+            { id: 'muse-spark-1.3' },
+            { id: 'muse-spark-1.3-contributor' },
             { id: 'muse-spark-1.2' },
             { id: 'muse-spark-1.2-contributor' },
             { id: 'muse-spark-1.1' },
@@ -799,12 +801,14 @@ describe('ProviderModelFetcherService', () => {
         }),
       );
       expect(result.map((model) => model.id)).toEqual([
+        'muse-spark-1.3',
+        'muse-spark-1.3-contributor',
         'muse-spark-1.2',
         'muse-spark-1.2-contributor',
         'muse-spark-1.1',
       ]);
       expect(result[1]).toMatchObject({
-        displayName: 'Muse Spark 1.2 Contributor (inputs and outputs may train Meta)',
+        displayName: 'Muse Spark 1.3 Contributor (inputs and outputs may train Meta)',
         provider: 'meta',
         contextWindow: 1_048_576,
         capabilityReasoning: true,
