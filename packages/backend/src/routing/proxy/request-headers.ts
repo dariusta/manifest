@@ -82,49 +82,6 @@ export function sanitizeRequestHeaders(
   return count > 0 ? out : null;
 }
 
-const HARNESS_IDENTITY_HEADERS = [
-  'user-agent',
-  'x-app',
-  'anthropic-beta',
-  'anthropic-version',
-  'anthropic-dangerous-direct-browser-access',
-  'x-anthropic-billing-header',
-  'x-claude-code-session-id',
-  'x-claude-code-agent-id',
-  'x-stainless-arch',
-  'x-stainless-helper-method',
-  'x-stainless-lang',
-  'x-stainless-os',
-  'x-stainless-package-version',
-  'x-stainless-retry-count',
-  'x-stainless-runtime',
-  'x-stainless-runtime-version',
-  'x-stainless-timeout',
-  'editor-version',
-  'editor-plugin-version',
-  'originator',
-] as const;
-
-/**
- * Identity headers from the inbound harness (Claude Code, Cursor, Codex, …)
- * that must ride on the provider request so Anthropic/OpenAI see the real
- * client. Auth headers stay Manifest-owned.
- */
-export function extractHarnessIdentityHeaders(
-  headers: IncomingHttpHeaders | undefined,
-): Record<string, string> | undefined {
-  if (!headers) return undefined;
-  const out: Record<string, string> = {};
-  for (const key of HARNESS_IDENTITY_HEADERS) {
-    const raw = headers[key] ?? headers[key.replace(/^[a-z]/, (c) => c.toUpperCase())];
-    if (raw == null) continue;
-    const joined = Array.isArray(raw) ? raw.join(', ') : String(raw);
-    const cleaned = joined.replace(/[\x00-\x1f\x7f]/g, '').trim();
-    if (cleaned) out[key] = cleaned;
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
-}
-
 // Truncate by UTF-8 byte length (not character count) so multi-byte values
 // can't exceed the byte budget. When the cut lands mid-codepoint, Node's
 // Buffer.toString replaces the partial sequence with U+FFFD — strip those so

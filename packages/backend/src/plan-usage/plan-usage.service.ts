@@ -4,9 +4,22 @@ import { Repository } from 'typeorm';
 import { AgentMessage } from '../entities/agent-message.entity';
 import { TenantProvider } from '../entities/tenant-provider.entity';
 import { ProviderKeyService } from '../routing/routing-core/provider-key.service';
+import { OpenaiOauthService } from '../routing/oauth/openai/openai-oauth.service';
+import { MinimaxOauthService } from '../routing/oauth/minimax/minimax-oauth.service';
+import { AnthropicOauthService } from '../routing/oauth/anthropic/anthropic-oauth.service';
+import { GeminiOauthService } from '../routing/oauth/gemini/gemini-oauth.service';
+import { KiroOauthService } from '../routing/oauth/kiro/kiro-oauth.service';
+import { XaiOauthService } from '../routing/oauth/xai/xai-oauth.service';
+import { resolveApiKey } from '../routing/proxy/oauth-credentials';
+import { parseOAuthTokenBlob, serializeOAuthTokenBlob } from '../routing/oauth/core';
 import { ProviderQuotaReport, ProviderUsageAdapterRegistry } from './provider-usage-adapters';
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
+/**
+ * Refresh logs are keyed by agent. Plan usage is a tenant-level read with no
+ * agent behind it, so it reports itself rather than borrowing an agent id.
+ */
+const PLAN_USAGE_AGENT_ID = 'plan-usage';
 const MAX_CONCURRENT_PROBES = 4;
 
 interface MetricRow {
@@ -106,6 +119,21 @@ function emptyObserved(): ObservedPlanUsage {
 }
 
 /** Copy only the public normalized contract, dropping arbitrary adapter fields. */
+/**
+ * Rehydrate the persisted probe. Returns null when absent or unparseable —
+ * the column is plain text, so a schema change or partial write degrades to
+ * "no snapshot" rather than throwing on a read path.
+ */
+function readPersistedQuota(connection: TenantProvider): ProviderQuotaReport | null {
+  if (!connection.cached_quota_report) return null;
+  try {
+    const parsed = JSON.parse(connection.cached_quota_report) as ProviderQuotaReport;
+    return parsed && typeof parsed === 'object' && Array.isArray(parsed.windows) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function publicReport(report: ProviderQuotaReport): ProviderQuotaReport {
   return {
     status: report.status,
@@ -130,6 +158,12 @@ export class PlanUsageService {
     private readonly messageRepo: Repository<AgentMessage>,
     private readonly providerKeys: ProviderKeyService,
     private readonly adapters: ProviderUsageAdapterRegistry,
+    private readonly openaiOauth: OpenaiOauthService,
+    private readonly minimaxOauth: MinimaxOauthService,
+    private readonly anthropicOauth: AnthropicOauthService,
+    private readonly geminiOauth: GeminiOauthService,
+    private readonly kiroOauth: KiroOauthService,
+    private readonly xaiOauth: XaiOauthService,
   ) {}
 
   async getPlanUsage(
@@ -275,23 +309,90 @@ export class PlanUsageService {
     }
 
     const probed = publicReport(
-      await this.adapters.probe(connection, () =>
-        this.providerKeys.getOwnedProviderCredentialById(tenantId, connection.id),
-      ),
+      await this.adapters.probe(connection, () => this.freshCredential(tenantId, connection)),
     );
     if (probed.status === 'live') {
       this.cache.set(key, { report: probed, cachedAt: Date.now() });
+      await this.persistQuota(connection, probed);
       return probed;
     }
-    if (cached) {
+    // A failed probe falls back to the newest surviving snapshot: the in-process
+    // entry first, then the persisted one, so a provider that has been rate
+    // limited since before the last restart still shows its known numbers.
+    const fallback = cached?.report ?? readPersistedQuota(connection);
+    if (fallback) {
       return {
-        ...publicReport(cached.report),
+        ...publicReport(fallback),
         status: 'cached',
         stale: true,
         ...(probed.message ? { message: probed.message } : {}),
       };
     }
     return probed;
+  }
+
+  /**
+   * Store the snapshot on the connection row. Best effort: plan usage is a
+   * read path, so a write failure must not fail the response.
+   */
+  private async persistQuota(
+    connection: TenantProvider,
+    report: ProviderQuotaReport,
+  ): Promise<void> {
+    try {
+      await this.providerRepo.update(
+        { id: connection.id },
+        {
+          cached_quota_report: JSON.stringify(report),
+          cached_quota_at: new Date().toISOString(),
+        },
+      );
+    } catch {
+      // Losing a snapshot only costs freshness on the next restart.
+    }
+  }
+
+  /**
+   * Decrypt the stored credential and, for OAuth subscriptions, refresh it the
+   * same way the proxy does before forwarding.
+   *
+   * Without this a merely-expired access token makes every usage probe answer
+   * 401 while inference keeps working — which is exactly what the "endpoint did
+   * not accept this credential" tile was reporting.
+   *
+   * The refreshed token is handed back inside the original blob so provider
+   * adapters keep reading `u` (Gemini's CodeAssist project, MiniMax's resource
+   * URL) from the same place.
+   */
+  private async freshCredential(
+    tenantId: string,
+    connection: TenantProvider,
+  ): Promise<string | null> {
+    const raw = await this.providerKeys.getOwnedProviderCredentialById(tenantId, connection.id);
+    if (!raw) return null;
+    const blob = parseOAuthTokenBlob(raw);
+    if (!blob || connection.auth_type !== 'subscription') return raw;
+
+    const resolved = await resolveApiKey(
+      connection.provider,
+      raw,
+      connection.auth_type,
+      PLAN_USAGE_AGENT_ID,
+      tenantId,
+      this.openaiOauth,
+      this.minimaxOauth,
+      this.anthropicOauth,
+      this.geminiOauth,
+      this.kiroOauth,
+      this.xaiOauth,
+      connection.label ?? undefined,
+    );
+    if (!resolved.apiKey) return null;
+    return serializeOAuthTokenBlob({
+      ...blob,
+      t: resolved.apiKey,
+      ...(resolved.resourceUrl ? { u: resolved.resourceUrl } : {}),
+    });
   }
 
   private async mapConcurrent<T, R>(

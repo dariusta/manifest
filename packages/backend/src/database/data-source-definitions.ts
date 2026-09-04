@@ -162,6 +162,7 @@ import { AddRequestsAndProviderAttempts1801000000000 } from './migrations/180100
 import { AddProviderAttemptOrdering1801100000000 } from './migrations/1801100000000-AddProviderAttemptOrdering';
 import { AddBetterAuthAccountIssuer1802200000000 } from './migrations/1802200000000-AddBetterAuthAccountIssuer';
 import { AddManualUsageLimit1802300000000 } from './migrations/1802300000000-AddManualUsageLimit';
+import { AddCachedQuotaReport1802500000000 } from './migrations/1802500000000-AddCachedQuotaReport';
 import { RelaxAccountIssuerNullable1802400000000 } from './migrations/1802400000000-RelaxAccountIssuerNullable';
 
 export const entities = [
@@ -328,4 +329,5 @@ export const migrations = [
   AddBetterAuthAccountIssuer1802200000000,
   AddManualUsageLimit1802300000000,
   RelaxAccountIssuerNullable1802400000000,
+  AddCachedQuotaReport1802500000000,
 ];

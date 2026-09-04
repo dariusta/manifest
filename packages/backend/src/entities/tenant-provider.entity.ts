@@ -56,4 +56,15 @@ export class TenantProvider {
 
   @Column(timestampType(), { nullable: true, default: null })
   models_fetched_at!: string | null;
+
+  /**
+   * Last successful provider quota probe, serialized. Survives restarts so a
+   * rate-limited provider can still show its last known numbers instead of
+   * "Usage unavailable".
+   */
+  @Column('text', { nullable: true, default: null })
+  cached_quota_report!: string | null;
+
+  @Column(timestampType(), { nullable: true, default: null })
+  cached_quota_at!: string | null;
 }

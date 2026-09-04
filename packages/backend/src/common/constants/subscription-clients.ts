@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 /**
  * Client identification strings sent to subscription backends that gate model
  * lists or requests by client version. Lifted into one place so bumping a
@@ -73,10 +71,14 @@ export const CLAUDE_CODE_PROVIDER_OWNED_HEADERS = Object.freeze([
   'anthropic-dangerous-direct-browser-access',
   'user-agent',
   'x-app',
+  // Billing attribution is Manifest's to set, never the caller's: a forwarded
+  // value would bill the request against someone else's account.
+  'x-anthropic-billing-header',
   // Caller-supplied forwarded-server values are always stripped; Manifest
   // itself sends none (matching the known-good first-party client).
   'x-forwarded-server',
   'x-stainless-arch',
+  'x-stainless-helper-method',
   'x-stainless-lang',
   'x-stainless-os',
   'x-stainless-package-version',

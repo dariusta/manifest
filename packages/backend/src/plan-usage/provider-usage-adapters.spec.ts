@@ -150,6 +150,35 @@ describe('provider usage response parsers', () => {
     });
   });
 
+  it('names repeated Z.ai credit windows by the cadence their reset implies', () => {
+    const inFiveHours = Date.now() + 5 * 3_600_000;
+    const inSixDays = Date.now() + 6 * 24 * 3_600_000;
+    const parsed = parseZaiUsage({
+      data: {
+        level: 'max',
+        limits: [
+          { type: 'CREDIT_LIMIT', percentage: 15, nextResetTime: inFiveHours },
+          { type: 'CREDIT_LIMIT', percentage: 48, nextResetTime: inSixDays },
+        ],
+      },
+    });
+    expect(parsed.windows.map((w) => w.name)).toEqual([
+      '5-hour credit limit',
+      'weekly credit limit',
+    ]);
+  });
+
+  it('leaves a single Z.ai window under the provider wording', () => {
+    const parsed = parseZaiUsage({
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', percentage: 15, nextResetTime: Date.now() + 5 * 3_600_000 },
+        ],
+      },
+    });
+    expect(parsed.windows.map((w) => w.name)).toEqual(['credit limit']);
+  });
+
   it('normalizes the grounded Z.ai monitor envelope', () => {
     expect(
       parseZaiUsage({

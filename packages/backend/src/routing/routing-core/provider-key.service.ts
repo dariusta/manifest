@@ -15,6 +15,7 @@ import {
   inferProviderFromModelName,
 } from '../../common/utils/provider-aliases';
 import { isManifestUsableProvider } from '../../common/utils/subscription-support';
+import { ProviderCredentialHealthService } from './provider-credential-health.service';
 
 /**
  * Sentinel id for the built-in Ollama tile. getProviderKeys() short-circuits
@@ -66,6 +67,10 @@ export class ProviderKeyService {
     // tests) cross-workspace sharing is disabled and behavior is unchanged.
     @Optional()
     private readonly tenantCache: TenantCacheService | null = null,
+    // Optional + last for the same reason as tenantCache. When null, key
+    // selection keeps its previous "always the first key" behavior.
+    @Optional()
+    private readonly credentialHealth: ProviderCredentialHealthService | null = null,
   ) {}
 
   /** Team workspaces the acting tenant borrows providers from ([] when none). */
@@ -177,7 +182,34 @@ export class ProviderKeyService {
         );
       }
     }
-    return keys[0];
+    return this.firstUsableKey(keys, tenantId, provider, authType);
+  }
+
+  /**
+   * Prefer a connection the provider has not just rejected for billing.
+   * Anthropic answers a spent subscription with a 400 on every call, so
+   * without this a tenant whose default connection is exhausted burns every
+   * request on it and never reaches a sibling that still works.
+   *
+   * When every connection is sidelined we still return the first one: the
+   * caller gets the provider's own error instead of a synthetic "no key".
+   */
+  private firstUsableKey(
+    keys: CachedProviderKey[],
+    tenantId: string,
+    provider: string,
+    authType?: AuthType,
+  ): CachedProviderKey {
+    if (!this.credentialHealth || keys.length === 1) return keys[0];
+    const usable = keys.find(
+      (k) => !this.credentialHealth?.isExhausted({ tenantId, provider, authType, label: k.label }),
+    );
+    if (usable && usable !== keys[0]) {
+      this.logger.log(
+        `Routing ${provider} to "${forLog(usable.label)}" — "${forLog(keys[0].label)}" is sidelined`,
+      );
+    }
+    return usable ?? keys[0];
   }
 
   /**

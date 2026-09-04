@@ -1,9 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { IncomingHttpHeaders } from 'http';
 import type { AuthType, ModelRoute } from 'manifest-shared';
-import { applyRequestParamDefaults } from 'manifest-shared';
+import { applyRequestParamDefaults, isAnthropicExtraUsageError } from 'manifest-shared';
 import { AgentModelParamsService } from '../routing-core/agent-model-params.service';
 import { ProviderParamSpecService } from '../routing-core/provider-param-spec.service';
 
@@ -49,6 +49,7 @@ interface ForwardProviderOptions {
 }
 
 import { ProviderKeyService } from '../routing-core/provider-key.service';
+import { ProviderCredentialHealthService } from '../routing-core/provider-credential-health.service';
 import { CustomProvider } from '../../entities/custom-provider.entity';
 import { CustomProviderService } from '../custom-provider/custom-provider.service';
 import { resolveForwardEndpoint } from './forward-endpoint-resolver';
@@ -64,7 +65,6 @@ import { resolveEndpointKey } from './provider-endpoints';
 import { CopilotTokenService } from './copilot-token.service';
 import { ReasoningContentCache } from './reasoning-content-cache';
 import { buildProviderExtraHeaders } from './provider-hooks';
-import { extractHarnessIdentityHeaders } from './request-headers';
 import { shouldTriggerFallback } from './fallback-status-codes';
 import { inferProviderFromModelName } from '../../common/utils/provider-aliases';
 import { normalizeAnthropicShortModelId } from '../../common/utils/anthropic-model-id';
@@ -144,6 +144,9 @@ export class ProxyFallbackService {
     private readonly modelParamsService: AgentModelParamsService,
     private readonly providerParamSpecs: ProviderParamSpecService,
     private readonly reasoningCache: ReasoningContentCache,
+    // Optional + last so positional test constructions keep working.
+    @Optional()
+    private readonly credentialHealth: ProviderCredentialHealthService | null = null,
   ) {}
 
   /**
@@ -398,6 +401,7 @@ export class ProxyFallbackService {
     try {
       const forward = await this.forwardToProvider(opts);
       const result = await this.retryOAuthSubscriptionAfterRejectedToken(opts, forward);
+      await this.noteCredentialBillingHealth(opts, result.response);
       return result;
     } catch (error) {
       if (opts.signal?.aborted) throw error;
@@ -417,6 +421,38 @@ export class ProxyFallbackService {
         isAnthropic: false,
         isChatGpt: false,
       };
+    }
+  }
+
+  /**
+   * Anthropic answers a spent subscription with a 400 on every call, so a
+   * tenant whose default connection is exhausted otherwise replays the same
+   * doomed forward forever. Record the verdict against the connection that
+   * served the attempt; key selection reads it to prefer a sibling.
+   */
+  private async noteCredentialBillingHealth(
+    opts: ForwardProviderOptions,
+    response: Response,
+  ): Promise<void> {
+    if (!this.credentialHealth || !opts.tenantId || !opts.providerKeyLabel) return;
+    const scope = {
+      tenantId: opts.tenantId,
+      provider: opts.provider,
+      authType: opts.authType as AuthType | undefined,
+      label: opts.providerKeyLabel,
+    };
+    if (response.ok) {
+      this.credentialHealth.markHealthy(scope);
+      return;
+    }
+    if (response.status !== 400) return;
+    try {
+      const errorBody = await response.clone().text();
+      if (isAnthropicExtraUsageError({ provider: opts.provider, httpStatus: 400, errorBody })) {
+        this.credentialHealth.markExhausted(scope, 'subscription extra usage is spent');
+      }
+    } catch {
+      // Best effort — an unreadable body just leaves health unchanged.
     }
   }
 
@@ -560,18 +596,11 @@ export class ProxyFallbackService {
       authType,
       opts.model,
     );
-    // Claude identity headers (x-claude-code-session-id / -agent-id) are
-    // Anthropic-specific: forwarding them to OpenAI/Google/custom/local routes
-    // would leak Claude session identifiers to unrelated providers.
-    const isAnthropicRoute = provider.toLowerCase() === 'anthropic';
-    const identityHeaders = isAnthropicRoute
-      ? extractHarnessIdentityHeaders(opts.inboundHeaders)
-      : undefined;
-    const extraHeaders = {
-      ...identityHeaders,
-      ...buildProviderExtraHeaders(provider, opts.providerCacheKey),
-    };
-    const mergedExtraHeaders = Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined;
+    // Manifest owns the provider-facing identity outright: nothing from the
+    // inbound caller rides along. Forwarding a harness's user-agent and
+    // x-stainless-* set let an OpenAI-SDK caller rewrite the Claude Code
+    // identity on an Anthropic subscription request.
+    const extraHeaders = buildProviderExtraHeaders(provider, opts.providerCacheKey);
 
     // Copilot: exchange the stored GitHub OAuth token for a short-lived API token
     let effectiveKey = opts.apiKey;
@@ -661,7 +690,7 @@ export class ProxyFallbackService {
         resolveChatBody,
         stream,
         signal,
-        extraHeaders: mergedExtraHeaders,
+        extraHeaders,
         customEndpoint,
         authType,
         apiMode: opts.apiMode,

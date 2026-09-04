@@ -21,6 +21,8 @@ const provider = (over: Partial<TenantProvider>): TenantProvider =>
     cached_models: null,
     models_fetched_at: null,
     manual_usage_limit_usd: null,
+    cached_quota_report: null,
+    cached_quota_at: null,
     ...over,
   }) as TenantProvider;
 
@@ -57,16 +59,81 @@ function harness(options?: {
   const adapters = { probe };
   const credential = options?.credential ?? jest.fn().mockResolvedValue('decrypted-secret');
   const providerKeys = { getOwnedProviderCredentialById: credential };
+  // Subscription refresh is exercised in its own describe below; these rows
+  // hold plain secrets, so unwrapToken is never reached.
+  const oauth = { unwrapToken: jest.fn().mockResolvedValue(null) };
   const service = new PlanUsageService(
     providerRepo as never,
     messageRepo as never,
     providerKeys as never,
     adapters as never,
+    oauth as never,
+    oauth as never,
+    oauth as never,
+    oauth as never,
+    oauth as never,
+    oauth as never,
   );
   return { service, providerRepo, messageRepo, probe, credential };
 }
 
 describe('PlanUsageService', () => {
+  it('falls back to the persisted snapshot when a live probe is rate limited', async () => {
+    const snapshot = {
+      status: 'live',
+      source: 'anthropic_internal_oauth_usage',
+      fetchedAt: '2026-09-03T10:00:00.000Z',
+      planName: 'max',
+      windows: [{ name: '5-hour limit', usedPercent: 17 }],
+    };
+    const probe = jest.fn().mockResolvedValue({
+      status: 'unavailable',
+      source: 'anthropic_internal_oauth_usage',
+      fetchedAt: null,
+      windows: [],
+      message: 'Provider usage is rate limited',
+    });
+    const { service } = harness({
+      providers: [
+        provider({
+          id: 'tp-anthropic',
+          provider: 'anthropic',
+          cached_quota_report: JSON.stringify(snapshot),
+          cached_quota_at: '2026-09-03T10:00:00.000Z',
+        }),
+      ],
+      probe,
+    });
+
+    const rows = await service.getPlanUsage('tenant-1');
+
+    expect(rows[0].quota).toMatchObject({
+      status: 'cached',
+      stale: true,
+      planName: 'max',
+      message: 'Provider usage is rate limited',
+    });
+    expect(rows[0].quota.windows).toEqual(snapshot.windows);
+  });
+
+  it('reports the probe verdict when no snapshot has ever been stored', async () => {
+    const probe = jest.fn().mockResolvedValue({
+      status: 'unavailable',
+      source: 'anthropic_internal_oauth_usage',
+      fetchedAt: null,
+      windows: [],
+      message: 'Provider usage is rate limited',
+    });
+    const { service } = harness({
+      providers: [provider({ id: 'tp-anthropic', provider: 'anthropic' })],
+      probe,
+    });
+
+    const rows = await service.getPlanUsage('tenant-1');
+
+    expect(rows[0].quota).toMatchObject({ status: 'unavailable' });
+  });
+
   it('returns one row per owned non-local connection with exact-id 30-day metrics and zero fills', async () => {
     const ownedA = provider({ id: 'tp-a', label: 'A' });
     const ownedB = provider({ id: 'tp-b', provider: 'anthropic', label: 'B' });

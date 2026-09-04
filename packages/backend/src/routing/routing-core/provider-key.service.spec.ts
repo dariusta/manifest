@@ -429,3 +429,62 @@ describe('ProviderKeyService — filterProvidersForAgent (per-agent visibility)'
     expect(keys.map((k) => k.id).sort()).toEqual(['tp-a', 'tp-b']);
   });
 });
+
+describe('ProviderKeyService — sidelined credentials', () => {
+  const key = (over: Partial<CachedProviderKey>): CachedProviderKey => ({
+    id: 'up-1',
+    label: 'Default',
+    priority: 0,
+    apiKey: 'sk',
+    region: null,
+    ...over,
+  });
+
+  const build = (health: unknown) =>
+    new ProviderKeyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      null,
+      null,
+      health as never,
+    );
+
+  it('skips a connection the provider rejected for billing and uses the sibling', async () => {
+    const health = { isExhausted: jest.fn((s: { label: string }) => s.label === 'Exhausted') };
+    const svc = build(health);
+    jest
+      .spyOn(svc, 'getProviderKeys')
+      .mockResolvedValue([key({ label: 'Exhausted' }), key({ id: 'up-2', label: 'Healthy' })]);
+
+    const selected = await svc.selectProviderKey('tenant-1', 'anthropic', 'subscription');
+
+    expect(selected?.label).toBe('Healthy');
+  });
+
+  it('still returns the first connection when every sibling is sidelined', async () => {
+    const health = { isExhausted: jest.fn().mockReturnValue(true) };
+    const svc = build(health);
+    jest
+      .spyOn(svc, 'getProviderKeys')
+      .mockResolvedValue([key({ label: 'A' }), key({ id: 'up-2', label: 'B' })]);
+
+    const selected = await svc.selectProviderKey('tenant-1', 'anthropic', 'subscription');
+
+    expect(selected?.label).toBe('A');
+  });
+
+  it('honors an explicit label pin even when that connection is sidelined', async () => {
+    const health = { isExhausted: jest.fn().mockReturnValue(true) };
+    const svc = build(health);
+    jest
+      .spyOn(svc, 'getProviderKeys')
+      .mockResolvedValue([key({ label: 'A' }), key({ id: 'up-2', label: 'B' })]);
+
+    const selected = await svc.selectProviderKey('tenant-1', 'anthropic', 'subscription', 'B');
+
+    expect(selected?.label).toBe('B');
+  });
+});

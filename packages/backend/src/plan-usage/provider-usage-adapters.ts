@@ -325,35 +325,66 @@ const ZAI_LIMIT_NAMES: Record<string, string> = {
   RATE_LIMIT: 'rate limit',
   TIMES_LIMIT: 'requests',
   SESSION_LIMIT: 'sessions',
+  CREDIT_LIMIT: 'credit limit',
 };
+
+/**
+ * Z.ai reports its rolling and long windows under one `type`, so a coding plan
+ * comes back as two identical "credit limit" rows that differ only by reset
+ * time. Name them by the cadence their reset implies.
+ */
+function zaiWindowCadence(resetAt: string | undefined, now: number): string | undefined {
+  if (!resetAt) return undefined;
+  const remainingHours = (new Date(resetAt).getTime() - now) / 3_600_000;
+  if (!Number.isFinite(remainingHours) || remainingHours <= 0) return undefined;
+  if (remainingHours <= 6) return '5-hour';
+  if (remainingHours <= 24 * 8) return 'weekly';
+  return undefined;
+}
+
+/**
+ * Only rename when a name actually repeats: a plan that reports a single
+ * window keeps the provider's own wording.
+ */
+function disambiguateZaiWindows(windows: ProviderQuotaWindow[]): ProviderQuotaWindow[] {
+  const counts = new Map<string, number>();
+  for (const window of windows) counts.set(window.name, (counts.get(window.name) ?? 0) + 1);
+  const now = Date.now();
+  return windows.map((window) => {
+    if ((counts.get(window.name) ?? 0) < 2) return window;
+    const cadence = zaiWindowCadence(window.resetAt, now);
+    return cadence ? { ...window, name: `${cadence} ${window.name}` } : window;
+  });
+}
 
 export function parseZaiUsage(body: unknown): ParsedProviderUsage {
   const envelope = record(body) ?? {};
   const root = record(envelope['data']) ?? envelope;
   const limits = root['limits'];
+  const windows: ProviderQuotaWindow[] = Array.isArray(limits)
+    ? limits.flatMap((raw) => {
+        const limit = record(raw);
+        if (!limit) return [];
+        const usedPercent = percent(limit['percentage']);
+        const remaining = finite(limit['remaining']);
+        if (usedPercent === undefined && remaining === undefined) return [];
+        const type = typeof limit['type'] === 'string' ? limit['type'] : 'RATE_LIMIT';
+        return [
+          {
+            name: ZAI_LIMIT_NAMES[type] ?? type.toLowerCase().replaceAll('_', ' '),
+            ...(usedPercent !== undefined
+              ? { usedPercent, remainingPercent: complement(usedPercent) }
+              : {}),
+            ...(remaining !== undefined ? { remaining } : {}),
+            ...(isoTime(limit['nextResetTime'], true)
+              ? { resetAt: isoTime(limit['nextResetTime'], true) }
+              : {}),
+          },
+        ];
+      })
+    : [];
   return {
-    windows: Array.isArray(limits)
-      ? limits.flatMap((raw) => {
-          const limit = record(raw);
-          if (!limit) return [];
-          const usedPercent = percent(limit['percentage']);
-          const remaining = finite(limit['remaining']);
-          if (usedPercent === undefined && remaining === undefined) return [];
-          const type = typeof limit['type'] === 'string' ? limit['type'] : 'RATE_LIMIT';
-          return [
-            {
-              name: ZAI_LIMIT_NAMES[type] ?? type.toLowerCase().replaceAll('_', ' '),
-              ...(usedPercent !== undefined
-                ? { usedPercent, remainingPercent: complement(usedPercent) }
-                : {}),
-              ...(remaining !== undefined ? { remaining } : {}),
-              ...(isoTime(limit['nextResetTime'], true)
-                ? { resetAt: isoTime(limit['nextResetTime'], true) }
-                : {}),
-            },
-          ];
-        })
-      : [],
+    windows: disambiguateZaiWindows(windows),
     ...(typeof root['level'] === 'string' ? { planName: root['level'] } : {}),
   };
 }
