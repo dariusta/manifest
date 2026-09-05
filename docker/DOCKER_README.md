@@ -349,8 +349,8 @@ Because the container detects self-hosted mode automatically (via `/.dockerenv`)
 ollama pull llama3.1:8b
 ```
 
-2. In the dashboard, go to Providers → API Keys → click the **Ollama** tile.
-3. Manifest reaches Ollama at `http://host.docker.internal:11434` and syncs the available models.
+2. In the dashboard, go to Providers → Local → connect **Ollama**.
+3. Enter the **Server IP or Base URL**. For Ollama on the Docker host, use `http://host.docker.internal:11434/v1`. Manifest discovers the models; select which ones to connect.
 
 ### LM Studio
 
@@ -383,7 +383,18 @@ For vLLM, text-generation-webui, TogetherAI proxies, Azure OpenAI gateways, or a
 
 ### Running Ollama on another machine
 
-If Ollama runs on a different host on your LAN, set `OLLAMA_HOST` in `.env` to the full URL (e.g. `http://192.168.1.20:11434`) and restart the stack. Private IPs are allowed in the self-hosted version.
+In Providers → Local → Ollama, enter the remote host in **Server IP or Base URL**:
+
+- `192.168.1.20` becomes `http://192.168.1.20:11434/v1`.
+- `http://192.168.1.20:11434` uses that explicit port.
+- `https://ollama.example.com` uses HTTPS on its standard port, with `/v1` appended.
+- `https://example.com/ollama/v1` preserves a reverse proxy's path prefix.
+
+The endpoint is saved on that workspace's custom-provider connection and is used for model discovery and requests. It can be edited without restarting Manifest or changing the process-wide `OLLAMA_HOST`; existing built-in connections still use that deployment default.
+
+For additional remote servers, use **Add custom provider** with a distinct name for each (for example, `Ollama GPU A` and `Ollama GPU B`), its OpenAI-compatible base URL ending in `/v1`, and **Fetch models**. This form also supports API keys for authenticated reverse proxies.
+
+The remote server must be reachable **from Manifest**, not just from your browser. On the remote machine, configure Ollama to listen on the appropriate network interface (for example, `OLLAMA_HOST=0.0.0.0:11434 ollama serve`). Restrict access with a private network/VPN or a firewall; do not expose an unauthenticated Ollama server to the public internet. Private IPs are allowed in self-hosted Manifest; cloud-metadata endpoints remain blocked.
 
 ### Podman / rootless containers
 

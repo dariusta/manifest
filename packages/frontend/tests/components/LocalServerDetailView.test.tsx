@@ -65,6 +65,10 @@ describe('resolveLocalServerBaseUrl', () => {
     ['192.168.1.42', 'http://192.168.1.42:11434/v1'],
     ['192.168.1.42:1234', 'http://192.168.1.42:1234/v1'],
     ['ollama.lan', 'http://ollama.lan:11434/v1'],
+    ['https://ollama.example.com', 'https://ollama.example.com/v1'],
+    ['http://ollama.example.com', 'http://ollama.example.com/v1'],
+    ['https://ollama.example.com:443/ollama/v1', 'https://ollama.example.com/ollama/v1'],
+    ['https://ollama.example.com:8443', 'https://ollama.example.com:8443/v1'],
     ['http://ollama.lan:11434', 'http://ollama.lan:11434/v1'],
     ['http://ollama.lan:11434/custom', 'http://ollama.lan:11434/custom'],
   ])('resolves %s to %s', (input, expected) => {
@@ -96,6 +100,35 @@ describe('LocalServerDetailView', () => {
       expect(container.textContent).toContain('1 model');
       expect(container.textContent).toContain('llama-3.1-8b');
     });
+  });
+
+  it('ignores a stale discovery response after switching servers', async () => {
+    let finishOld!: (value: { models: { model_name: string }[] }) => void;
+    mockProbe.mockImplementation((_agent: string, url: string) =>
+      url.includes('remote.example.com')
+        ? Promise.resolve({ models: [{ model_name: 'remote-model' }] })
+        : new Promise((resolve) => {
+            finishOld = resolve;
+          }),
+    );
+    const { getByLabelText, getByText, container } = render(() => (
+      <LocalServerDetailView
+        agentName="a1"
+        provider={lmsProv}
+        onConnected={vi.fn()}
+        onBack={vi.fn()}
+      />
+    ));
+    await waitFor(() => expect(finishOld).toBeDefined());
+    fireEvent.input(getByLabelText('Server IP or Base URL'), {
+      target: { value: 'https://remote.example.com' },
+    });
+    await waitFor(() => expect(getByText('Connect 1 model')).toBeDefined());
+    finishOld({ models: [{ model_name: 'old-model' }] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(container.querySelectorAll('.provider-toggle__switch--on')).toHaveLength(1);
+    expect(getByText('Connect 1 model')).toBeDefined();
+    mockProbe.mockReset();
   });
 
   it('renders a toggle list when LM Studio returns multiple models', async () => {
@@ -162,7 +195,9 @@ describe('LocalServerDetailView', () => {
   });
 
   it('shows the failure state with setup command and a Retry button when probe fails', async () => {
-    mockProbe.mockRejectedValue(new Error('No server is listening on http://localhost:1234/v1/models'));
+    mockProbe.mockRejectedValue(
+      new Error('No server is listening on http://localhost:1234/v1/models'),
+    );
 
     const { container } = render(() => (
       <LocalServerDetailView
@@ -291,9 +326,7 @@ describe('LocalServerDetailView', () => {
 
     // Wait for initial probe to land.
     const toggles = await waitFor(() => {
-      const list = Array.from(
-        container.querySelectorAll<HTMLButtonElement>('.provider-toggle'),
-      );
+      const list = Array.from(container.querySelectorAll<HTMLButtonElement>('.provider-toggle'));
       if (list.length !== 2) throw new Error('waiting');
       return list;
     });
@@ -313,9 +346,7 @@ describe('LocalServerDetailView', () => {
     fireEvent.click(refreshBtn!);
 
     await waitFor(() => {
-      const rows = Array.from(
-        container.querySelectorAll<HTMLButtonElement>('.provider-toggle'),
-      );
+      const rows = Array.from(container.querySelectorAll<HTMLButtonElement>('.provider-toggle'));
       if (rows.length !== 3) throw new Error('waiting for 3 models');
       // alpha was toggled off before refresh and should stay off.
       const labels = rows.map((row) => ({
@@ -347,9 +378,7 @@ describe('LocalServerDetailView', () => {
     ));
 
     const toggles = await waitFor(() => {
-      const list = Array.from(
-        container.querySelectorAll<HTMLButtonElement>('.provider-toggle'),
-      );
+      const list = Array.from(container.querySelectorAll<HTMLButtonElement>('.provider-toggle'));
       if (list.length !== 2) throw new Error('waiting');
       return list;
     });
@@ -417,7 +446,9 @@ describe('LocalServerDetailView', () => {
 
     // Switch to CLI tab to reveal the copy button
     const cliTab = await waitFor(() => {
-      const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('.provider-detail__caveat button'));
+      const tabs = Array.from(
+        container.querySelectorAll<HTMLButtonElement>('.provider-detail__caveat button'),
+      );
       const t = tabs.find((el) => el.textContent?.trim() === 'CLI');
       if (!t) throw new Error('CLI tab not yet rendered');
       return t;
@@ -459,7 +490,9 @@ describe('LocalServerDetailView', () => {
 
     // Switch to CLI tab to reveal the copy button
     const cliTab = await waitFor(() => {
-      const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('.provider-detail__caveat button'));
+      const tabs = Array.from(
+        container.querySelectorAll<HTMLButtonElement>('.provider-detail__caveat button'),
+      );
       const t = tabs.find((el) => el.textContent?.trim() === 'CLI');
       if (!t) throw new Error('CLI tab not yet rendered');
       return t;
@@ -495,8 +528,16 @@ describe('LocalServerDetailView', () => {
       name: 'LM Studio',
       base_url: 'http://localhost:1234/v1',
       models: [
-        { model_name: 'alpha', input_price_per_million_tokens: 0, output_price_per_million_tokens: 0 },
-        { model_name: 'beta', input_price_per_million_tokens: 0, output_price_per_million_tokens: 0 },
+        {
+          model_name: 'alpha',
+          input_price_per_million_tokens: 0,
+          output_price_per_million_tokens: 0,
+        },
+        {
+          model_name: 'beta',
+          input_price_per_million_tokens: 0,
+          output_price_per_million_tokens: 0,
+        },
       ],
     };
 
@@ -555,7 +596,11 @@ describe('LocalServerDetailView', () => {
       name: 'LM Studio',
       base_url: 'http://localhost:1234/v1',
       models: [
-        { model_name: 'alpha', input_price_per_million_tokens: 0, output_price_per_million_tokens: 0 },
+        {
+          model_name: 'alpha',
+          input_price_per_million_tokens: 0,
+          output_price_per_million_tokens: 0,
+        },
       ],
     };
 
@@ -597,7 +642,11 @@ describe('LocalServerDetailView', () => {
       name: 'LM Studio',
       base_url: 'http://localhost:1234/v1',
       models: [
-        { model_name: 'alpha', input_price_per_million_tokens: 0, output_price_per_million_tokens: 0 },
+        {
+          model_name: 'alpha',
+          input_price_per_million_tokens: 0,
+          output_price_per_million_tokens: 0,
+        },
       ],
     };
 
@@ -652,7 +701,11 @@ describe('LocalServerDetailView', () => {
       name: 'LM Studio',
       base_url: 'http://localhost:1234/v1',
       models: [
-        { model_name: 'alpha', input_price_per_million_tokens: 0, output_price_per_million_tokens: 0 },
+        {
+          model_name: 'alpha',
+          input_price_per_million_tokens: 0,
+          output_price_per_million_tokens: 0,
+        },
       ],
     };
 
@@ -691,9 +744,7 @@ describe('LocalServerDetailView', () => {
     // Wait for the setup command copy button (inside the setup cmd block, not Docker caveat)
     const copyBtn = await waitFor(() => {
       // The copy button is a button with a title attribute
-      const candidates = Array.from(
-        container.querySelectorAll<HTMLButtonElement>('button[title]'),
-      );
+      const candidates = Array.from(container.querySelectorAll<HTMLButtonElement>('button[title]'));
       const b = candidates.find((el) => el.title === 'Copy' || el.title === 'Copied!');
       if (!b) throw new Error('copy button not yet rendered');
       return b;
@@ -723,9 +774,7 @@ describe('LocalServerDetailView', () => {
     ));
 
     const copyBtn = await waitFor(() => {
-      const candidates = Array.from(
-        container.querySelectorAll<HTMLButtonElement>('button[title]'),
-      );
+      const candidates = Array.from(container.querySelectorAll<HTMLButtonElement>('button[title]'));
       const b = candidates.find((el) => el.title === 'Copy' || el.title === 'Copied!');
       if (!b) throw new Error('copy button not yet rendered');
       return b;
@@ -833,12 +882,15 @@ describe('LocalServerDetailView', () => {
     });
 
     // Switch to CLI tab and verify the bind command is shown.
-    const cliTab = Array.from(container.querySelectorAll<HTMLButtonElement>('.provider-detail__caveat button'))
-      .find((el) => el.textContent?.trim() === 'CLI')!;
+    const cliTab = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.provider-detail__caveat button'),
+    ).find((el) => el.textContent?.trim() === 'CLI')!;
     fireEvent.click(cliTab);
 
     await waitFor(() => {
-      expect(container.querySelector('.provider-detail__caveat')!.textContent).toContain('--bind 0.0.0.0');
+      expect(container.querySelector('.provider-detail__caveat')!.textContent).toContain(
+        '--bind 0.0.0.0',
+      );
     });
   });
 
@@ -856,7 +908,9 @@ describe('LocalServerDetailView', () => {
     ));
 
     const input = await waitFor(() => {
-      const field = container.querySelector('input[aria-label="Server IP or Base URL"]') as HTMLInputElement | null;
+      const field = container.querySelector(
+        'input[aria-label="Server IP or Base URL"]',
+      ) as HTMLInputElement | null;
       if (!field) throw new Error('base url input missing');
       return field;
     });
@@ -891,26 +945,38 @@ describe('LocalServerDetailView', () => {
       <LocalServerDetailView
         agentName="a1"
         provider={lmsProv}
-        editData={{
-          id: 'cp-1',
-          name: 'LM Studio',
-          base_url: 'http://localhost:1234/v1',
-          models: [{ model_name: 'kept', input_price_per_million_tokens: 0, output_price_per_million_tokens: 0 }],
-        } as never}
+        editData={
+          {
+            id: 'cp-1',
+            name: 'LM Studio',
+            base_url: 'http://localhost:1234/v1',
+            models: [
+              {
+                model_name: 'kept',
+                input_price_per_million_tokens: 0,
+                output_price_per_million_tokens: 0,
+              },
+            ],
+          } as never
+        }
         onConnected={vi.fn()}
         onBack={vi.fn()}
       />
     ));
 
     const input = await waitFor(() => {
-      const field = container.querySelector('input[aria-label="Server IP or Base URL"]') as HTMLInputElement | null;
+      const field = container.querySelector(
+        'input[aria-label="Server IP or Base URL"]',
+      ) as HTMLInputElement | null;
       if (!field) throw new Error('base url input missing');
       return field;
     });
     fireEvent.input(input, { target: { value: 'http://10.0.0.8:1234/v1' } });
 
     const save = await waitFor(() => {
-      const b = Array.from(container.querySelectorAll('button')).find((x) => x.textContent === 'Save changes');
+      const b = Array.from(container.querySelectorAll('button')).find(
+        (x) => x.textContent === 'Save changes',
+      );
       if (!b) throw new Error('save missing');
       return b as HTMLButtonElement;
     });

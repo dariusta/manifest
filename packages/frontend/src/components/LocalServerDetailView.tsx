@@ -54,7 +54,10 @@ export function resolveLocalServerBaseUrl(
   }
   try {
     const url = new URL(host);
-    if (!url.port) url.port = String(defaultPort);
+    // Complete URLs retain their HTTP(S) default port (including explicit
+    // :80/:443, which URL normalizes away). Only shorthand hosts get the
+    // provider's port; otherwise reverse-proxied remote servers break.
+    if (!hasScheme && !url.port) url.port = String(defaultPort);
     if (!url.pathname || url.pathname === '/') url.pathname = '/v1';
     return url.toString().replace(/\/$/, '');
   } catch {
@@ -89,14 +92,17 @@ const LocalServerDetailView: Component<Props> = (props) => {
   // First probe seeds "all selected" (connect mode) or keeps the edit
   // selection (edit mode); subsequent probes intersect-preserve.
   const [hasSeeded, setHasSeeded] = createSignal(isEdit());
+  let probeGeneration = 0;
 
   const [probe] = createResource(
     () => ({ key: refreshKey(), url: resolvedBaseUrl() }),
     async ({ url }): Promise<ProbeState> => {
+      const generation = ++probeGeneration;
       const wasConnected = hasSeeded();
       try {
         const { models } = await probeCustomProvider(props.agentName, url);
         const names = models.map((m) => m.model_name);
+        if (generation !== probeGeneration) return { models: names, baseUrl: url };
         setSelected((prev) => {
           if (!hasSeeded()) {
             setHasSeeded(true);
@@ -109,7 +115,7 @@ const LocalServerDetailView: Component<Props> = (props) => {
         });
         return { models: names, baseUrl: url };
       } catch (err) {
-        if (wasConnected) {
+        if (wasConnected && generation === probeGeneration) {
           toast.error(`${props.provider.name} is no longer reachable`);
         }
         throw err;
@@ -130,13 +136,14 @@ const LocalServerDetailView: Component<Props> = (props) => {
 
   const handleConnect = async () => {
     const state = probe();
-    if (!state || state.models.length === 0) return;
+    if (!state || probe.loading || probe.error || state.baseUrl !== resolvedBaseUrl()) return;
     const picked = Array.from(selected());
+    if (picked.length === 0) return;
     setConnecting(true);
     try {
       if (props.editData) {
         await updateCustomProvider(props.agentName, props.editData.id, {
-          base_url: resolvedBaseUrl(),
+          base_url: state.baseUrl,
           models: picked.map((name) => ({
             model_name: name,
             input_price_per_million_tokens: 0,
@@ -149,7 +156,7 @@ const LocalServerDetailView: Component<Props> = (props) => {
       } else {
         await createCustomProvider(props.agentName, {
           name: props.provider.name,
-          base_url: resolvedBaseUrl(),
+          base_url: state.baseUrl,
           models: picked.map((name) => ({
             model_name: name,
             input_price_per_million_tokens: 0,
@@ -243,8 +250,9 @@ const LocalServerDetailView: Component<Props> = (props) => {
           onChange={() => retry()}
         />
         <small style="color: hsl(var(--muted-foreground));">
-          Enter an IP, hostname, or complete URL. Manifest adds http://, port{' '}
-          {props.provider.defaultLocalPort}, and /v1 when omitted.
+          Use a local or remote server reachable from Manifest. For an IP or hostname, Manifest adds
+          http:// and port {props.provider.defaultLocalPort}. Complete URLs keep their port. /v1 is
+          added when no path is supplied. localhost refers to the Manifest server, not your browser.
         </small>
       </label>
 

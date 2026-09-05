@@ -236,6 +236,43 @@ describe("ProviderSelectContent", () => {
   });
 
   describe("LocalServerDetailView flow", () => {
+    it.each(['ollama', 'lmstudio', 'llamacpp'])(
+      'opens the remote server form for a %s local deep link',
+      async (providerId) => {
+        render(() => (
+          <ProviderSelectContent
+            agentName="test-agent"
+            providers={[]}
+            providerDeepLink={{ providerId, authType: 'local' }}
+            onUpdate={onUpdate}
+          />
+        ));
+        expect(screen.getByLabelText('Server IP or Base URL')).toBeDefined();
+      },
+    );
+
+    it('discovers and saves a remote Ollama endpoint from its direct connect flow', async () => {
+      const api = await import('../../src/services/api.js');
+      render(() => (
+        <ProviderSelectContent
+          agentName="test-agent"
+          providers={[]}
+          providerDeepLink={{ providerId: 'ollama', authType: 'local' }}
+          onUpdate={onUpdate}
+        />
+      ));
+      fireEvent.input(screen.getByLabelText('Server IP or Base URL'), {
+        target: { value: 'https://ollama.example.com' },
+      });
+      await waitFor(() => expect(api.probeCustomProvider).toHaveBeenCalledWith(
+        'test-agent', 'https://ollama.example.com/v1',
+      ));
+      await waitFor(() => expect(screen.getByText('Connect 1 model').hasAttribute('disabled')).toBe(false));
+      fireEvent.click(screen.getByText('Connect 1 model'));
+      await waitFor(() => expect(api.createCustomProvider).toHaveBeenCalledWith(
+        'test-agent', expect.objectContaining({ name: 'Ollama', base_url: 'https://ollama.example.com/v1' }),
+      ));
+    });
     // The LM Studio / llama.cpp local-server detail view is reached by editing
     // an existing local custom provider (its name maps to a defaultLocalPort
     // provider). The create-from-tile flow was removed with the list view.

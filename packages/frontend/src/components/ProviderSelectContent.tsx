@@ -39,6 +39,8 @@ const ProviderSelectContent: Component<ProviderSelectContentProps> = (props) => 
 
   const deepLink = props.providerDeepLink;
   const deepLinkProv = deepLink ? PROVIDERS.find((p) => p.id === deepLink.providerId) : null;
+  const deepLinkLocalProvider =
+    deepLink?.authType === 'local' && deepLinkProv?.defaultLocalPort ? deepLinkProv : null;
   // A `custom:<id>` deep link can't resolve to a standard PROVIDERS entry; it
   // targets a custom provider whose editor we open directly (see onMount below).
   const deepLinkCustomId = deepLink?.providerId.startsWith('custom:')
@@ -68,7 +70,7 @@ const ProviderSelectContent: Component<ProviderSelectContentProps> = (props) => 
     });
   }
   const [selectedProvider, setSelectedProvider] = createSignal<string | null>(
-    deepLinkProv ? deepLinkProv.id : null,
+    deepLinkLocalProvider ? null : (deepLinkProv?.id ?? null),
   );
   const [selectedAuthType, setSelectedAuthType] = createSignal<AuthType>(
     deepLink?.authType ?? (deepLinkProv?.subscriptionOnly ? 'subscription' : 'api_key'),
@@ -78,7 +80,9 @@ const ProviderSelectContent: Component<ProviderSelectContentProps> = (props) => 
   const [editingCustomProvider, setEditingCustomProvider] = createSignal<CustomProviderData | null>(
     null,
   );
-  const [localServerProvider, setLocalServerProvider] = createSignal<ProviderDef | null>(null);
+  const [localServerProvider, setLocalServerProvider] = createSignal<ProviderDef | null>(
+    deepLinkLocalProvider,
+  );
   const [localServerEditData, setLocalServerEditData] = createSignal<
     CustomProviderData | undefined
   >(undefined);
