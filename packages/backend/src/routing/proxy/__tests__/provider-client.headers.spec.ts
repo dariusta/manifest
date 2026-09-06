@@ -80,14 +80,16 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
       'x-stainless-helper-method': 'stream',
       'x-stainless-lang': 'js',
       'x-stainless-os': claudeCodeStainlessOs(),
-      'x-stainless-package-version': '0.80.0',
+      'x-stainless-package-version': '0.112.1',
       'x-stainless-retry-count': '0',
       'x-stainless-runtime': 'node',
-      'x-stainless-runtime-version': 'v24.14.0',
+      'x-stainless-runtime-version': 'v26.3.0',
       'x-stainless-timeout': '600',
     });
     expect(sentHeaders).not.toHaveProperty('x-forwarded-server');
+    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
     expect(sentHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
+    expect(sentHeaders['anthropic-beta']).toContain('fallback-credit-2026-06-01');
     expect(sentHeaders['anthropic-beta']).toContain('claude-code-20250219');
     expect(sentHeaders['anthropic-beta']).toContain('context-management-2025-06-27');
     expect(sentHeaders['anthropic-beta']).toContain('effort-2025-11-24');
@@ -118,11 +120,12 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     });
 
     const sentHeaders = mockFetch.mock.calls[0][1].headers as Record<string, string>;
-    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.258 (external, cli)');
+    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
     expect(sentHeaders['x-app']).toBe('cli');
     expect(sentHeaders['x-stainless-lang']).toBe('js');
     expect(sentHeaders['x-stainless-runtime']).toBe('node');
-    expect(sentHeaders['x-stainless-package-version']).toBe('0.80.0');
+    expect(sentHeaders['x-stainless-package-version']).toBe('0.112.1');
+    expect(sentHeaders['x-stainless-runtime-version']).toBe('v26.3.0');
     expect(sentHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
     expect(sentHeaders['anthropic-beta']).not.toContain('caller-controlled');
     expect(sentHeaders['x-claude-code-session-id']).toBe('session-123');

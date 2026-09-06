@@ -18,8 +18,9 @@
  * caller as a first-party Claude Code OAuth client. Without it Anthropic
  * classifies the Bearer token as a third-party app and draws from extra
  * usage ("Third-party apps now draw from your extra usage…") instead of the
- * plan limits. The user-agent must also use the interactive CLI entrypoint
- * (`external, cli`), not Agent SDK (`sdk-cli`).
+ * plan limits. Live Claude Code traffic that Anthropic bills as included usage
+ * identifies as `claude-cli/<version> (external, sdk-cli)` and includes
+ * `fallback-credit-2026-06-01` in `anthropic-beta`.
  *
  * Copilot (`https://api.githubcopilot.com/...`): GitHub validates the
  * `Editor-Version` and `Editor-Plugin-Version` headers; both are bumped
@@ -30,7 +31,7 @@ export const CODEX_CLI_VERSION = '0.128.0';
 export const CODEX_CLI_ORIGINATOR = 'codex_cli_rs';
 export const CODEX_CLI_USER_AGENT = 'codex_cli_rs/0.0.0 (Unknown 0; unknown) unknown';
 
-export const CLAUDE_CODE_VERSION = '2.1.258';
+export const CLAUDE_CODE_VERSION = '2.1.259';
 const CLAUDE_CODE_PACKAGE_URL = 'https://registry.npmjs.org/@anthropic-ai%2fclaude-code/latest';
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const VERSION_FETCH_TIMEOUT_MS = 10_000;
@@ -56,13 +57,20 @@ export async function refreshClaudeCodeVersion(): Promise<string | null> {
   }
 }
 
-export const CLAUDE_CODE_STAINLESS_PACKAGE_VERSION = '0.80.0';
-export const CLAUDE_CODE_STAINLESS_RUNTIME_VERSION = 'v24.14.0';
+export const CLAUDE_CODE_STAINLESS_PACKAGE_VERSION = '0.112.1';
+export const CLAUDE_CODE_STAINLESS_RUNTIME_VERSION = 'v26.3.0';
 export const CLAUDE_CODE_BETA_FLAGS = [
   'claude-code-20250219',
   'oauth-2025-04-20',
+  'interleaved-thinking-2025-05-14',
+  'thinking-token-count-2026-05-13',
   'context-management-2025-06-27',
+  'prompt-caching-scope-2026-01-05',
+  'mid-conversation-system-2026-04-07',
+  'advisor-tool-2026-03-01',
+  'advanced-tool-use-2025-11-20',
   'effort-2025-11-24',
+  'fallback-credit-2026-06-01',
 ].join(',');
 
 /** Compatibility identity owned by Manifest for Anthropic subscription calls. */
@@ -121,7 +129,7 @@ export const buildClaudeCodeSubscriptionHeaders = (apiKey: string): Record<strin
   'anthropic-version': '2023-06-01',
   'anthropic-beta': CLAUDE_CODE_BETA_FLAGS,
   'anthropic-dangerous-direct-browser-access': 'true',
-  'user-agent': `claude-cli/${getClaudeCodeVersion()} (external, cli)`,
+  'user-agent': `claude-cli/${getClaudeCodeVersion()} (external, sdk-cli)`,
   'x-app': 'cli',
   'x-stainless-arch': claudeCodeStainlessArch(),
   'x-stainless-helper-method': 'stream',

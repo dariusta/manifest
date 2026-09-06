@@ -1,4 +1,4 @@
-import { sanitizeRequestHeaders } from './request-headers';
+import { sanitizeProviderRequestHeaders, sanitizeRequestHeaders } from './request-headers';
 
 describe('sanitizeRequestHeaders', () => {
   it('returns null when no headers are provided', () => {
@@ -131,5 +131,24 @@ describe('sanitizeRequestHeaders', () => {
     expect(serialized).toBeLessThanOrEqual(8192);
     expect(Object.keys(result!).length).toBeLessThan(20);
     expect(Object.keys(result!).length).toBeGreaterThan(0);
+  });
+});
+
+describe('sanitizeProviderRequestHeaders', () => {
+  it('records outbound Claude Code identity and drops credentials', () => {
+    expect(
+      sanitizeProviderRequestHeaders({
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+        'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+        'x-app': 'cli',
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fallback-credit-2026-06-01',
+      }),
+    ).toEqual({
+      'content-type': 'application/json',
+      'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+      'x-app': 'cli',
+      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fallback-credit-2026-06-01',
+    });
   });
 });

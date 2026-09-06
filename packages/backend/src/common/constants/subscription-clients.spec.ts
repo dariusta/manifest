@@ -41,13 +41,13 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     // Header set copied byte-for-byte from the known-good implementation:
     // a synthetic forwarded-server id must NOT be present.
     expect(headers).not.toHaveProperty('x-forwarded-server');
-    expect(headers['x-stainless-package-version']).toBe('0.80.0');
-    expect(headers['x-stainless-runtime-version']).toBe('v24.14.0');
+    expect(headers['x-stainless-package-version']).toBe('0.112.1');
+    expect(headers['x-stainless-runtime-version']).toBe('v26.3.0');
   });
 
   it('identifies as Claude Code 2.1.251+ so Fable 5.1 is not rejected', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.258 (external, cli)');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
     const match = headers['user-agent']?.match(/^claude-cli\/(\d+)\.(\d+)\.(\d+) /);
     expect(match).not.toBeNull();
     const [, major, minor, patch] = match!;
@@ -65,13 +65,17 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     expect(headers['anthropic-beta']).toContain('claude-code-20250219');
     expect(headers['anthropic-beta']).toContain('context-management-2025-06-27');
     expect(headers['anthropic-beta']).toContain('effort-2025-11-24');
+    expect(headers['anthropic-beta']).toContain('fallback-credit-2026-06-01');
+    expect(headers['anthropic-beta']).toContain('interleaved-thinking-2025-05-14');
   });
 
-  it('identifies as the Claude Code CLI entrypoint, not the Agent SDK', () => {
+  it('matches the live Claude Code CLI identity that Anthropic bills as included usage', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.258 (external, cli)');
-    expect(headers['user-agent']).not.toContain('sdk-cli');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
     expect(headers['x-app']).toBe('cli');
+    expect(headers['x-stainless-package-version']).toBe('0.112.1');
+    expect(headers['x-stainless-runtime-version']).toBe('v26.3.0');
+    expect(headers['x-stainless-timeout']).toBe('600');
   });
 });
 

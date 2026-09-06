@@ -72,6 +72,7 @@ export interface ProviderAttemptRef {
   /** Capture owned by this exact provider call, never by the parent Request. */
   recordingCapture?: AttemptRecordingCapture;
   startRecording?: (recording: ProviderAttemptRecordingStart) => void;
+  recordOutboundHeaders?: (headers: Record<string, string>) => void;
   finishRecording?: (response?: RecordingResponseBody | null) => Promise<void>;
 }
 

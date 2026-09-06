@@ -32,7 +32,7 @@ import { resolveModelCapabilityMetadata } from '../../model-discovery/model-capa
 import { classifyCaller } from './caller-classifier';
 import { ObservationReporter } from '../autofix/observation-reporter';
 import type { AutofixRecord } from '../autofix/autofix.types';
-import { sanitizeRequestHeaders } from './request-headers';
+import { sanitizeProviderRequestHeaders, sanitizeRequestHeaders } from './request-headers';
 import { buildProxySessionScope } from './proxy-session-scope';
 import {
   buildMetaHeaders,
@@ -317,6 +317,20 @@ export class ProxyController {
           return;
         }
         attempt.recordingCapture = createAttemptRecordingCapture(requestBody, wireFormat);
+      };
+      attempt.recordOutboundHeaders = (headers) => {
+        const outbound = sanitizeProviderRequestHeaders(headers);
+        if (!outbound) return;
+        attempt.pendingWrite = attempt.pendingWrite
+          .then(async (ok) => {
+            if (!ok) return false;
+            await this.recorder.updateAttemptHeaders(attempt.id, outbound);
+            return true;
+          })
+          .catch((e) => {
+            this.logger.warn(`Failed to record outbound Provider Attempt headers: ${e}`);
+            return false;
+          });
       };
       attempt.finishRecording = async (response) => {
         if (recordingFinished) return;

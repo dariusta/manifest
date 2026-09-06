@@ -423,6 +423,7 @@ export class ProviderClient {
         if (providerOwnedValue !== undefined) finalHeaders[protectedName] = providerOwnedValue;
       }
     }
+    opts.attempt?.recordOutboundHeaders?.(finalHeaders);
 
     const retryWireBody = async (
       wireRequestBody: Record<string, unknown>,

@@ -693,6 +693,13 @@ export class ProxyMessageRecorder implements OnModuleDestroy {
     return true;
   }
 
+  async updateAttemptHeaders(
+    attemptId: string,
+    requestHeaders: Record<string, string>,
+  ): Promise<void> {
+    await this.messageRepo.update({ id: attemptId }, { request_headers: requestHeaders });
+  }
+
   /** Finish caller-disconnected work without attributing an error to Manifest or the provider. */
   async recordCancelledRequest(ctx: IngestionContext, opts: CancelledRequestOpts): Promise<void> {
     const row = buildMessageRow(ctx, {

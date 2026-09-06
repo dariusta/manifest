@@ -82,6 +82,12 @@ export function sanitizeRequestHeaders(
   return count > 0 ? out : null;
 }
 
+export function sanitizeProviderRequestHeaders(
+  headers: Record<string, string>,
+): Record<string, string> | null {
+  return sanitizeRequestHeaders(headers);
+}
+
 // Truncate by UTF-8 byte length (not character count) so multi-byte values
 // can't exceed the byte budget. When the cut lands mid-codepoint, Node's
 // Buffer.toString replaces the partial sequence with U+FFFD — strip those so

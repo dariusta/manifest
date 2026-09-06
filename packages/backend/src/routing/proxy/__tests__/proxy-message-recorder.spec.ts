@@ -2015,6 +2015,22 @@ describe('ProxyMessageRecorder', () => {
       );
       expect(updateMock.mock.calls[0][1].request_headers).toEqual({ 'x-e': '5' });
     });
+
+    it('updateAttemptHeaders stores outbound provider identity on the attempt', async () => {
+      await recorder.updateAttemptHeaders('attempt-outbound', {
+        'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+        'x-app': 'cli',
+      });
+      expect(updateMock).toHaveBeenCalledWith(
+        { id: 'attempt-outbound' },
+        {
+          request_headers: {
+            'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+            'x-app': 'cli',
+          },
+        },
+      );
+    });
   });
 
   describe('autofix persistence', () => {
