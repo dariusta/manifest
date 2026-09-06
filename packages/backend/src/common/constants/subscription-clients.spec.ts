@@ -47,7 +47,7 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
 
   it('identifies as Claude Code 2.1.251+ so Fable 5.1 is not rejected', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.258 (external, sdk-cli)');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.258 (external, cli)');
     const match = headers['user-agent']?.match(/^claude-cli\/(\d+)\.(\d+)\.(\d+) /);
     expect(match).not.toBeNull();
     const [, major, minor, patch] = match!;
@@ -65,6 +65,13 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     expect(headers['anthropic-beta']).toContain('claude-code-20250219');
     expect(headers['anthropic-beta']).toContain('context-management-2025-06-27');
     expect(headers['anthropic-beta']).toContain('effort-2025-11-24');
+  });
+
+  it('identifies as the Claude Code CLI entrypoint, not the Agent SDK', () => {
+    const headers = buildClaudeCodeSubscriptionHeaders('key-123');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.258 (external, cli)');
+    expect(headers['user-agent']).not.toContain('sdk-cli');
+    expect(headers['x-app']).toBe('cli');
   });
 });
 

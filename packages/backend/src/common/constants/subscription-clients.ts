@@ -18,7 +18,8 @@
  * caller as a first-party Claude Code OAuth client. Without it Anthropic
  * classifies the Bearer token as a third-party app and draws from extra
  * usage ("Third-party apps now draw from your extra usage…") instead of the
- * plan limits.
+ * plan limits. The user-agent must also use the interactive CLI entrypoint
+ * (`external, cli`), not Agent SDK (`sdk-cli`).
  *
  * Copilot (`https://api.githubcopilot.com/...`): GitHub validates the
  * `Editor-Version` and `Editor-Plugin-Version` headers; both are bumped
@@ -120,7 +121,7 @@ export const buildClaudeCodeSubscriptionHeaders = (apiKey: string): Record<strin
   'anthropic-version': '2023-06-01',
   'anthropic-beta': CLAUDE_CODE_BETA_FLAGS,
   'anthropic-dangerous-direct-browser-access': 'true',
-  'user-agent': `claude-cli/${getClaudeCodeVersion()} (external, sdk-cli)`,
+  'user-agent': `claude-cli/${getClaudeCodeVersion()} (external, cli)`,
   'x-app': 'cli',
   'x-stainless-arch': claudeCodeStainlessArch(),
   'x-stainless-helper-method': 'stream',

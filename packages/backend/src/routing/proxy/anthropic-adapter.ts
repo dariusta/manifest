@@ -71,12 +71,12 @@ function normalizeAnthropicThinking(thinking: unknown): unknown {
 /**
  * System prompt required by Anthropic's subscription OAuth API to unlock
  * sonnet/opus model families. Without it, subscription tokens can only
- * access haiku. This mirrors how the Copilot integration spoofs
- * Editor-Version headers to satisfy GitHub's API validation.
+ * access haiku. Use the interactive Claude Code CLI identity, not the
+ * Agent SDK identity that Anthropic classifies as third-party usage.
  */
 const SUBSCRIPTION_IDENTITY_BLOCK: ContentBlock = {
   type: 'text',
-  text: "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+  text: "You are Claude Code, Anthropic's official CLI for Claude.",
 };
 
 function safeParseArgs(args: string | undefined): unknown {

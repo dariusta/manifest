@@ -734,7 +734,7 @@ describe('Anthropic Adapter', () => {
         cache_control?: unknown;
       }>;
       expect(system).toHaveLength(2);
-      expect(system[0].text).toContain('Claude agent');
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
       expect(system[0].cache_control).toBeUndefined();
       expect(system[1].text).toBe('You are helpful.');
       expect(system[1].cache_control).toEqual({ type: 'ephemeral' });
@@ -749,7 +749,7 @@ describe('Anthropic Adapter', () => {
       });
       const system = result.system as Array<{ type: string; text: string }>;
       expect(system).toHaveLength(1);
-      expect(system[0].text).toContain('Claude agent');
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
     });
 
     it('does not inject subscription identity when option is false', () => {
@@ -2351,7 +2351,7 @@ describe('Anthropic Adapter', () => {
       );
       const system = result.system as Array<Record<string, unknown>>;
       expect(system).toHaveLength(2);
-      expect(system[0].text).toMatch(/Claude agent/);
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
       expect(system[0].cache_control).toBeUndefined();
       expect(system[1].text).toBe('You are Manifest.');
       expect(system[1].cache_control).toEqual({ type: 'ephemeral' });
@@ -2364,7 +2364,7 @@ describe('Anthropic Adapter', () => {
       );
       const system = result.system as Array<Record<string, unknown>>;
       expect(system).toHaveLength(1);
-      expect(system[0].text).toMatch(/Claude agent/);
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
       expect(system[0].cache_control).toBeUndefined();
     });
 
@@ -2423,7 +2423,7 @@ describe('Anthropic Adapter', () => {
 
       expect(countCacheControls(result)).toBe(4);
       const system = result.system as Array<Record<string, unknown>>;
-      expect(system[0].text).toMatch(/Claude agent/);
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
       expect(system[0].cache_control).toBeUndefined();
       const tools = result.tools as Array<Record<string, unknown>>;
       expect(tools[0].cache_control).toEqual(cache);
@@ -2454,7 +2454,7 @@ describe('Anthropic Adapter', () => {
 
       expect(countCacheControls(result)).toBe(4);
       const system = result.system as Array<Record<string, unknown>>;
-      expect(system[0].text).toMatch(/Claude agent/);
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
       expect(system[0].cache_control).toBeUndefined();
       const tools = result.tools as Array<Record<string, unknown>>;
       expect(tools[0].cache_control).toBeUndefined();

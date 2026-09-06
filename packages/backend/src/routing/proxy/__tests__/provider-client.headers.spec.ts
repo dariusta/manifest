@@ -118,7 +118,7 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     });
 
     const sentHeaders = mockFetch.mock.calls[0][1].headers as Record<string, string>;
-    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.258 (external, sdk-cli)');
+    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.258 (external, cli)');
     expect(sentHeaders['x-app']).toBe('cli');
     expect(sentHeaders['x-stainless-lang']).toBe('js');
     expect(sentHeaders['x-stainless-runtime']).toBe('node');

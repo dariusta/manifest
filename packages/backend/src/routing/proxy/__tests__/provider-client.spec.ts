@@ -1762,7 +1762,7 @@ describe('ProviderClient', () => {
       expect(sentBody.cache_control).toEqual({ type: 'ephemeral' });
       const system = sentBody.system as Array<{ text?: string; cache_control?: unknown }>;
       // First system block is the subscription identity prompt
-      expect(system[0].text).toContain('Claude agent');
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
       expect(system[0].cache_control).toBeUndefined();
       // The OAuth API accepts cache_control (the #1193 400s were caused by the
       // missing identity block, not caching), so subscription auth gets the
