@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'crypto';
 
+import { getClaudeCodeVersion } from '../../common/constants/subscription-clients';
 import { OpenAIMessage, ThinkingBlockLookup } from './proxy-types';
 import type { ThinkingBlock, ThinkingBlockRouteContext } from './thinking-block-cache';
 
@@ -78,6 +79,166 @@ const SUBSCRIPTION_IDENTITY_BLOCK: ContentBlock = {
   type: 'text',
   text: "You are Claude Code, Anthropic's official CLI for Claude.",
 };
+
+const CLAUDE_CODE_TOOL_VOCAB = [
+  'Read',
+  'Write',
+  'Edit',
+  'Bash',
+  'Glob',
+  'Grep',
+  'Task',
+  'TodoWrite',
+  'WebFetch',
+  'WebSearch',
+  'NotebookEdit',
+  'Agent',
+  'LS',
+  'Skill',
+  'BashOutput',
+  'KillBash',
+  'SlashCommand',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'EnterWorktree',
+  'ExitWorktree',
+  'ListAgents',
+  'ListMcpResourcesTool',
+  'LSP',
+  'DesignSync',
+  'ToolSearch',
+] as const;
+
+const HERMES_TO_CLAUDE_CODE_TOOLS: Record<string, (typeof CLAUDE_CODE_TOOL_VOCAB)[number]> = {
+  read_file: 'Read',
+  write_file: 'Write',
+  patch: 'Edit',
+  search_files: 'Grep',
+  terminal: 'Bash',
+  web_search: 'WebSearch',
+  web_extract: 'WebFetch',
+  delegate_task: 'Task',
+  browser_exec: 'Agent',
+  execute_code: 'NotebookEdit',
+  memory: 'TodoWrite',
+  skill_view: 'Skill',
+  skill_manage: 'SlashCommand',
+  skills_list: 'LS',
+  tool_search: 'ToolSearch',
+  tool_describe: 'ListMcpResourcesTool',
+  tool_call: 'CronCreate',
+  clarify: 'CronList',
+  text_to_speech: 'DesignSync',
+  vision_analyze: 'LSP',
+  mem0_search: 'Glob',
+  mem0_add: 'EnterWorktree',
+  mem0_update: 'ExitWorktree',
+  mem0_delete: 'KillBash',
+};
+
+const THIRD_PARTY_SYSTEM_RE =
+  /\b(sharky|hermes operator|hermes agent|openclaw|soul\.md|you are sharky)\b/i;
+
+type ClaudeCodeToolRemapper = {
+  remap: (original: string) => string;
+  restore: (mapped: string) => string;
+  aliases: Map<string, string>;
+};
+
+let lastClaudeCodeToolAliases: Map<string, string> | undefined;
+
+function createClaudeCodeToolRemapper(): ClaudeCodeToolRemapper {
+  const aliases = new Map<string, string>();
+  const originalToMapped = new Map<string, string>();
+  const used = new Set<string>();
+  const remap = (original: string): string => {
+    const existing = originalToMapped.get(original);
+    if (existing) return existing;
+    let mapped: string | undefined = HERMES_TO_CLAUDE_CODE_TOOLS[original];
+    if (!mapped || used.has(mapped)) {
+      mapped = CLAUDE_CODE_TOOL_VOCAB.find((name) => !used.has(name));
+    }
+    if (!mapped) mapped = original;
+    used.add(mapped);
+    aliases.set(mapped, original);
+    originalToMapped.set(original, mapped);
+    return mapped;
+  };
+  const restore = (mapped: string): string => aliases.get(mapped) ?? mapped;
+  lastClaudeCodeToolAliases = aliases;
+  return { remap, restore, aliases };
+}
+
+function buildClaudeCodeBillingHeaderBlock(): ContentBlock {
+  return {
+    type: 'text',
+    text: `x-anthropic-billing-header: cc_version=${getClaudeCodeVersion()}; cc_entrypoint=sdk-cli;`,
+  };
+}
+
+function applySubscriptionSystemIdentity(blocks: ContentBlock[]): ContentBlock[] {
+  const sanitized: ContentBlock[] = [];
+  let replacedThirdParty = false;
+  for (const block of blocks) {
+    if (block.text === SUBSCRIPTION_IDENTITY_BLOCK.text) continue;
+    if (typeof block.text === 'string' && THIRD_PARTY_SYSTEM_RE.test(block.text)) {
+      if (!replacedThirdParty) {
+        sanitized.push(buildClaudeCodeBillingHeaderBlock());
+        replacedThirdParty = true;
+      }
+      continue;
+    }
+    sanitized.push(block);
+  }
+  return [{ ...SUBSCRIPTION_IDENTITY_BLOCK }, ...sanitized];
+}
+
+function attachClaudeCodeToolAliases(
+  body: Record<string, unknown>,
+  aliases: Map<string, string>,
+): void {
+  Object.defineProperty(body, '_claudeCodeToolAliases', {
+    value: aliases,
+    enumerable: false,
+    configurable: true,
+  });
+}
+
+export function takeClaudeCodeToolAliases(
+  body: Record<string, unknown> | undefined,
+): Map<string, string> | undefined {
+  if (!body) return lastClaudeCodeToolAliases;
+  const aliases = (body as { _claudeCodeToolAliases?: Map<string, string> })._claudeCodeToolAliases;
+  if (aliases)
+    delete (body as { _claudeCodeToolAliases?: Map<string, string> })._claudeCodeToolAliases;
+  return aliases ?? lastClaudeCodeToolAliases;
+}
+
+function restoreClaudeCodeToolName(
+  name: string | undefined,
+  aliases?: Map<string, string>,
+): string {
+  if (!name) return '';
+  return (aliases ?? lastClaudeCodeToolAliases)?.get(name) ?? name;
+}
+
+function remapAnthropicToolName(
+  tool: Record<string, unknown>,
+  remap: (original: string) => string,
+): void {
+  if (typeof tool.name === 'string') tool.name = remap(tool.name);
+  if (isObjectRecord(tool.function) && typeof tool.function.name === 'string') {
+    tool.function.name = remap(tool.function.name);
+  }
+}
+
+function remapToolUseName(block: ContentBlock, remap: (original: string) => string): ContentBlock {
+  if (block.type === 'tool_use' && typeof block.name === 'string') {
+    return { ...block, name: remap(block.name) };
+  }
+  return block;
+}
 
 function safeParseArgs(args: string | undefined): unknown {
   try {
@@ -274,6 +435,7 @@ function convertMessage(
   msg: OpenAIMessage,
   thinkingLookup?: ThinkingBlockLookup,
   thinkingRouteContext?: ThinkingBlockRouteContext,
+  remapToolName?: (original: string) => string,
 ): { role: 'user' | 'assistant'; content: ContentBlock[] } | null {
   if (msg.role === 'system' || msg.role === 'developer') return null;
 
@@ -316,7 +478,7 @@ function convertMessage(
         blocks.push({
           type: 'tool_use',
           id: tc.id,
-          name: tc.function.name,
+          name: remapToolName ? remapToolName(tc.function.name) : tc.function.name,
           input: safeParseArgs(tc.function.arguments),
         });
       }
@@ -392,14 +554,15 @@ export function toAnthropicRequest(
 
   // Subscription OAuth tokens require the Claude Code agent identity as the
   // first system block to access sonnet/opus models (haiku works without it).
+  const remapper = options?.injectSubscriptionIdentity ? createClaudeCodeToolRemapper() : undefined;
   if (options?.injectSubscriptionIdentity) {
-    systemBlocks.unshift({ ...SUBSCRIPTION_IDENTITY_BLOCK });
+    systemBlocks.splice(0, systemBlocks.length, ...applySubscriptionSystemIdentity(systemBlocks));
   }
 
   const thinkingLookup = options?.thinkingLookup;
   const thinkingRouteContext = options?.thinkingRouteContext;
   const converted = messages
-    .map((msg) => convertMessage(msg, thinkingLookup, thinkingRouteContext))
+    .map((msg) => convertMessage(msg, thinkingLookup, thinkingRouteContext, remapper?.remap))
     .filter(Boolean);
   const result: Record<string, unknown> = {
     messages: converted,
@@ -413,10 +576,14 @@ export function toAnthropicRequest(
   // server tools never reach this code path and the OpenAI function-shape
   // assumption is safe.
   const tools = convertTools(body.tools as Array<Record<string, unknown>> | undefined) ?? [];
+  if (remapper) {
+    for (const tool of tools) tool.name = remapper.remap(tool.name);
+  }
   if (tools.length > 0) {
     tools[tools.length - 1].cache_control = CACHE;
     result.tools = tools;
   }
+  if (remapper) attachClaudeCodeToolAliases(result, remapper.aliases);
 
   const outputConfig = toAnthropicOutputConfig(body.response_format, body.output_config);
   if (outputConfig) {
@@ -516,6 +683,7 @@ export function applyAnthropicMessagesMutations(
   const needsBlockSystem =
     options?.injectSubscriptionIdentity ||
     (typeof body.system === 'string' ? body.system : Array.isArray(body.system));
+  const remapper = options?.injectSubscriptionIdentity ? createClaudeCodeToolRemapper() : undefined;
   if (needsBlockSystem) {
     let systemBlocks: ContentBlock[] = [];
     if (typeof body.system === 'string') {
@@ -525,7 +693,7 @@ export function applyAnthropicMessagesMutations(
     }
     tryAddCacheControl(systemBlocks[systemBlocks.length - 1], cacheBudget);
     if (options?.injectSubscriptionIdentity) {
-      systemBlocks.unshift({ ...SUBSCRIPTION_IDENTITY_BLOCK });
+      systemBlocks.splice(0, systemBlocks.length, ...applySubscriptionSystemIdentity(systemBlocks));
     }
     if (systemBlocks.length > 0) {
       result.system = systemBlocks;
@@ -541,11 +709,13 @@ export function applyAnthropicMessagesMutations(
     const tools = (body.tools as Array<Record<string, unknown>>).map((t) => {
       const cloned = { ...t };
       stripEmptyDomainFilters(cloned);
+      if (remapper) remapAnthropicToolName(cloned, remapper.remap);
       return cloned;
     });
     tryAddCacheControl(tools[tools.length - 1], cacheBudget);
     result.tools = tools;
   }
+  if (remapper) attachClaudeCodeToolAliases(result, remapper.aliases);
 
   if (result.output_config !== undefined) {
     result.output_config = normalizeOutputConfigForModel(
@@ -562,8 +732,15 @@ export function applyAnthropicMessagesMutations(
       .map((m): Record<string, unknown> | null => {
         if (m.role !== 'assistant' || !Array.isArray(m.content)) return m;
         const sanitized = stripUnsignedThinkingBlocks(m.content as ContentBlock[]);
-        const content = sanitized.content;
-        const messageChanged = sanitized.changed;
+        let content = sanitized.content;
+        let messageChanged = sanitized.changed;
+        if (remapper) {
+          const remapped = content.map((block) => remapToolUseName(block, remapper.remap));
+          if (remapped.some((block, index) => block !== content[index])) {
+            content = remapped;
+            messageChanged = true;
+          }
+        }
         if (messageChanged && content.length === 0) {
           messagesChanged = true;
           return null;
@@ -656,7 +833,10 @@ export function fromAnthropicResponse(
       toolCalls.push({
         id: block.id as string,
         type: 'function',
-        function: { name: block.name as string, arguments: JSON.stringify(block.input ?? {}) },
+        function: {
+          name: restoreClaudeCodeToolName(block.name as string),
+          arguments: JSON.stringify(block.input ?? {}),
+        },
       });
     }
   }
@@ -830,7 +1010,7 @@ function handleContentBlockStart(state: StreamState, data: Record<string, unknow
             index: idx,
             id: toolUseId,
             type: 'function',
-            function: { name: block.name as string, arguments: '' },
+            function: { name: restoreClaudeCodeToolName(block.name as string), arguments: '' },
           },
         ],
       },

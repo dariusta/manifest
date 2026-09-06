@@ -752,6 +752,45 @@ describe('Anthropic Adapter', () => {
       expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
     });
 
+    it('maps Hermes tools onto Claude Code vocabulary for included subscription usage', () => {
+      const body = {
+        messages: [
+          { role: 'system', content: 'You are Sharky, Darius Hermes operator.' },
+          { role: 'user', content: 'Hi' },
+        ],
+        tools: [
+          { type: 'function', function: { name: 'read_file', description: 'Read a file' } },
+          { type: 'function', function: { name: 'write_file', description: 'Write a file' } },
+          { type: 'function', function: { name: 'search_files', description: 'Search files' } },
+          { type: 'function', function: { name: 'terminal', description: 'Run a command' } },
+          { type: 'function', function: { name: 'web_search', description: 'Search the web' } },
+          { type: 'function', function: { name: 'web_extract', description: 'Fetch a URL' } },
+          {
+            type: 'function',
+            function: { name: 'delegate_task', description: 'Spawn a subagent' },
+          },
+        ],
+      };
+      const result = toAnthropicRequest(body, 'claude-opus-5', {
+        injectSubscriptionIdentity: true,
+      });
+      const tools = result.tools as Array<{ name: string }>;
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'Read',
+        'Write',
+        'Grep',
+        'Bash',
+        'WebSearch',
+        'WebFetch',
+        'Task',
+      ]);
+      const system = result.system as Array<{ text: string }>;
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
+      expect(system[1].text).toContain('x-anthropic-billing-header: cc_version=');
+      expect(system[1].text).toContain('cc_entrypoint=sdk-cli');
+      expect(system.some((block) => /Sharky|Hermes/i.test(block.text))).toBe(false);
+    });
+
     it('does not inject subscription identity when option is false', () => {
       const body = {
         messages: [
@@ -810,6 +849,28 @@ describe('Anthropic Adapter', () => {
       expect(usage.prompt_tokens).toBe(10);
       expect(usage.completion_tokens).toBe(5);
       expect(usage.total_tokens).toBe(15);
+    });
+
+    it('restores caller tool names after a Claude Code subscription remap', () => {
+      toAnthropicRequest(
+        {
+          messages: [{ role: 'user', content: 'Hi' }],
+          tools: [{ type: 'function', function: { name: 'read_file', description: 'Read' } }],
+        },
+        'claude-opus-5',
+        { injectSubscriptionIdentity: true },
+      );
+      const result = fromAnthropicResponse(
+        {
+          content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: { path: 'a.ts' } }],
+          stop_reason: 'tool_use',
+        },
+        'claude-opus-5',
+      );
+      const message = (
+        result.choices as Array<{ message: { tool_calls: Array<{ function: { name: string } }> } }>
+      )[0].message;
+      expect(message.tool_calls[0].function.name).toBe('read_file');
     });
 
     it('maps end_turn to stop', () => {
@@ -2366,6 +2427,30 @@ describe('Anthropic Adapter', () => {
       expect(system).toHaveLength(1);
       expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
       expect(system[0].cache_control).toBeUndefined();
+    });
+
+    it('maps native Anthropic tools onto Claude Code vocabulary for included subscription usage', () => {
+      const result = applyAnthropicMessagesMutations(
+        {
+          messages: [{ role: 'user', content: 'hi' }],
+          system: 'You are Sharky, Darius Hermes operator.',
+          tools: [
+            { name: 'read_file', description: 'Read a file', input_schema: { type: 'object' } },
+            { name: 'terminal', description: 'Run a command', input_schema: { type: 'object' } },
+            {
+              name: 'browser_exec',
+              description: 'Drive a browser',
+              input_schema: { type: 'object' },
+            },
+          ],
+        },
+        { injectSubscriptionIdentity: true },
+      );
+      const tools = result.tools as Array<{ name: string }>;
+      expect(tools.map((tool) => tool.name)).toEqual(['Read', 'Bash', 'Agent']);
+      const system = result.system as Array<{ text: string }>;
+      expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
+      expect(system.some((block) => /Sharky|Hermes/i.test(block.text))).toBe(false);
     });
 
     it('drops system when input has none and no mutations need it', () => {
