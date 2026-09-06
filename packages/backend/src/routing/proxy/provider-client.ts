@@ -410,8 +410,7 @@ export class ProviderClient {
     // Anthropic subscription compatibility identity is provider-owned. A
     // cross-provider fallback must not turn into OpenAI/Python or another
     // caller identity merely because those inbound headers were retained for
-    // observability. Safe x-claude-code session/agent IDs are not in this list
-    // and remain request-specific when the actual caller supplied them.
+    // observability. Session/agent/forwarded-server IDs are minted by Manifest.
     if (endpointKey === 'anthropic' && authType === 'subscription') {
       for (const protectedName of CLAUDE_CODE_PROVIDER_OWNED_HEADERS) {
         const providerOwnedValue = Object.entries(headers).find(
@@ -682,7 +681,7 @@ export class ProviderClient {
         : innerBody;
       return {
         url,
-        headers: endpoint.buildHeaders(apiKey, authType),
+        headers: endpoint.buildHeaders(apiKey, authType, ctx.sessionKey ?? ctx.providerCacheKey),
         requestBody,
       };
     }
@@ -734,7 +733,7 @@ export class ProviderClient {
           : messagesPath;
       return {
         url: `${endpoint.baseUrl}${path}`,
-        headers: endpoint.buildHeaders(apiKey, authType),
+        headers: endpoint.buildHeaders(apiKey, authType, ctx.sessionKey ?? ctx.providerCacheKey),
         requestBody,
         structuredOutputToolName: syntheticToolName,
       };
@@ -801,7 +800,7 @@ export class ProviderClient {
       }
       return {
         url: `${endpoint.baseUrl}${endpoint.buildPath(bareModel)}`,
-        headers: endpoint.buildHeaders(apiKey, authType),
+        headers: endpoint.buildHeaders(apiKey, authType, ctx.sessionKey ?? ctx.providerCacheKey),
         requestBody,
       };
     }
@@ -848,7 +847,7 @@ export class ProviderClient {
     }
     return {
       url: `${endpoint.baseUrl}${endpoint.buildPath(bareModel)}`,
-      headers: endpoint.buildHeaders(apiKey, authType),
+      headers: endpoint.buildHeaders(apiKey, authType, ctx.sessionKey ?? ctx.providerCacheKey),
       requestBody,
     };
   }

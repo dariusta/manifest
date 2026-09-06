@@ -23,7 +23,7 @@ import { buildKiroHeaders, KIRO_BASE_URL, KIRO_CHAT_TARGET } from './kiro-adapte
 
 export interface ProviderEndpoint {
   baseUrl: string;
-  buildHeaders: (apiKey: string, authType?: string) => Record<string, string>;
+  buildHeaders: (apiKey: string, authType?: string, identityKey?: string) => Record<string, string>;
   buildPath: (model: string) => string;
   /**
    * Optional override used when the request is a stream. Some upstreams
@@ -97,9 +97,13 @@ export function resolveBedrockEndpointKey(
   return 'bedrock';
 }
 
-const anthropicHeaders = (apiKey: string, authType?: string): Record<string, string> => {
+const anthropicHeaders = (
+  apiKey: string,
+  authType?: string,
+  identityKey?: string,
+): Record<string, string> => {
   if (authType === 'subscription') {
-    return buildClaudeCodeSubscriptionHeaders(apiKey);
+    return buildClaudeCodeSubscriptionHeaders(apiKey, identityKey);
   }
 
   const headers: Record<string, string> = {

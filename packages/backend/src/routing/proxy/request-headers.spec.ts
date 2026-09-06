@@ -143,12 +143,18 @@ describe('sanitizeProviderRequestHeaders', () => {
         'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
         'x-app': 'cli',
         'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fallback-credit-2026-06-01',
+        'x-claude-code-session-id': '2d71ef06-94ba-4b7d-85c7-4cf4bb2af162',
+        'x-claude-code-agent-id': 'a0f40d280c4b10cd1',
+        'x-forwarded-server': '0f6845270692',
       }),
     ).toEqual({
       'content-type': 'application/json',
       'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
       'x-app': 'cli',
       'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fallback-credit-2026-06-01',
+      'x-claude-code-session-id': '2d71ef06-94ba-4b7d-85c7-4cf4bb2af162',
+      'x-claude-code-agent-id': 'a0f40d280c4b10cd1',
+      'x-forwarded-server': '0f6845270692',
     });
   });
 });

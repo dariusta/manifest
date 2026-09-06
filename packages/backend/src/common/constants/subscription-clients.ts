@@ -19,13 +19,16 @@
  * classifies the Bearer token as a third-party app and draws from extra
  * usage ("Third-party apps now draw from your extra usage…") instead of the
  * plan limits. Live Claude Code traffic that Anthropic bills as included usage
- * identifies as `claude-cli/<version> (external, sdk-cli)` and includes
- * `fallback-credit-2026-06-01` in `anthropic-beta`.
+ * identifies as `claude-cli/<version> (external, sdk-cli)`, spoofs the Mac
+ * stainless metadata, and includes `fallback-credit-2026-06-01` plus stable
+ * `x-claude-code-session-id` / `x-claude-code-agent-id` / `x-forwarded-server`.
  *
  * Copilot (`https://api.githubcopilot.com/...`): GitHub validates the
  * `Editor-Version` and `Editor-Plugin-Version` headers; both are bumped
  * together when GitHub deprecates an older pair.
  */
+
+import { createHash, randomUUID } from 'crypto';
 
 export const CODEX_CLI_VERSION = '0.128.0';
 export const CODEX_CLI_ORIGINATOR = 'codex_cli_rs';
@@ -79,14 +82,19 @@ export const CLAUDE_CODE_PROVIDER_OWNED_HEADERS = Object.freeze([
   'anthropic-beta',
   'anthropic-dangerous-direct-browser-access',
   'user-agent',
+  'accept',
   'x-app',
+  'x-claude-code-session-id',
+  'x-claude-code-agent-id',
   // Billing attribution is Manifest's to set, never the caller's: a forwarded
   // value would bill the request against someone else's account.
   'x-anthropic-billing-header',
-  // Caller-supplied forwarded-server values are always stripped; Manifest
-  // itself sends none (matching the known-good first-party client).
+  // Live Claude Code always sends a synthetic forwarded-server id. Caller
+  // values are stripped and replaced with Manifest's.
   'x-forwarded-server',
   'x-stainless-arch',
+  // Real Claude Code no longer sends helper-method; keep it owned so a
+  // leaked inbound value cannot ride through.
   'x-stainless-helper-method',
   'x-stainless-lang',
   'x-stainless-os',
@@ -123,24 +131,55 @@ export function claudeCodeStainlessOs(platform = process.platform): string {
   }
 }
 
-export const buildClaudeCodeSubscriptionHeaders = (apiKey: string): Record<string, string> => ({
-  Authorization: `Bearer ${apiKey}`,
-  'Content-Type': 'application/json',
-  'anthropic-version': '2023-06-01',
-  'anthropic-beta': CLAUDE_CODE_BETA_FLAGS,
-  'anthropic-dangerous-direct-browser-access': 'true',
-  'user-agent': `claude-cli/${getClaudeCodeVersion()} (external, sdk-cli)`,
-  'x-app': 'cli',
-  'x-stainless-arch': claudeCodeStainlessArch(),
-  'x-stainless-helper-method': 'stream',
-  'x-stainless-lang': 'js',
-  'x-stainless-os': claudeCodeStainlessOs(),
-  'x-stainless-package-version': CLAUDE_CODE_STAINLESS_PACKAGE_VERSION,
-  'x-stainless-retry-count': '0',
-  'x-stainless-runtime': 'node',
-  'x-stainless-runtime-version': CLAUDE_CODE_STAINLESS_RUNTIME_VERSION,
-  'x-stainless-timeout': '600',
-});
+/** Live Claude Code CLI identity Anthropic bills as included usage. */
+export function claudeCodeSessionIdentity(seed?: string): {
+  sessionId: string;
+  agentId: string;
+  forwardedServer: string;
+} {
+  const material = seed?.trim() ? seed : randomUUID();
+  const sessionBytes = Buffer.from(
+    createHash('sha256').update(`claude-code:${material}`).digest().subarray(0, 16),
+  );
+  sessionBytes[6] = (sessionBytes[6] & 0x0f) | 0x40;
+  sessionBytes[8] = (sessionBytes[8] & 0x3f) | 0x80;
+  const hex = sessionBytes.toString('hex');
+  const rest = createHash('sha256').update(`claude-code-ids:${material}`).digest('hex');
+  return {
+    sessionId: `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`,
+    agentId: rest.slice(0, 17),
+    forwardedServer: rest.slice(17, 29),
+  };
+}
+
+export const buildClaudeCodeSubscriptionHeaders = (
+  apiKey: string,
+  identityKey?: string,
+): Record<string, string> => {
+  const identity = claudeCodeSessionIdentity(identityKey);
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    accept: 'application/json',
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+    'anthropic-beta': CLAUDE_CODE_BETA_FLAGS,
+    'anthropic-dangerous-direct-browser-access': 'true',
+    'user-agent': `claude-cli/${getClaudeCodeVersion()} (external, sdk-cli)`,
+    'x-app': 'cli',
+    'x-claude-code-session-id': identity.sessionId,
+    'x-claude-code-agent-id': identity.agentId,
+    'x-forwarded-server': identity.forwardedServer,
+    // Live Claude Code reports a Mac even when Manifest itself runs on Linux.
+    'x-stainless-arch': 'arm64',
+    'x-stainless-lang': 'js',
+    'x-stainless-os': 'MacOS',
+    'x-stainless-package-version': CLAUDE_CODE_STAINLESS_PACKAGE_VERSION,
+    'x-stainless-retry-count': '0',
+    'x-stainless-runtime': 'node',
+    'x-stainless-runtime-version': CLAUDE_CODE_STAINLESS_RUNTIME_VERSION,
+    'x-stainless-timeout': '600',
+  };
+};
 
 export const COPILOT_EDITOR_VERSION = 'vscode/1.100.0';
 export const COPILOT_PLUGIN_VERSION = 'copilot/1.300.0';

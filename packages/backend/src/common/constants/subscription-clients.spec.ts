@@ -34,13 +34,11 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
   it('sets the bearer token and stainless metadata headers', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
     expect(headers.Authorization).toBe('Bearer key-123');
+    expect(headers.accept).toBe('application/json');
     expect(headers['x-app']).toBe('cli');
-    expect(headers['x-stainless-arch']).toBeDefined();
-    expect(headers['x-stainless-os']).toBeDefined();
-    expect(headers['x-stainless-helper-method']).toBe('stream');
-    // Header set copied byte-for-byte from the known-good implementation:
-    // a synthetic forwarded-server id must NOT be present.
-    expect(headers).not.toHaveProperty('x-forwarded-server');
+    expect(headers['x-stainless-arch']).toBe('arm64');
+    expect(headers['x-stainless-os']).toBe('MacOS');
+    expect(headers).not.toHaveProperty('x-stainless-helper-method');
     expect(headers['x-stainless-package-version']).toBe('0.112.1');
     expect(headers['x-stainless-runtime-version']).toBe('v26.3.0');
   });
@@ -73,9 +71,26 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
     expect(headers['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
     expect(headers['x-app']).toBe('cli');
+    expect(headers['x-stainless-arch']).toBe('arm64');
+    expect(headers['x-stainless-os']).toBe('MacOS');
     expect(headers['x-stainless-package-version']).toBe('0.112.1');
     expect(headers['x-stainless-runtime-version']).toBe('v26.3.0');
     expect(headers['x-stainless-timeout']).toBe('600');
+    expect(headers['x-claude-code-session-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(headers['x-claude-code-agent-id']).toMatch(/^[a-f0-9]{16,17}$/);
+    expect(headers['x-forwarded-server']).toMatch(/^[a-f0-9]{12}$/);
+  });
+
+  it('keeps Claude Code session identity stable for the same seed', () => {
+    const first = buildClaudeCodeSubscriptionHeaders('key-123', 'sess-abc');
+    const second = buildClaudeCodeSubscriptionHeaders('key-123', 'sess-abc');
+    const other = buildClaudeCodeSubscriptionHeaders('key-123', 'sess-xyz');
+    expect(first['x-claude-code-session-id']).toBe(second['x-claude-code-session-id']);
+    expect(first['x-claude-code-agent-id']).toBe(second['x-claude-code-agent-id']);
+    expect(first['x-forwarded-server']).toBe(second['x-forwarded-server']);
+    expect(other['x-claude-code-session-id']).not.toBe(first['x-claude-code-session-id']);
   });
 });
 

@@ -486,6 +486,14 @@ describe('PROVIDER_ENDPOINTS', () => {
     expect(headers['x-app']).toBe('cli');
     expect(headers['x-stainless-runtime']).toBe('node');
     expect(headers['x-stainless-lang']).toBe('js');
+    expect(headers['x-stainless-arch']).toBe('arm64');
+    expect(headers['x-stainless-os']).toBe('MacOS');
+    expect(headers['x-claude-code-session-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(headers['x-claude-code-agent-id']).toMatch(/^[a-f0-9]{16,17}$/);
+    expect(headers['x-forwarded-server']).toMatch(/^[a-f0-9]{12}$/);
+    expect(headers).not.toHaveProperty('x-stainless-helper-method');
     expect(headers['x-api-key']).toBeUndefined();
   });
 

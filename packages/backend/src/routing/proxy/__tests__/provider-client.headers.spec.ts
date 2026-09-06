@@ -9,10 +9,6 @@
 // fails loudly.
 
 import { ProviderClient } from '../provider-client';
-import {
-  claudeCodeStainlessArch,
-  claudeCodeStainlessOs,
-} from '../../../common/constants/subscription-clients';
 import { CodexSessionAffinity } from '../codex-session-affinity';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -70,23 +66,26 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     const sentHeaders = mockFetch.mock.calls[0][1].headers as Record<string, string>;
     expect(sentHeaders).toEqual({
       Authorization: 'Bearer sk-ant-oat-token',
+      accept: 'application/json',
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01',
       'anthropic-beta': expect.stringContaining('claude-code-20250219'),
       'anthropic-dangerous-direct-browser-access': 'true',
       'user-agent': expect.stringContaining('claude-cli/'),
       'x-app': 'cli',
-      'x-stainless-arch': claudeCodeStainlessArch(),
-      'x-stainless-helper-method': 'stream',
+      'x-claude-code-session-id': expect.stringMatching(UUID_RE),
+      'x-claude-code-agent-id': expect.stringMatching(/^[a-f0-9]{16,17}$/),
+      'x-forwarded-server': expect.stringMatching(/^[a-f0-9]{12}$/),
+      'x-stainless-arch': 'arm64',
       'x-stainless-lang': 'js',
-      'x-stainless-os': claudeCodeStainlessOs(),
+      'x-stainless-os': 'MacOS',
       'x-stainless-package-version': '0.112.1',
       'x-stainless-retry-count': '0',
       'x-stainless-runtime': 'node',
       'x-stainless-runtime-version': 'v26.3.0',
       'x-stainless-timeout': '600',
     });
-    expect(sentHeaders).not.toHaveProperty('x-forwarded-server');
+    expect(sentHeaders).not.toHaveProperty('x-stainless-helper-method');
     expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
     expect(sentHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
     expect(sentHeaders['anthropic-beta']).toContain('fallback-credit-2026-06-01');
@@ -124,13 +123,19 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     expect(sentHeaders['x-app']).toBe('cli');
     expect(sentHeaders['x-stainless-lang']).toBe('js');
     expect(sentHeaders['x-stainless-runtime']).toBe('node');
+    expect(sentHeaders['x-stainless-arch']).toBe('arm64');
+    expect(sentHeaders['x-stainless-os']).toBe('MacOS');
     expect(sentHeaders['x-stainless-package-version']).toBe('0.112.1');
     expect(sentHeaders['x-stainless-runtime-version']).toBe('v26.3.0');
     expect(sentHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
     expect(sentHeaders['anthropic-beta']).not.toContain('caller-controlled');
-    expect(sentHeaders['x-claude-code-session-id']).toBe('session-123');
-    expect(sentHeaders['x-claude-code-agent-id']).toBe('agent-456');
-    expect(sentHeaders).not.toHaveProperty('x-forwarded-server');
+    expect(sentHeaders['x-claude-code-session-id']).toMatch(UUID_RE);
+    expect(sentHeaders['x-claude-code-session-id']).not.toBe('session-123');
+    expect(sentHeaders['x-claude-code-agent-id']).toMatch(/^[a-f0-9]{16,17}$/);
+    expect(sentHeaders['x-claude-code-agent-id']).not.toBe('agent-456');
+    expect(sentHeaders['x-forwarded-server']).toMatch(/^[a-f0-9]{12}$/);
+    expect(sentHeaders['x-forwarded-server']).not.toBe('caller-controlled');
+    expect(sentHeaders).not.toHaveProperty('x-stainless-helper-method');
     expect(sentHeaders.Authorization).toBe('Bearer «reda...…»');
     expect(sentHeaders).not.toHaveProperty('x-api-key');
   });

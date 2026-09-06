@@ -45,7 +45,9 @@ const NOISE_HEADERS = new Set<string>([
 
 export function sanitizeRequestHeaders(
   headers: IncomingHttpHeaders,
+  opts?: { keep?: readonly string[] },
 ): Record<string, string> | null {
+  const keep = new Set((opts?.keep ?? []).map((key) => key.toLowerCase()));
   const out: Record<string, string> = {};
   let totalBytes = 2; // account for `{}` of the eventual JSON
   let count = 0;
@@ -56,7 +58,7 @@ export function sanitizeRequestHeaders(
 
     const key = rawKey.toLowerCase();
     if (SENSITIVE_HEADERS.has(key)) continue;
-    if (NOISE_HEADERS.has(key)) continue;
+    if (NOISE_HEADERS.has(key) && !keep.has(key)) continue;
 
     const joined = Array.isArray(rawVal) ? rawVal.join(', ') : String(rawVal);
     const cleaned = joined.replace(/[\x00-\x1f\x7f]/g, '').trim();
@@ -85,7 +87,9 @@ export function sanitizeRequestHeaders(
 export function sanitizeProviderRequestHeaders(
   headers: Record<string, string>,
 ): Record<string, string> | null {
-  return sanitizeRequestHeaders(headers);
+  // Live Claude Code identity includes a synthetic x-forwarded-server. Keep it
+  // on outbound attempts so the Request headers tab matches included-usage traffic.
+  return sanitizeRequestHeaders(headers, { keep: ['x-forwarded-server'] });
 }
 
 // Truncate by UTF-8 byte length (not character count) so multi-byte values
