@@ -2453,6 +2453,42 @@ describe('Anthropic Adapter', () => {
       expect(system.some((block) => /Sharky|Hermes/i.test(block.text))).toBe(false);
     });
 
+    it('keeps Claude Code and MCP tool names unique on subscription forwards', () => {
+      const result = applyAnthropicMessagesMutations(
+        {
+          messages: [{ role: 'user', content: 'hi' }],
+          tools: [
+            { name: 'Read', input_schema: { type: 'object' } },
+            { name: 'Write', input_schema: { type: 'object' } },
+            { name: 'Workflow', input_schema: { type: 'object' } },
+            { name: 'mcp__zread__read_file', input_schema: { type: 'object' } },
+            { name: 'write_file', input_schema: { type: 'object' } },
+          ],
+        },
+        { injectSubscriptionIdentity: true },
+      );
+      const names = (result.tools as Array<{ name: string }>).map((tool) => tool.name);
+      expect(names).toEqual(['Read', 'Write', 'Workflow', 'mcp__zread__read_file', 'write_file']);
+      expect(new Set(names).size).toBe(names.length);
+    });
+
+    it('disambiguates duplicate Claude Code tool names instead of forwarding collisions', () => {
+      const result = applyAnthropicMessagesMutations(
+        {
+          messages: [{ role: 'user', content: 'hi' }],
+          tools: [
+            { name: 'Write', input_schema: { type: 'object' } },
+            { name: 'Write', input_schema: { type: 'object' } },
+          ],
+        },
+        { injectSubscriptionIdentity: true },
+      );
+      const names = (result.tools as Array<{ name: string }>).map((tool) => tool.name);
+      expect(names[0]).toBe('Write');
+      expect(names[1]).not.toBe('Write');
+      expect(new Set(names).size).toBe(2);
+    });
+
     it('drops system when input has none and no mutations need it', () => {
       const result = applyAnthropicMessagesMutations({
         messages: [{ role: 'user', content: 'hi' }],

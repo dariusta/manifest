@@ -80,37 +80,7 @@ const SUBSCRIPTION_IDENTITY_BLOCK: ContentBlock = {
   text: "You are Claude Code, Anthropic's official CLI for Claude.",
 };
 
-const CLAUDE_CODE_TOOL_VOCAB = [
-  'Read',
-  'Write',
-  'Edit',
-  'Bash',
-  'Glob',
-  'Grep',
-  'Task',
-  'TodoWrite',
-  'WebFetch',
-  'WebSearch',
-  'NotebookEdit',
-  'Agent',
-  'LS',
-  'Skill',
-  'BashOutput',
-  'KillBash',
-  'SlashCommand',
-  'CronCreate',
-  'CronDelete',
-  'CronList',
-  'EnterWorktree',
-  'ExitWorktree',
-  'ListAgents',
-  'ListMcpResourcesTool',
-  'LSP',
-  'DesignSync',
-  'ToolSearch',
-] as const;
-
-const HERMES_TO_CLAUDE_CODE_TOOLS: Record<string, (typeof CLAUDE_CODE_TOOL_VOCAB)[number]> = {
+const HERMES_TO_CLAUDE_CODE_TOOLS: Record<string, string> = {
   read_file: 'Read',
   write_file: 'Write',
   patch: 'Edit',
@@ -142,6 +112,7 @@ const THIRD_PARTY_SYSTEM_RE =
 
 type ClaudeCodeToolRemapper = {
   remap: (original: string) => string;
+  remapUnique: (original: string) => string;
   restore: (mapped: string) => string;
   aliases: Map<string, string>;
 };
@@ -152,22 +123,31 @@ function createClaudeCodeToolRemapper(): ClaudeCodeToolRemapper {
   const aliases = new Map<string, string>();
   const originalToMapped = new Map<string, string>();
   const used = new Set<string>();
-  const remap = (original: string): string => {
-    const existing = originalToMapped.get(original);
-    if (existing) return existing;
-    let mapped: string | undefined = HERMES_TO_CLAUDE_CODE_TOOLS[original];
-    if (!mapped || used.has(mapped)) {
-      mapped = CLAUDE_CODE_TOOL_VOCAB.find((name) => !used.has(name));
+  const claim = (original: string, reuseExisting: boolean): string => {
+    if (reuseExisting) {
+      const existing = originalToMapped.get(original);
+      if (existing) return existing;
     }
-    if (!mapped) mapped = original;
+    const preferred = HERMES_TO_CLAUDE_CODE_TOOLS[original];
+    let mapped = preferred && !used.has(preferred) ? preferred : original;
+    if (used.has(mapped)) {
+      let suffix = 2;
+      mapped = `${original}_${suffix}`;
+      while (used.has(mapped)) {
+        suffix += 1;
+        mapped = `${original}_${suffix}`;
+      }
+    }
     used.add(mapped);
     aliases.set(mapped, original);
-    originalToMapped.set(original, mapped);
+    if (!originalToMapped.has(original)) originalToMapped.set(original, mapped);
     return mapped;
   };
+  const remap = (original: string): string => claim(original, true);
+  const remapUnique = (original: string): string => claim(original, false);
   const restore = (mapped: string): string => aliases.get(mapped) ?? mapped;
   lastClaudeCodeToolAliases = aliases;
-  return { remap, restore, aliases };
+  return { remap, remapUnique, restore, aliases };
 }
 
 function buildClaudeCodeBillingHeaderBlock(): ContentBlock {
@@ -577,7 +557,7 @@ export function toAnthropicRequest(
   // assumption is safe.
   const tools = convertTools(body.tools as Array<Record<string, unknown>> | undefined) ?? [];
   if (remapper) {
-    for (const tool of tools) tool.name = remapper.remap(tool.name);
+    for (const tool of tools) tool.name = remapper.remapUnique(tool.name);
   }
   if (tools.length > 0) {
     tools[tools.length - 1].cache_control = CACHE;
@@ -709,7 +689,7 @@ export function applyAnthropicMessagesMutations(
     const tools = (body.tools as Array<Record<string, unknown>>).map((t) => {
       const cloned = { ...t };
       stripEmptyDomainFilters(cloned);
-      if (remapper) remapAnthropicToolName(cloned, remapper.remap);
+      if (remapper) remapAnthropicToolName(cloned, remapper.remapUnique);
       return cloned;
     });
     tryAddCacheControl(tools[tools.length - 1], cacheBudget);

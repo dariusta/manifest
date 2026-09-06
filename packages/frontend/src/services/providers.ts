@@ -334,6 +334,14 @@ const PROVIDER_UI: Record<string, ProviderUIOverlay> = {
   meta: {
     initial: 'Me',
     subtitle: 'Muse Spark 1.3, Contributor, and older',
+    supportsSubscription: true,
+    subscriptionLabel: 'Muse Code subscription',
+    subscriptionAuthMode: 'token',
+    subscriptionCredentialKind: 'api-key',
+    subscriptionCredentialName: 'Muse Code',
+    subscriptionKeyPlaceholder: 'Paste your Muse Code API key',
+    subscriptionSignInUrl: 'https://dev.meta.ai/',
+    subscriptionSignInLabel: 'Sign in to Muse Code',
     models: META_MODEL_API_MODELS.map((model) => ({
       label: model.displayName,
       value: model.id,

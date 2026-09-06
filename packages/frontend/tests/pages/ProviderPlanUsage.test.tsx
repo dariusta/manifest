@@ -83,7 +83,10 @@ const siblingAnthropic = {
 beforeEach(() => {
   mocks.getProviderPlanUsage.mockReset();
   mocks.setProviderManualUsageLimit.mockReset();
-  mocks.setProviderManualUsageLimit.mockResolvedValue({ connectionId: 'tp-openai-key', limitUsd: 100 });
+  mocks.setProviderManualUsageLimit.mockResolvedValue({
+    connectionId: 'tp-openai-key',
+    limitUsd: 100,
+  });
 });
 
 afterEach(() => {
@@ -146,14 +149,18 @@ describe('Plan Usage page', () => {
 
     await fireEvent.click(screen.getByRole('tab', { name: /Usage-based API keys/ }));
     expect(await screen.findByText('Manual setup')).toBeDefined();
-    expect(screen.getByRole('spinbutton', { name: 'Manual 30-day allowance for Prod key' })).toBeDefined();
+    expect(
+      screen.getByRole('spinbutton', { name: 'Manual 30-day allowance for Prod key' }),
+    ).toBeDefined();
     expect(
       screen.queryByRole('spinbutton', { name: 'Manual 30-day allowance for Live key' }),
     ).toBeNull();
   });
 
   it('lets an operator set a manual 30-day allowance on a usage-based key', async () => {
-    mocks.getProviderPlanUsage.mockResolvedValue({ connections: [liveAnthropic, unsupportedOpenAI] });
+    mocks.getProviderPlanUsage.mockResolvedValue({
+      connections: [liveAnthropic, unsupportedOpenAI],
+    });
     render(() => <PlanUsage />);
 
     await screen.findByText('Claude Max');
@@ -222,5 +229,62 @@ describe('Plan Usage page', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(mocks.getProviderPlanUsage).toHaveBeenCalledTimes(2));
     expect(mocks.getProviderPlanUsage.mock.calls[1][0]).toBeUndefined();
+  });
+
+  it('sorts subscription cards by provider name', async () => {
+    mocks.getProviderPlanUsage.mockResolvedValue({
+      connections: [
+        { ...liveAnthropic, tenant_provider_id: 'tp-xai', provider: 'xai', label: 'Grok' },
+        liveAnthropic,
+        {
+          ...liveAnthropic,
+          tenant_provider_id: 'tp-gemini',
+          provider: 'gemini',
+          label: 'Google',
+        },
+      ],
+    });
+    render(() => <PlanUsage />);
+    await screen.findByText('Grok');
+    const names = [...document.querySelectorAll('.plan-usage-card__name')].map(
+      (node) => node.textContent,
+    );
+    expect(names).toEqual(['Anthropic', 'Google', 'xAI']);
+  });
+
+  it('keeps Gemini 3.7 and Pro Agent usage visible and hides the rest until expanded', async () => {
+    mocks.getProviderPlanUsage.mockResolvedValue({
+      connections: [
+        {
+          ...liveAnthropic,
+          tenant_provider_id: 'tp-gemini',
+          provider: 'gemini',
+          label: 'Google',
+          quota: {
+            status: 'live',
+            source: 'google_cloud_code_quota',
+            fetchedAt: '2026-09-06T01:00:00.000Z',
+            windows: [
+              { name: 'gemini-2.5-flash', remainingPercent: 100 },
+              { name: 'gemini-3.7-flash-tiered', remainingPercent: 100 },
+              { name: 'gemini-pro-agent', remainingPercent: 100 },
+              { name: 'gpt-oss-120b-medium', remainingPercent: 100 },
+            ],
+          },
+        },
+      ],
+    });
+    render(() => <PlanUsage />);
+    await screen.findByText('gemini-3.7-flash-tiered');
+    expect(screen.getByText('gemini-pro-agent')).toBeDefined();
+    expect(screen.queryByText('gemini-2.5-flash')).toBeNull();
+    expect(screen.queryByText('gpt-oss-120b-medium')).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    expect(await screen.findByText('gemini-2.5-flash')).toBeDefined();
+    expect(screen.getByText('gpt-oss-120b-medium')).toBeDefined();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide more' }));
+    expect(screen.queryByText('gemini-2.5-flash')).toBeNull();
   });
 });

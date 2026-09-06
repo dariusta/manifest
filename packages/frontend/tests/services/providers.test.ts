@@ -506,6 +506,8 @@ describe('PROVIDERS', () => {
   it('exposes the current Meta Muse Spark catalog and Contributor warning', () => {
     const meta = PROVIDERS.find((provider) => provider.id === 'meta')!;
     expect(meta.name).toBe('Meta');
+    expect(meta.supportsSubscription).toBe(true);
+    expect(meta.subscriptionLabel).toBe('Muse Code subscription');
     expect(meta.models.map((model) => model.value)).toEqual([
       'muse-spark-1.3',
       'muse-spark-1.3-contributor',

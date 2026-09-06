@@ -2576,6 +2576,14 @@
         "plan-usage.css"
       ]
     },
+    "plan-usage-more": {
+      "classes": [
+        "plan-usage-more"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
     "plan-usage-observed": {
       "classes": [
         "plan-usage-observed"
@@ -5234,8 +5242,8 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 327,
-    "classes": 1739,
+    "blocks": 328,
+    "classes": 1740,
     "canonicalRules": 47,
     "ghostRules": 47
   }

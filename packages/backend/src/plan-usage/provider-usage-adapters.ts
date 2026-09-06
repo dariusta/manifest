@@ -253,6 +253,17 @@ export function parseGeminiUsage(body: unknown): ParsedProviderUsage {
   };
 }
 
+export function parseMetaUsage(body: unknown): ParsedProviderUsage {
+  const root = record(body) ?? {};
+  const data = root['data'];
+  const models = Array.isArray(data) ? data : [];
+  if (models.length === 0) return { windows: [] };
+  return {
+    planName: 'Muse Code',
+    windows: [{ name: 'Muse Code models', remainingPercent: 100, usedPercent: 0 }],
+  };
+}
+
 export function parseCopilotUsage(body: unknown): ParsedProviderUsage {
   const root = record(body) ?? {};
   const snapshots = record(root['quota_snapshots']) ?? {};
@@ -507,6 +518,14 @@ const DEFINITIONS: Record<string, ProbeDefinition> = {
     method: 'GET',
     headers: bearer,
     parse: parseZaiUsage,
+  },
+  meta: {
+    source: 'meta_model_api_catalog',
+    authTypes: ['subscription', 'api_key'],
+    url: () => 'https://api.meta.ai/v1/models',
+    method: 'GET',
+    headers: bearer,
+    parse: parseMetaUsage,
   },
 };
 

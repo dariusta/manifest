@@ -6,6 +6,7 @@ import {
   parseCopilotUsage,
   parseGeminiUsage,
   parseKimiUsage,
+  parseMetaUsage,
   parseOpenAiUsage,
   parseZaiUsage,
 } from './provider-usage-adapters';
@@ -91,6 +92,17 @@ describe('provider usage response parsers', () => {
           resetAt: '2026-09-03T00:00:00.000Z',
         },
       ],
+    });
+  });
+
+  it('treats a live Muse Code catalog as remaining subscription quota', () => {
+    expect(
+      parseMetaUsage({
+        data: [{ id: 'muse-spark-1.3' }, { id: 'muse-spark-1.2' }],
+      }),
+    ).toMatchObject({
+      planName: 'Muse Code',
+      windows: [{ name: 'Muse Code models', remainingPercent: 100, usedPercent: 0 }],
     });
   });
 
@@ -245,6 +257,7 @@ describe('ProviderUsageAdapterRegistry probes', () => {
     ['copilot', 'https://api.github.com/copilot_internal/user', 'GET'],
     ['moonshot', 'https://api.kimi.com/coding/v1/usages', 'GET'],
     ['zai', 'https://api.z.ai/api/monitor/usage/quota/limit', 'GET'],
+    ['meta', 'https://api.meta.ai/v1/models', 'GET'],
   ])('probes %s only at its fixed HTTPS endpoint', async (provider, endpoint, method) => {
     const fetchFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     const registry = new ProviderUsageAdapterRegistry(fetchFn as never);

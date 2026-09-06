@@ -28,6 +28,7 @@ describe('SUBSCRIPTION_PROVIDER_CONFIGS', () => {
         'opencode-go',
         'gemini',
         'xai',
+        'meta',
       ]),
     );
   });
@@ -180,6 +181,24 @@ describe('getSubscriptionProviderConfig', () => {
     });
   });
 
+  it('returns config for Muse Code', () => {
+    const config = getSubscriptionProviderConfig('meta');
+    expect(config).toMatchObject({
+      supportsSubscription: true,
+      subscriptionLabel: 'Muse Code subscription',
+      subscriptionAuthMode: 'token',
+      subscriptionKeyPlaceholder: 'Paste your Muse Code API key',
+      subscriptionTokenPrefix: 'LLM_',
+    });
+    expect(getSubscriptionKnownModels('meta')).toEqual([
+      'muse-spark-1.3',
+      'muse-spark-1.3-contributor',
+      'muse-spark-1.2',
+      'muse-spark-1.2-contributor',
+      'muse-spark-1.1',
+    ]);
+  });
+
   it('returns config for Command Code', () => {
     const config = getSubscriptionProviderConfig('commandcode');
     expect(config).toMatchObject({
@@ -319,6 +338,7 @@ describe('supportsSubscriptionProvider', () => {
     expect(supportsSubscriptionProvider('opencode-go')).toBe(true);
     expect(supportsSubscriptionProvider('gemini')).toBe(true);
     expect(supportsSubscriptionProvider('xai')).toBe(true);
+    expect(supportsSubscriptionProvider('meta')).toBe(true);
   });
 
   it('returns true for aliases of supported providers', () => {

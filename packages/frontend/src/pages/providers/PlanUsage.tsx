@@ -51,6 +51,23 @@ function providerName(id: string): string {
   return PROVIDERS.find((provider) => provider.id === id)?.name ?? id;
 }
 
+function byProviderName(a: ProviderPlanUsage, b: ProviderPlanUsage): number {
+  return (
+    providerName(a.provider).localeCompare(providerName(b.provider)) ||
+    a.label.localeCompare(b.label)
+  );
+}
+
+const GEMINI_FEATURED_WINDOW = /gemini-3\.7|gemini-pro-agent/i;
+
+function isGeminiConnection(row: ProviderPlanUsage): boolean {
+  return row.provider === 'gemini' || row.provider === 'google';
+}
+
+function isFeaturedGeminiWindow(window: ProviderPlanUsageWindow): boolean {
+  return GEMINI_FEATURED_WINDOW.test(window.name);
+}
+
 function clampPercent(value: number | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.min(100, Math.max(0, value));
@@ -112,9 +129,17 @@ const PlanUsage: Component = () => {
   });
   const connections = createMemo(() => data()?.connections ?? []);
   const subscriptions = createMemo(() =>
-    connections().filter((row) => row.auth_type === 'subscription'),
+    connections()
+      .filter((row) => row.auth_type === 'subscription')
+      .slice()
+      .sort(byProviderName),
   );
-  const usageBased = createMemo(() => connections().filter((row) => row.auth_type === 'api_key'));
+  const usageBased = createMemo(() =>
+    connections()
+      .filter((row) => row.auth_type === 'api_key')
+      .slice()
+      .sort(byProviderName),
+  );
   const visibleConnections = createMemo(() =>
     activeTab() === 'subscription' ? subscriptions() : usageBased(),
   );
@@ -246,6 +271,19 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> 
   );
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal<string | null>(null);
+  const [showMoreWindows, setShowMoreWindows] = createSignal(false);
+  const featuredWindows = createMemo(() => {
+    const windows = quota().windows;
+    if (!isGeminiConnection(props.row)) return windows;
+    return windows.filter(isFeaturedGeminiWindow);
+  });
+  const extraWindows = createMemo(() => {
+    if (!isGeminiConnection(props.row)) return [];
+    return quota().windows.filter((window) => !isFeaturedGeminiWindow(window));
+  });
+  const visibleWindows = createMemo(() =>
+    showMoreWindows() ? [...featuredWindows(), ...extraWindows()] : featuredWindows(),
+  );
 
   const saveManualLimit = async () => {
     const value = Number(manualLimit());
@@ -309,7 +347,7 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> 
           </p>
         }
       >
-        <For each={quota().windows}>
+        <For each={visibleWindows()}>
           {(window) => (
             <div class="plan-usage-window">
               <div class="plan-usage-window__meta">
@@ -330,6 +368,15 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> 
             </div>
           )}
         </For>
+        <Show when={extraWindows().length > 0}>
+          <button
+            class="btn btn--ghost btn--sm plan-usage-more"
+            type="button"
+            onClick={() => setShowMoreWindows(!showMoreWindows())}
+          >
+            {showMoreWindows() ? 'Hide more' : 'Show more'}
+          </button>
+        </Show>
       </Show>
 
       <Show when={balanceRemainingLabel(props.row)}>

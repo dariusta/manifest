@@ -100,6 +100,11 @@
   margin-top: var(--gap-lg);
 }
 
+.plan-usage-more {
+  margin-top: var(--gap-sm);
+  justify-self: start;
+}
+
 .plan-usage-balance {
   margin-top: var(--gap-sm);
   color: hsl(var(--foreground));

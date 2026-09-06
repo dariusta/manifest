@@ -96,7 +96,7 @@
 --z-toast: 8000
 --z-tooltip: 9999
 
-## Blocks (327 BEM blocks, 1739 classes)
+## Blocks (328 BEM blocks, 1740 classes)
 account-back-btn (agents.css): account-back-btn
 account-email-footer (agents.css): account-email-footer
 account-email-toggle (agents.css): account-email-toggle--disabled
@@ -289,6 +289,7 @@ plan-usage-card (plan-usage.css): plan-usage-card plan-usage-card__header plan-u
 plan-usage-grid (plan-usage.css): plan-usage-grid
 plan-usage-manual-limit (plan-usage.css): plan-usage-manual-limit plan-usage-manual-limit__controls
 plan-usage-message (plan-usage.css): plan-usage-message
+plan-usage-more (plan-usage.css): plan-usage-more
 plan-usage-observed (plan-usage.css): plan-usage-observed
 plan-usage-tab-empty (plan-usage.css): plan-usage-tab-empty
 plan-usage-tabs (plan-usage.css): plan-usage-tabs

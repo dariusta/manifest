@@ -1,4 +1,5 @@
 import type { SubscriptionProviderConfig } from './types';
+import { META_MODEL_API_CONTEXT_WINDOW, META_MODEL_API_MODELS } from '../providers';
 
 export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
   Record<string, Readonly<SubscriptionProviderConfig>>
@@ -321,6 +322,20 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     // Model list is fetched dynamically from Command Code's public Provider API catalog.
     subscriptionCapabilities: Object.freeze({
       maxContextWindow: 1000000,
+      supportsPromptCaching: false,
+      supportsBatching: false,
+    }),
+  }),
+  meta: Object.freeze({
+    supportsSubscription: true as const,
+    subscriptionLabel: 'Muse Code subscription',
+    subscriptionAuthMode: 'token' as const,
+    subscriptionKeyPlaceholder: 'Paste your Muse Code API key',
+    subscriptionTokenPrefix: 'LLM_',
+    knownModels: Object.freeze(META_MODEL_API_MODELS.map((model) => model.id)),
+    knownModelsMatch: 'exact' as const,
+    subscriptionCapabilities: Object.freeze({
+      maxContextWindow: META_MODEL_API_CONTEXT_WINDOW,
       supportsPromptCaching: false,
       supportsBatching: false,
     }),
