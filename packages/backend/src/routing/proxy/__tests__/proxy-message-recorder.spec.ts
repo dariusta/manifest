@@ -2031,6 +2031,33 @@ describe('ProxyMessageRecorder', () => {
         },
       );
     });
+
+    it('keeps outbound provider headers when a later inbound snapshot arrives', async () => {
+      const attempt: ProviderAttemptRef = {
+        id: 'attempt-keep-outbound',
+        attemptNumber: 1,
+        startedAtMs: 1_000,
+        startedAt: '1970-01-01T00:00:01.000Z',
+        completedAtMs: 1_050,
+        pendingWrite: Promise.resolve(true),
+        outboundHeaders: {
+          'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+          'x-app': 'cli',
+        },
+      };
+      await recorder.recordSuccessMessage(
+        ctx,
+        'claude-opus-5',
+        'standard',
+        'scored',
+        { prompt_tokens: 1, completion_tokens: 1 },
+        { requestHeaders: { 'user-agent': 'OpenAI/Python 2.24.0' }, attempt },
+      );
+      expect(updateMock.mock.calls.at(-1)![1].request_headers).toEqual({
+        'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+        'x-app': 'cli',
+      });
+    });
   });
 
   describe('autofix persistence', () => {

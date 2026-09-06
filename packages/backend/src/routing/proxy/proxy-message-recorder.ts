@@ -621,6 +621,9 @@ export class ProxyMessageRecorder implements OnModuleDestroy {
       return;
     }
     const payload = { ...terminalRow };
+    if (attempt?.outboundHeaders) {
+      payload.request_headers = attempt.outboundHeaders;
+    }
     delete payload.id;
     await this.messageRepo.update({ id: attempt.id }, payload);
   }

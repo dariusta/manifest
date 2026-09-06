@@ -73,6 +73,7 @@ export interface ProviderAttemptRef {
   recordingCapture?: AttemptRecordingCapture;
   startRecording?: (recording: ProviderAttemptRecordingStart) => void;
   recordOutboundHeaders?: (headers: Record<string, string>) => void;
+  outboundHeaders?: Record<string, string> | null;
   finishRecording?: (response?: RecordingResponseBody | null) => Promise<void>;
 }
 

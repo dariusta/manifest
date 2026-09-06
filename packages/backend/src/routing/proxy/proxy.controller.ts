@@ -321,6 +321,7 @@ export class ProxyController {
       attempt.recordOutboundHeaders = (headers) => {
         const outbound = sanitizeProviderRequestHeaders(headers);
         if (!outbound) return;
+        attempt.outboundHeaders = outbound;
         attempt.pendingWrite = attempt.pendingWrite
           .then(async (ok) => {
             if (!ok) return false;
