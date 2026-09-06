@@ -413,11 +413,12 @@ const PROVIDER_UI: Record<string, ProviderUIOverlay> = {
   },
   openai: {
     initial: 'O',
-    subtitle: 'GPT-5.6, GPT-5.5, GPT-5.4, Codex',
+    subtitle: 'GPT-6 Astra, GPT-5.6, GPT-5.5, GPT-5.4, Codex',
     supportsSubscription: true,
     subscriptionLabel: 'ChatGPT Plus/Pro/Team',
     subscriptionAuthMode: 'popup_oauth',
     models: [
+      { label: 'GPT-6 Astra', value: 'gpt-6-astra' },
       { label: 'GPT-4o', value: 'gpt-4o' },
       { label: 'GPT-4o Mini', value: 'gpt-4o-mini' },
       { label: 'GPT-4o (2024-11-20)', value: 'gpt-4o-2024-11-20' },

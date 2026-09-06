@@ -1,10 +1,15 @@
 import { ModelDiscoveryService } from './model-discovery.service';
-import { ProviderModelFetcherService } from './provider-model-fetcher.service';
+import {
+  ProviderModelFetcherService,
+  PROVIDER_CONFIGS,
+  filterNonChatModels,
+} from './provider-model-fetcher.service';
 import { ProviderModelRegistryService } from './provider-model-registry.service';
 import { TenantProvider } from '../entities/tenant-provider.entity';
 import { CustomProvider } from '../entities/custom-provider.entity';
 import { DiscoveredModel } from './model-fetcher';
 import { supplementWithKnownModels } from './model-fallback';
+import { openAiModelId, routeForOpenAiModelId } from '../routing/proxy/openai-model-id';
 
 jest.mock('../common/utils/crypto.util', () => ({
   decrypt: jest.fn(),
@@ -147,6 +152,79 @@ describe('ModelDiscoveryService', () => {
     );
   });
 
+  it.each(['api_key', 'subscription'] as const)(
+    'advertises and resolves exact gpt-6-astra for %s when discovery catalogs lag',
+    async (authType) => {
+      const provider = makeProvider({ auth_type: authType });
+      const discovered = await service.discoverModels(provider);
+      const astra = discovered.find((model) => model.id === 'gpt-6-astra');
+      expect(astra).toMatchObject({
+        id: 'gpt-6-astra',
+        provider: 'openai',
+        authType,
+        contextWindow: 1050000,
+        inputPricePerToken: authType === 'subscription' ? 0 : null,
+        outputPricePerToken: authType === 'subscription' ? 0 : null,
+        capabilities: expect.arrayContaining(['text', 'image', 'tools', 'stream']),
+      });
+      providerRepo.find.mockResolvedValue([provider]);
+      expect(await service.getModelForAgent('tenant-1', 'gpt-6-astra')).toMatchObject({
+        id: 'gpt-6-astra',
+        provider: 'openai',
+        authType,
+      });
+    },
+  );
+
+  it.each(['openai', 'openai-subscription'])(
+    'retains exact gpt-6-astra through the %s native parser and filters',
+    (configKey) => {
+      const payload =
+        configKey === 'openai'
+          ? { data: [{ id: 'gpt-6-astra' }] }
+          : { models: [{ slug: 'gpt-6-astra', visibility: 'list' }] };
+      const parsed = PROVIDER_CONFIGS[configKey].parse(payload, 'openai');
+      expect(filterNonChatModels(parsed, configKey).map((model) => model.id)).toEqual([
+        'gpt-6-astra',
+      ]);
+    },
+  );
+
+  it('keeps both gpt-6-astra public routes distinct and preserves native metadata', async () => {
+    const native = makeModel({
+      id: 'gpt-6-astra',
+      displayName: 'Provider Astra',
+      contextWindow: 1050000,
+      contextWindowSource: 'provider',
+      inputPricePerToken: null,
+      outputPricePerToken: null,
+    });
+    fetcher.fetch.mockImplementation(async () => [{ ...native }]);
+    const api = makeProvider();
+    const subscription = makeProvider({ id: 'subscription', auth_type: 'subscription' });
+    await service.discoverModels(api);
+    await service.discoverModels(subscription);
+    for (const provider of [api, subscription]) {
+      expect(provider.cached_models?.filter((m) => m.id === native.id)).toHaveLength(1);
+      expect(provider.cached_models?.find((m) => m.id === native.id)).toMatchObject({
+        displayName: native.displayName,
+        contextWindowSource: 'provider',
+      });
+    }
+    providerRepo.find.mockResolvedValue([api, subscription]);
+    const models = await service.getModelsForAgent('tenant-1');
+    const routes = models.filter((m) => m.id === native.id).map(openAiModelId);
+    expect(routes).toEqual(['openai/gpt-6-astra', 'openai/gpt-6-astra-subscription']);
+    for (const [index, authType] of (['api_key', 'subscription'] as const).entries()) {
+      expect(routeForOpenAiModelId(routes[index], models)).toEqual({
+        provider: 'openai',
+        model: 'gpt-6-astra',
+        authType,
+      });
+    }
+    expect(routeForOpenAiModelId('gpt-6-astra', models)).toBeNull();
+  });
+
   afterAll(() => {
     if (previousMode === undefined) delete process.env['MANIFEST_MODE'];
     else process.env['MANIFEST_MODE'] = previousMode;
@@ -181,7 +259,7 @@ describe('ModelDiscoveryService', () => {
       expect(mockGetSecret).toHaveBeenCalled();
       expect(mockDecrypt).toHaveBeenCalledWith('encrypted-key', expect.any(String));
       expect(fetcher.fetch).toHaveBeenCalledWith('openai', 'decrypted-key', 'api_key', undefined);
-      expect(result).toHaveLength(1);
+      expect(result.map((model) => model.id)).toEqual(['gpt-4', 'gpt-6-astra']);
       expect(provider.cached_models).toEqual(result);
       expect(provider.models_fetched_at).toBeDefined();
       expect(providerRepo.save).toHaveBeenCalledWith(provider);
@@ -467,7 +545,7 @@ describe('ModelDiscoveryService', () => {
 
       await service.discoverModels(makeProvider());
 
-      expect(mockPricingSync.lookupPricing).not.toHaveBeenCalled();
+      expect(mockPricingSync.lookupPricing).not.toHaveBeenCalledWith('openai/priced-model');
     });
 
     it('should call computeQualityScore for enriched models', async () => {
@@ -515,8 +593,8 @@ describe('ModelDiscoveryService', () => {
       const result = await service.discoverModels(makeProvider());
 
       expect(mockModelRegistry.getConfirmedModels).toHaveBeenCalledWith('openai');
-      // Only confirmed model should be in fallback
-      expect(result).toHaveLength(1);
+      // Only confirmed models plus the explicit API catalog addition.
+      expect(result.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-6-astra']);
       expect(result[0].id).toBe('gpt-4o');
     });
 
@@ -680,7 +758,7 @@ describe('ModelDiscoveryService', () => {
         forceRefresh: true,
       });
       expect(result.ok).toBe(true);
-      expect(result.model_count).toBe(2);
+      expect(result.model_count).toBe(3);
       expect(result.error).toBeNull();
       expect(result.last_fetched_at).toBeDefined();
     });
@@ -709,27 +787,28 @@ describe('ModelDiscoveryService', () => {
       const result = await service.refreshProvider('tenant-1', 'openai', 'api_key');
 
       expect(fetcher.fetch).toHaveBeenCalledTimes(2);
-      expect(first.cached_models?.map((model) => model.id)).toEqual(['gpt-4o']);
+      expect(first.cached_models?.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-6-astra']);
       expect(second.cached_models?.map((model) => model.id)).toEqual([
         'gpt-5.6-sol',
         'gpt-5.6-terra',
         'gpt-5.6-luna',
+        'gpt-6-astra',
       ]);
       expect(mockModelsDevSync.refreshCache).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         ok: true,
-        model_count: 3,
+        model_count: 4,
         last_fetched_at: expect.any(String),
         error: null,
       });
     });
 
     it('returns ok=false with hint when provider returns no models', async () => {
-      const provider = makeProvider({ provider: 'openai', cached_models: null });
+      const provider = makeProvider({ provider: 'deepseek', cached_models: null });
       providerRepo.find.mockResolvedValue([provider]);
       fetcher.fetch.mockResolvedValue([]);
 
-      const result = await service.refreshProvider('agent-1', 'openai');
+      const result = await service.refreshProvider('agent-1', 'deepseek');
       expect(result.ok).toBe(false);
       expect(result.model_count).toBe(0);
       expect(result.error).toBe('Provider returned no models');
@@ -784,10 +863,12 @@ describe('ModelDiscoveryService', () => {
 
       const result = await service.discoverModels(provider);
 
-      expect(result).toEqual(cachedModels);
-      expect(provider.cached_models).toEqual(cachedModels);
-      expect(provider.models_fetched_at).toBe('2026-04-01T08:00:00.000Z');
-      expect(providerRepo.save).not.toHaveBeenCalled();
+      expect(result.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-4o-mini', 'gpt-6-astra']);
+      expect(result.slice(0, 2)).toEqual(
+        cachedModels.map((model) => ({ ...model, authType: 'api_key' })),
+      );
+      expect(provider.cached_models).toEqual(result);
+      expect(providerRepo.save).toHaveBeenCalledWith(provider);
     });
   });
 
@@ -2692,8 +2773,8 @@ describe('ModelDiscoveryService', () => {
 
       const result = supplementWithKnownModels(raw, 'openai');
 
-      // 1 discovered + 7 ChatGPT-account supported knownModels
-      expect(result.length).toBe(8);
+      // 1 discovered + 8 ChatGPT-account supported knownModels
+      expect(result.length).toBe(9);
       expect(result[0].id).toBe('gpt-oss-120b');
       expect(result.map((m) => m.id)).toContain('gpt-5.6-sol');
       expect(result.map((m) => m.id)).toContain('gpt-5.6-terra');
@@ -3326,7 +3407,7 @@ describe('ModelDiscoveryService', () => {
       const result = await service.discoverModels(makeProvider());
 
       expect(mockModelsDevSync.getModelsForProvider).toHaveBeenCalledWith('openai');
-      expect(result).toHaveLength(1);
+      expect(result.map((model) => model.id)).toEqual(['md-model', 'gpt-6-astra']);
       expect(result[0].id).toBe('md-model');
       expect(result[0].capabilityReasoning).toBe(true);
       // OpenRouter fallback should NOT be called when models.dev has data
@@ -3344,7 +3425,7 @@ describe('ModelDiscoveryService', () => {
 
       expect(mockModelsDevSync.getModelsForProvider).toHaveBeenCalledWith('openai');
       expect(mockPricingSync.getAll).toHaveBeenCalled();
-      expect(result).toHaveLength(1);
+      expect(result.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-6-astra']);
       expect(result[0].id).toBe('gpt-4o');
     });
 
@@ -3367,7 +3448,7 @@ describe('ModelDiscoveryService', () => {
       const result = await serviceNoMd.discoverModels(makeProvider());
 
       // Should go straight to OpenRouter fallback
-      expect(result).toHaveLength(1);
+      expect(result.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-6-astra']);
       expect(result[0].id).toBe('gpt-4o');
     });
   });

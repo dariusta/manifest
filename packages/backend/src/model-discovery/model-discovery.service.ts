@@ -309,10 +309,43 @@ export class ModelDiscoveryService {
       }
     }
 
+    // A curated API addition must not replace previously discovered models
+    // when every live/catalog source is temporarily unavailable.
+    if (
+      provider.provider === 'openai' &&
+      provider.auth_type === 'api_key' &&
+      raw.length === 0 &&
+      Array.isArray(provider.cached_models)
+    ) {
+      raw = [...provider.cached_models];
+    }
+
     // For subscription providers, supplement live discovery with the explicit
     // curated list so users can always select known supported models.
     if (provider.auth_type === 'subscription') {
       raw = supplementWithKnownModels(raw, provider.provider);
+    } else if (
+      provider.provider === 'openai' &&
+      provider.auth_type === 'api_key' &&
+      !raw.some((model) => model.id === 'gpt-6-astra')
+    ) {
+      // Explicit API availability while native/external catalogs catch up.
+      // https://developers.openai.com/api/docs/models/gpt-6-astra
+      // Leave pricing unknown here; normal enrichment supplies current rates.
+      raw.push({
+        id: 'gpt-6-astra',
+        displayName: 'GPT-6 Astra',
+        provider: 'openai',
+        contextWindow: 1050000,
+        inputPricePerToken: null,
+        outputPricePerToken: null,
+        capabilityReasoning: true,
+        capabilityCode: true,
+        inputModalities: ['text', 'image'],
+        outputModalities: ['text'],
+        capabilities: ['text', 'image', 'tools', 'stream'],
+        qualityScore: 3,
+      });
     }
 
     // Preserve the full AuthType union (api_key / subscription / local) —

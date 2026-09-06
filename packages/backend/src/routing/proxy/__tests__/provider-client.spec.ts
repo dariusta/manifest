@@ -1913,6 +1913,27 @@ describe('ProviderClient', () => {
     });
   });
 
+  it.each(['api_key', 'subscription'] as const)(
+    'forwards exact gpt-6-astra through the OpenAI %s transport',
+    async (authType) => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+      await client.forward({
+        provider: 'openai',
+        apiKey: 'test-astra-token',
+        model: 'gpt-6-astra',
+        body,
+        stream: false,
+        authType,
+      });
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        authType === 'subscription'
+          ? 'https://chatgpt.com/backend-api/codex/responses'
+          : 'https://api.openai.com/v1/chat/completions',
+      );
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body).model).toBe('gpt-6-astra');
+    },
+  );
+
   describe('ChatGPT subscription provider', () => {
     it('routes to chatgpt.com Codex backend with subscription authType', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));

@@ -37,6 +37,8 @@ const KNOWN_MODEL_MODALITIES: Readonly<Record<string, KnownCapabilities>> = {
   // ChatGPT subscription (Codex models API) publishes no modality metadata,
   // and models.dev lags behind new launches. These facts bootstrap the
   // subscription catalog until an upstream source carries them (#2537).
+  // https://developers.openai.com/api/docs/models/gpt-6-astra
+  'openai/gpt-6-astra': TEXT_IMAGE_TOOLS,
   'openai/gpt-5.6-sol': TEXT_IMAGE_TOOLS,
   'openai/gpt-5.6-terra': TEXT_IMAGE_TOOLS,
   'openai/gpt-5.6-luna': TEXT_IMAGE_TOOLS,

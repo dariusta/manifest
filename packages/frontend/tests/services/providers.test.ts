@@ -18,6 +18,13 @@ import {
 /* ── getProvider ────────────────────────────────── */
 
 describe('getProvider', () => {
+  it('includes exact GPT-6 Astra in the OpenAI model choices', () => {
+    expect(getProvider('openai')?.models).toContainEqual({
+      label: 'GPT-6 Astra',
+      value: 'gpt-6-astra',
+    });
+    expect(getProvider('openai')?.subtitle).toContain('GPT-6 Astra');
+  });
   it('returns the provider definition for a known ID', () => {
     const result = getProvider('openai');
     expect(result).toBeDefined();
