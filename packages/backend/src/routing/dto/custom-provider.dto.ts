@@ -16,6 +16,8 @@ import {
   IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { MODEL_MODALITIES } from 'manifest-shared';
+import type { ModelModality } from 'manifest-shared';
 
 export const CUSTOM_PROVIDER_API_KINDS = ['openai', 'anthropic'] as const;
 export type CustomProviderApiKindDto = (typeof CUSTOM_PROVIDER_API_KINDS)[number];
@@ -48,6 +50,15 @@ export class CustomProviderModelDto {
   @IsOptional()
   @IsBoolean()
   price_estimated?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MODEL_MODALITIES.length)
+  @IsIn(MODEL_MODALITIES, {
+    each: true,
+    message: 'input_modalities must be text, image, audio, or video',
+  })
+  input_modalities?: ModelModality[];
 }
 
 export class CreateCustomProviderDto {

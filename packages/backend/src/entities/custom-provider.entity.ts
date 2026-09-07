@@ -1,4 +1,5 @@
 import { Entity, Column, PrimaryColumn } from 'typeorm';
+import type { ModelModality } from 'manifest-shared';
 import { timestampType, timestampDefault } from '../common/utils/postgres-sql';
 
 export interface CustomProviderModel {
@@ -7,6 +8,11 @@ export interface CustomProviderModel {
   output_price_per_million_tokens?: number;
   context_window?: number;
   price_estimated?: boolean;
+  /**
+   * Input modalities the server reported for this model (e.g. `['text', 'image']`
+   * for a vision model). Unset means unknown, not text-only.
+   */
+  input_modalities?: ModelModality[];
 }
 
 export type CustomProviderApiKind = 'openai' | 'anthropic';

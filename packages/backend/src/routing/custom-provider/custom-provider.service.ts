@@ -14,7 +14,8 @@ import {
   SHARED_PROVIDER_BY_ID_OR_ALIAS,
   normalizeProviderName,
 } from 'manifest-shared';
-import type { AuthType } from 'manifest-shared';
+import { MODEL_MODALITIES } from 'manifest-shared';
+import type { AuthType, ModelModality } from 'manifest-shared';
 import {
   CustomProvider,
   CustomProviderApiKind,
@@ -29,6 +30,30 @@ import { ModelPricingCacheService } from '../../model-prices/model-pricing-cache
 import { ModelsDevSyncService } from '../../database/models-dev-sync.service';
 import { IngestEventBusService } from '../../common/services/ingest-event-bus.service';
 import { classifyProbeError } from './probe-error';
+
+/**
+ * One `/models` entry as returned by an OpenAI-compatible server. Servers that
+ * publish modality metadata (OpenRouter, LiteLLM, vLLM, proxies in front of
+ * Ollama) use the OpenRouter `architecture.input_modalities` shape.
+ */
+interface ProbedModelEntry {
+  id?: string;
+  architecture?: { input_modalities?: unknown };
+}
+
+function probedInputModalities(entry: ProbedModelEntry): ModelModality[] | undefined {
+  const raw = entry.architecture?.input_modalities;
+  if (!Array.isArray(raw)) return undefined;
+  const out: ModelModality[] = [];
+  for (const value of raw) {
+    if (typeof value !== 'string') continue;
+    const lower = value.toLowerCase() as ModelModality;
+    if ((MODEL_MODALITIES as readonly string[]).includes(lower) && !out.includes(lower)) {
+      out.push(lower);
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
 
 const PROBE_TIMEOUT_MS = 5000;
 
@@ -466,15 +491,21 @@ export class CustomProviderService {
       if (!contentType.includes('application/json')) {
         throw new BadRequestException(classifyProbeError({ url, contentType }).message);
       }
-      const body = (await res.json()) as { data?: { id?: string }[] };
+      const body = (await res.json()) as { data?: ProbedModelEntry[] };
       const items = body?.data ?? [];
       const filtered = items.filter(
-        (m): m is { id: string } =>
+        (m): m is ProbedModelEntry & { id: string } =>
           typeof m.id === 'string' && m.id.length > 0 && !isEmbeddingModel(m.id),
       );
       return this.enrichCustomProviderModels(
         providerName,
-        filtered.map((m) => ({ model_name: m.id })),
+        filtered.map((m) => {
+          const inputModalities = probedInputModalities(m);
+          return {
+            model_name: m.id,
+            ...(inputModalities ? { input_modalities: inputModalities } : {}),
+          };
+        }),
         { defaultContextWindow: false },
       );
     } catch (err) {
@@ -528,6 +559,7 @@ export class CustomProviderService {
       if (outputPrice !== undefined) enriched.output_price_per_million_tokens = outputPrice;
       if (contextWindow !== undefined) enriched.context_window = contextWindow;
       if (priceEstimated) enriched.price_estimated = true;
+      if (model.input_modalities?.length) enriched.input_modalities = [...model.input_modalities];
       return enriched;
     });
   }

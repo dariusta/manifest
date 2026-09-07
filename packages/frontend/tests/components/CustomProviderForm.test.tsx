@@ -500,6 +500,47 @@ describe("CustomProviderForm — Fetch models probe", () => {
     });
   });
 
+  it("keeps probed input modalities, shows a badge, and submits them", async () => {
+    mockProbeCustomProvider.mockResolvedValue({
+      models: [
+        { model_name: "qwen-vision", input_modalities: ["text", "image"] },
+        { model_name: "plain" },
+      ],
+    });
+    mockCreateCustomProvider.mockResolvedValue({ id: "cp-1" });
+
+    render(() => (
+      <CustomProviderForm agentName="test-agent" onCreated={onCreated} onBack={onBack} />
+    ));
+
+    fireEvent.input(screen.getByPlaceholderText("e.g. Groq, Together, Azure"), {
+      target: { value: "Spark Qwen" },
+    });
+    fireEvent.input(screen.getByPlaceholderText("https://api.example.com/v1"), {
+      target: { value: "http://host.docker.internal:11436/v1" },
+    });
+    fireEvent.click(screen.getByText("Fetch models"));
+
+    await waitFor(() => {
+      expect(screen.getAllByPlaceholderText("Model name")).toHaveLength(2);
+      expect(screen.getByLabelText("Input: Text, Image")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByText("Connect"));
+
+    await waitFor(() => {
+      expect(mockCreateCustomProvider).toHaveBeenCalledWith(
+        "test-agent",
+        expect.objectContaining({
+          models: [
+            { model_name: "qwen-vision", input_modalities: ["text", "image"] },
+            { model_name: "plain" },
+          ],
+        }),
+      );
+    });
+  });
+
   it("shows an inline error when the probe fails", async () => {
     mockProbeCustomProvider.mockRejectedValue(new Error("Connection refused"));
 

@@ -12,6 +12,8 @@ import { toast } from '../services/toast-store.js';
 import { checkIsSelfHosted } from '../services/setup-status.js';
 import type { CustomProviderPrefill } from '../services/routing-params.js';
 import InfoTooltip from './InfoTooltip.jsx';
+import { ModelModalityBadges } from './ModelCapabilityBadges.jsx';
+import type { ModelModality } from 'manifest-shared';
 
 const BASE_URL_PLACEHOLDERS: Record<CustomProviderApiKind, string> = {
   openai: 'https://api.example.com/v1',
@@ -32,6 +34,7 @@ interface ModelRow {
   input_price: string;
   output_price: string;
   price_estimated: boolean;
+  input_modalities?: ModelModality[];
 }
 
 const ESTIMATED_PRICE_TOOLTIP = 'Estimated price. This may not be accurate.';
@@ -51,6 +54,7 @@ const toModelRows = (models: CustomProviderModel[] | undefined): ModelRow[] =>
     output_price:
       m.output_price_per_million_tokens != null ? String(m.output_price_per_million_tokens) : '',
     price_estimated: m.price_estimated === true,
+    ...(m.input_modalities?.length ? { input_modalities: m.input_modalities } : {}),
   }));
 
 const CustomProviderForm: Component<Props> = (props) => {
@@ -148,6 +152,7 @@ const CustomProviderForm: Component<Props> = (props) => {
       ...(r.price_estimated && (r.input_price !== '' || r.output_price !== '')
         ? { price_estimated: true }
         : {}),
+      ...(r.input_modalities?.length ? { input_modalities: r.input_modalities } : {}),
     }));
 
   const handleCreate = async () => {
@@ -430,6 +435,13 @@ const CustomProviderForm: Component<Props> = (props) => {
                     value={row().model_name}
                     onInput={(e) => updateRow(i, 'model_name', e.currentTarget.value)}
                   />
+                  <Show when={row().input_modalities?.length}>
+                    <ModelModalityBadges
+                      modalities={row().input_modalities}
+                      direction="input"
+                      compact
+                    />
+                  </Show>
                   <input
                     class="provider-detail__input custom-provider-model-row__price"
                     type="text"
