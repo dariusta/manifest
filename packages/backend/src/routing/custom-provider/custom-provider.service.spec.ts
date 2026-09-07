@@ -941,6 +941,30 @@ describe('CustomProviderService', () => {
       ]);
     });
 
+    it('keeps input modalities the server publishes via architecture.input_modalities', async () => {
+      const { svc } = makeDeps({});
+      global.fetch = jest.fn().mockResolvedValue(
+        jsonResponse({
+          data: [
+            {
+              id: 'qwen-vision',
+              architecture: { input_modalities: ['text', 'IMAGE', 'image', 'hologram', 7] },
+            },
+            { id: 'text-only' },
+            { id: 'no-usable', architecture: { input_modalities: ['hologram'] } },
+          ],
+        }),
+      ) as unknown as typeof fetch;
+
+      const result = await svc.probeModels('http://host.docker.internal:11436/v1');
+
+      expect(result).toEqual([
+        { model_name: 'qwen-vision', input_modalities: ['text', 'image'] },
+        { model_name: 'text-only' },
+        { model_name: 'no-usable' },
+      ]);
+    });
+
     it('strips trailing slashes from the base URL before appending /models', async () => {
       const { svc } = makeDeps({});
       global.fetch = jest

@@ -661,6 +661,12 @@ export class ModelDiscoveryService {
           outputPricePerToken: outputPerToken,
           capabilityReasoning: false,
           capabilityCode: false,
+          // Modalities come from the server's own /models metadata (or the
+          // operator). Leave them unset when unknown so the resolver can still
+          // fall back to models.dev instead of pinning the model to text-only.
+          ...(m.input_modalities?.length
+            ? { inputModalities: m.input_modalities, capabilities: m.input_modalities }
+            : {}),
           qualityScore: 2,
         });
       }

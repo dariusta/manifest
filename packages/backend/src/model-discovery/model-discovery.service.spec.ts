@@ -916,6 +916,28 @@ describe('ModelDiscoveryService', () => {
       expect(result[1].displayName).toBe('custom-llm');
     });
 
+    it('surfaces custom-provider input modalities on the discovered model', async () => {
+      providerRepo.find.mockResolvedValue([]);
+      customProviderRepo.find.mockResolvedValue([
+        makeCustomProvider({
+          models: [
+            { model_name: 'qwen-vision', input_modalities: ['text', 'image'] },
+            { model_name: 'plain' },
+          ],
+        }),
+      ]);
+
+      const result = await service.getModelsForAgent('tenant-1');
+
+      const vision = result.find((m) => m.id === 'custom:cp-1/qwen-vision');
+      const plain = result.find((m) => m.id === 'custom:cp-1/plain');
+      expect(vision?.inputModalities).toEqual(['text', 'image']);
+      expect(vision?.capabilities).toEqual(['text', 'image']);
+      // Unknown stays unknown so the resolver can still consult models.dev.
+      expect(plain?.inputModalities).toBeUndefined();
+      expect(plain?.capabilities).toBeUndefined();
+    });
+
     it('should filter stale unsupported OpenAI subscription cached models', async () => {
       const providers = [
         makeProvider({

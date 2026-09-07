@@ -434,6 +434,8 @@ export interface CustomProviderModel {
   output_price_per_million_tokens?: number;
   context_window?: number;
   price_estimated?: boolean;
+  /** Reported by the server's /models probe (e.g. `['text', 'image']`). */
+  input_modalities?: ModelModality[];
 }
 
 export interface CustomProviderData {
