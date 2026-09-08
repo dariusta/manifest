@@ -1,11 +1,41 @@
-.plan-usage-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: var(--gap-lg);
+/* One section per provider, each account inside gets its own full card. */
+.plan-usage-group + .plan-usage-group {
+  margin-top: var(--gap-xl);
 }
 
+.plan-usage-group__header {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin-bottom: var(--gap-md);
+}
+
+.plan-usage-group__title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.plan-usage-group__count {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-sm);
+}
+
+.plan-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--gap-lg);
+  align-items: stretch;
+}
+
+/* Column layout so the observed-usage footer pins to the bottom and every
+   card in a row lines up regardless of how many windows it renders. */
 .plan-usage-card {
+  display: flex;
+  flex-direction: column;
   padding: var(--gap-lg);
+  min-width: 0;
 }
 
 .plan-usage-card__header {
@@ -23,6 +53,10 @@
   min-width: 0;
 }
 
+.plan-usage-card__identity-text {
+  min-width: 0;
+}
+
 .plan-usage-card__name {
   font-weight: 600;
   color: hsl(var(--foreground));
@@ -31,8 +65,21 @@
 .plan-usage-card__label {
   color: hsl(var(--muted-foreground));
   font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.plan-usage-card__badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.plan-usage-plan,
 .plan-usage-badge {
   display: inline-flex;
   align-items: center;
@@ -41,7 +88,12 @@
   border: 1px solid hsl(var(--border));
   font-size: var(--font-size-xs);
   color: hsl(var(--muted-foreground));
-  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.plan-usage-plan {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
 }
 
 .plan-usage-badge--live,
@@ -58,32 +110,77 @@
   color: hsl(var(--warning));
 }
 
+.plan-usage-card__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: var(--gap-sm);
+}
+
 .plan-usage-window {
+  --plan-usage-tone: var(--success);
   display: grid;
-  gap: 6px;
-  margin: var(--gap-sm) 0;
+  gap: 5px;
+}
+
+.plan-usage-window--warn {
+  --plan-usage-tone: var(--warning);
+}
+
+.plan-usage-window--low {
+  --plan-usage-tone: var(--destructive);
 }
 
 .plan-usage-window__meta {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: var(--gap-sm);
   font-size: var(--font-size-sm);
 }
 
-.plan-usage-observed {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--gap-sm);
-  margin-top: var(--gap-md);
+.plan-usage-window__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--foreground));
+}
+
+.plan-usage-window__remaining {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--plan-usage-tone));
+}
+
+.plan-usage-window--ok .plan-usage-window__remaining {
   color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-sm);
+}
+
+.plan-usage-bar {
+  height: 6px;
+  background: hsl(var(--muted));
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.plan-usage-bar__fill {
+  height: 100%;
+  min-width: 2px;
+  border-radius: var(--radius-pill);
+  background: hsl(var(--plan-usage-tone));
+  transition: width 500ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.plan-usage-window__reset {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-xs);
 }
 
 .plan-usage-message {
-  margin-top: var(--gap-sm);
   color: hsl(var(--muted-foreground));
   font-size: var(--font-size-sm);
+  margin: 0;
 }
 
 .plan-usage-tabs {
@@ -101,13 +198,46 @@
 }
 
 .plan-usage-more {
-  margin-top: var(--gap-sm);
-  justify-self: start;
+  appearance: none;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: hsl(var(--muted-foreground));
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
-.plan-usage-balance {
-  margin-top: var(--gap-sm);
+.plan-usage-more:hover {
   color: hsl(var(--foreground));
+}
+
+/* Balance: a quiet label/value row for subscriptions (extra credits), a
+   headline number for usage-based keys where it is the whole story. */
+.plan-usage-balance {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  font-size: var(--font-size-sm);
+  color: hsl(var(--muted-foreground));
+}
+
+.plan-usage-balance__value {
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--foreground));
+}
+
+.plan-usage-balance--headline {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.plan-usage-balance--headline .plan-usage-balance__value {
   font-size: var(--font-size-lg);
   font-weight: 600;
 }
@@ -115,7 +245,7 @@
 .plan-usage-manual-limit {
   display: grid;
   gap: 6px;
-  margin-top: var(--gap-md);
+  margin-top: var(--gap-sm);
   padding-top: var(--gap-md);
   border-top: 1px solid hsl(var(--border));
 }
@@ -137,9 +267,45 @@
   flex: 1;
 }
 
+/* Observed usage footer: label-over-value cells so long token counts never
+   wrap mid-number, pinned to the card bottom. */
+.plan-usage-observed {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--gap-sm);
+  margin: var(--gap-md) 0 0;
+  padding-top: var(--gap-md);
+  border-top: 1px solid hsl(var(--border));
+}
+
+.plan-usage-observed > div {
+  min-width: 0;
+}
+
+.plan-usage-observed dt {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-usage-observed dd {
+  margin: 2px 0 0;
+  color: hsl(var(--foreground));
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 @media (max-width: 640px) {
   .plan-usage-manual-limit__controls {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .plan-usage-observed {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

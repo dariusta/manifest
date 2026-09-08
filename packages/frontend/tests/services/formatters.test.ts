@@ -16,6 +16,10 @@ import {
 } from '../../src/services/formatters';
 
 describe('formatNumber', () => {
+  it('formats billions', () => {
+    expect(formatNumber(1_156_500_000)).toBe('1.2B');
+    expect(formatNumber(2_000_000_000)).toBe('2B');
+  });
   it('formats millions', () => {
     expect(formatNumber(1_200_000)).toBe('1.2M');
     expect(formatNumber(5_000_000)).toBe('5M');
@@ -183,6 +187,10 @@ describe('formatTime', () => {
   it('handles space-separated timestamp', () => {
     const result = formatTime('2024-01-15 09:22:41');
     expect(result).toMatch(/\w+ \d+, \d{2}:\d{2}:\d{2}/);
+  });
+  it('drops seconds when asked', () => {
+    const result = formatTime('2024-01-15T09:22:41Z', { seconds: false });
+    expect(result).toMatch(/^\w+ \d+, \d{2}:\d{2}$/);
   });
 });
 

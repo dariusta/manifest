@@ -2533,7 +2533,18 @@
     },
     "plan-usage-balance": {
       "classes": [
-        "plan-usage-balance"
+        "plan-usage-balance",
+        "plan-usage-balance--headline",
+        "plan-usage-balance__value"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-bar": {
+      "classes": [
+        "plan-usage-bar",
+        "plan-usage-bar__fill"
       ],
       "files": [
         "plan-usage.css"
@@ -2542,8 +2553,11 @@
     "plan-usage-card": {
       "classes": [
         "plan-usage-card",
+        "plan-usage-card__badges",
+        "plan-usage-card__body",
         "plan-usage-card__header",
         "plan-usage-card__identity",
+        "plan-usage-card__identity-text",
         "plan-usage-card__label",
         "plan-usage-card__name"
       ],
@@ -2554,6 +2568,17 @@
     "plan-usage-grid": {
       "classes": [
         "plan-usage-grid"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-group": {
+      "classes": [
+        "plan-usage-group",
+        "plan-usage-group__count",
+        "plan-usage-group__header",
+        "plan-usage-group__title"
       ],
       "files": [
         "plan-usage.css"
@@ -2592,6 +2617,14 @@
         "plan-usage.css"
       ]
     },
+    "plan-usage-plan": {
+      "classes": [
+        "plan-usage-plan"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
     "plan-usage-tab-empty": {
       "classes": [
         "plan-usage-tab-empty"
@@ -2611,7 +2644,13 @@
     "plan-usage-window": {
       "classes": [
         "plan-usage-window",
-        "plan-usage-window__meta"
+        "plan-usage-window--low",
+        "plan-usage-window--ok",
+        "plan-usage-window--warn",
+        "plan-usage-window__meta",
+        "plan-usage-window__name",
+        "plan-usage-window__remaining",
+        "plan-usage-window__reset"
       ],
       "files": [
         "plan-usage.css"
@@ -4523,6 +4562,13 @@
       "line": 195
     },
     {
+      "selector": ".plan-usage-plan",
+      "prop": "color",
+      "value": "hsl(var(--foreground))",
+      "file": "plan-usage.css",
+      "line": 96
+    },
+    {
       "selector": ".request-tool",
       "prop": "border",
       "value": "1px solid hsl(36 80% 50% / 0.24)",
@@ -5080,6 +5126,14 @@
       "losesTo": "overview.css:55"
     },
     {
+      "selector": ".plan-usage-plan",
+      "prop": "color",
+      "value": "hsl(var(--muted-foreground))",
+      "file": "plan-usage.css",
+      "line": 90,
+      "losesTo": "plan-usage.css:96"
+    },
+    {
       "selector": ".request-tool",
       "prop": "border",
       "value": "1px solid hsl(var(--border))",
@@ -5242,9 +5296,9 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 328,
-    "classes": 1740,
-    "canonicalRules": 47,
-    "ghostRules": 47
+    "blocks": 331,
+    "classes": 1758,
+    "canonicalRules": 48,
+    "ghostRules": 48
   }
 }

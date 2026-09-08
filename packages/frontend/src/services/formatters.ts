@@ -3,6 +3,10 @@
  */
 export function formatNumber(n: number): string {
   n = Number(n);
+  if (n >= 1_000_000_000) {
+    const v = n / 1_000_000_000;
+    return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}B`;
+  }
   if (n >= 1_000_000) {
     const v = n / 1_000_000;
     return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}M`;
@@ -50,7 +54,7 @@ export function formatTrend(pct: number): string {
 /**
  * Format a timestamp to a date + time string (e.g., Feb 27, 09:22:41).
  */
-export function formatTime(ts: string): string {
+export function formatTime(ts: string, options: { seconds?: boolean } = {}): string {
   const normalized = ts.replace(' ', 'T');
   const d = new Date(normalized.endsWith('Z') ? normalized : normalized + 'Z');
   const date = d.toLocaleDateString('en-US', {
@@ -61,7 +65,7 @@ export function formatTime(ts: string): string {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
+    ...(options.seconds === false ? {} : { second: '2-digit' }),
   });
   return `${date}, ${time}`;
 }
