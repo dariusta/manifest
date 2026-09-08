@@ -2518,6 +2518,32 @@
         "auth.css"
       ]
     },
+    "plan-usage-agent": {
+      "classes": [
+        "plan-usage-agent",
+        "plan-usage-agent--top",
+        "plan-usage-agent__bar",
+        "plan-usage-agent__fill",
+        "plan-usage-agent__icon",
+        "plan-usage-agent__name",
+        "plan-usage-agent__platform",
+        "plan-usage-agent__row",
+        "plan-usage-agent__tokens"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
+    "plan-usage-agents": {
+      "classes": [
+        "plan-usage-agents",
+        "plan-usage-agents__list",
+        "plan-usage-agents__title"
+      ],
+      "files": [
+        "plan-usage.css"
+      ]
+    },
     "plan-usage-badge": {
       "classes": [
         "plan-usage-badge",
@@ -5296,8 +5322,8 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 331,
-    "classes": 1758,
+    "blocks": 333,
+    "classes": 1770,
     "canonicalRules": 48,
     "ghostRules": 48
   }

@@ -14,9 +14,11 @@ import {
   getProviderPlanUsage,
   setProviderManualUsageLimit,
   type ProviderPlanUsage,
+  type ProviderPlanUsageAgent,
   type ProviderPlanUsageStatus,
   type ProviderPlanUsageWindow,
 } from '../../services/api/providers.js';
+import { PLATFORM_ICONS, PLATFORM_LABELS, coerceAgentPlatform } from 'manifest-shared';
 import { formatCost, formatNumber, formatTime } from '../../services/formatters.js';
 import { PROVIDERS } from '../../services/providers.js';
 import '../../styles/analytics-overview.css';
@@ -155,6 +157,20 @@ function balanceHeading(row: ProviderPlanUsage): string {
   return row.auth_type === 'subscription' ? 'Extra credits' : 'Balance';
 }
 
+function agentPlatformLabel(agent: ProviderPlanUsageAgent): string {
+  return PLATFORM_LABELS[coerceAgentPlatform(agent.agent_platform)];
+}
+
+function agentPlatformIcon(agent: ProviderPlanUsageAgent): string | undefined {
+  return PLATFORM_ICONS[coerceAgentPlatform(agent.agent_platform)];
+}
+
+/** Share of the connection's 30-day tokens one harness accounts for. */
+function agentShare(agent: ProviderPlanUsageAgent, total: number): number {
+  if (total <= 0) return 0;
+  return Math.min(100, Math.max(0, (agent.tokens / total) * 100));
+}
+
 const PlanUsage: Component = () => {
   const [loadError, setLoadError] = createSignal<unknown>(null);
   const [activeTab, setActiveTab] = createSignal<UsageTab>('subscription');
@@ -207,7 +223,7 @@ const PlanUsage: Component = () => {
   );
 
   return (
-    <div class="container--lg">
+    <div class="container--full">
       <Title>Plan Usage | Manifest</Title>
       <div class="page-header">
         <div>
@@ -330,6 +346,7 @@ const PlanUsage: Component = () => {
 const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> = (props) => {
   const observed = () => props.row.observed_30d;
   const quota = () => props.row.quota;
+  const topAgents = () => observed().by_agent ?? [];
   // Seed from the configured limit (independent of the effective quota) so a
   // stored allowance stays visible and clearable even while live/cached
   // provider data is authoritative.
@@ -515,6 +532,45 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> 
           </div>
         </Show>
       </div>
+
+      <Show when={topAgents().length > 0}>
+        <div class="plan-usage-agents">
+          <div class="plan-usage-agents__title">Top harnesses (30d)</div>
+          <ol class="plan-usage-agents__list">
+            <For each={topAgents()}>
+              {(agent, index) => (
+                <li class="plan-usage-agent" classList={{ 'plan-usage-agent--top': index() === 0 }}>
+                  <div class="plan-usage-agent__row">
+                    <Show when={agentPlatformIcon(agent)}>
+                      {(icon) => (
+                        <img
+                          class="plan-usage-agent__icon"
+                          src={icon()}
+                          alt=""
+                          aria-hidden="true"
+                        />
+                      )}
+                    </Show>
+                    <span class="plan-usage-agent__name" title={agent.agent_name}>
+                      {agent.agent_name}
+                    </span>
+                    <span class="plan-usage-agent__platform">{agentPlatformLabel(agent)}</span>
+                    <span class="plan-usage-agent__tokens">
+                      {formatNumber(agent.tokens)} tok · {formatNumber(agent.requests)} req
+                    </span>
+                  </div>
+                  <div class="plan-usage-agent__bar" aria-hidden="true">
+                    <div
+                      class="plan-usage-agent__fill"
+                      style={{ width: `${agentShare(agent, observed().tokens)}%` }}
+                    />
+                  </div>
+                </li>
+              )}
+            </For>
+          </ol>
+        </div>
+      </Show>
 
       <dl class="plan-usage-observed">
         <div>

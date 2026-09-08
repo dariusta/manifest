@@ -22,6 +22,8 @@ const CACHE_TTL_MS = 15 * 60 * 1000;
 const PLAN_USAGE_AGENT_ID = 'plan-usage';
 const MAX_CONCURRENT_PROBES = 4;
 
+const MAX_AGENTS_PER_CONNECTION = 5;
+
 interface MetricRow {
   tenant_provider_id: string;
   requests: string | number | null;
@@ -32,6 +34,24 @@ interface MetricRow {
   last_used_at: Date | string | null;
 }
 
+interface AgentMetricRow {
+  tenant_provider_id: string;
+  agent_id: string | null;
+  agent_name: string | null;
+  agent_platform: string | null;
+  requests: string | number | null;
+  tokens: string | number | null;
+}
+
+/** One harness (agent) drawing on a connection over the last 30 days. */
+export interface ObservedAgentUsage {
+  agent_id: string | null;
+  agent_name: string;
+  agent_platform: string | null;
+  requests: number;
+  tokens: number;
+}
+
 export interface ObservedPlanUsage {
   requests: number;
   tokens: number;
@@ -40,6 +60,8 @@ export interface ObservedPlanUsage {
   succeeded: number;
   success_rate: number | null;
   last_used_at: string | null;
+  /** Heaviest harnesses first, capped to MAX_AGENTS_PER_CONNECTION. */
+  by_agent: ObservedAgentUsage[];
 }
 
 export interface PlanUsageQuota extends ProviderQuotaReport {
@@ -95,6 +117,38 @@ const METRICS_SQL = `
   GROUP BY at.tenant_provider_id
 `;
 
+/**
+ * Same population as METRICS_SQL, split per agent so a card can show which
+ * harness is drawing the plan down. Agent rows are joined by id (the recorder
+ * always stamps it) with the message's own agent_name as a fallback label for
+ * attempts whose agent has since been deleted.
+ */
+const AGENT_METRICS_SQL = `
+  SELECT
+    at.tenant_provider_id,
+    at.agent_id,
+    COALESCE(ag.name, at.agent_name) AS agent_name,
+    ag.agent_platform,
+    COUNT(DISTINCT COALESCE(at.request_id, at.id)) FILTER (
+      WHERE at.status IS NULL
+        OR (at.status NOT IN ('pending', 'cancelled') AND at.status NOT IN ('error', 'fallback_error', 'rate_limited', 'auto_fixed', 'failed'))
+    ) AS requests,
+    SUM(COALESCE(at.input_tokens, 0) + COALESCE(at.output_tokens, 0))
+      FILTER (WHERE at.status IS NULL OR at.status NOT IN ('pending', 'cancelled')) AS tokens
+  FROM agent_messages at
+  LEFT JOIN agents ag ON ag.tenant_id = at.tenant_id AND ag.id = at.agent_id
+  WHERE at.tenant_id = $1
+    AND at.tenant_provider_id = ANY($2::varchar[])
+    AND at.timestamp >= NOW() - INTERVAL '30 days'
+    AND NOT EXISTS (
+      SELECT 1 FROM agents playag
+      WHERE playag.tenant_id = at.tenant_id
+        AND playag.is_playground = true
+        AND (playag.id = at.agent_id OR playag.name = at.agent_name)
+    )
+  GROUP BY at.tenant_provider_id, at.agent_id, COALESCE(ag.name, at.agent_name), ag.agent_platform
+`;
+
 function numberValue(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -115,7 +169,31 @@ function emptyObserved(): ObservedPlanUsage {
     succeeded: 0,
     success_rate: null,
     last_used_at: null,
+    by_agent: [],
   };
+}
+
+function groupAgentMetrics(rows: AgentMetricRow[]): Map<string, ObservedAgentUsage[]> {
+  const byConnection = new Map<string, ObservedAgentUsage[]>();
+  for (const row of rows) {
+    const tokens = numberValue(row.tokens);
+    const requests = numberValue(row.requests);
+    if (tokens === 0 && requests === 0) continue;
+    const list = byConnection.get(row.tenant_provider_id) ?? [];
+    list.push({
+      agent_id: row.agent_id,
+      agent_name: row.agent_name ?? 'Unknown agent',
+      agent_platform: row.agent_platform,
+      requests,
+      tokens,
+    });
+    byConnection.set(row.tenant_provider_id, list);
+  }
+  for (const [id, list] of byConnection) {
+    list.sort((a, b) => b.tokens - a.tokens || b.requests - a.requests);
+    byConnection.set(id, list.slice(0, MAX_AGENTS_PER_CONNECTION));
+  }
+  return byConnection;
 }
 
 /** Copy only the public normalized contract, dropping arbitrary adapter fields. */
@@ -189,11 +267,13 @@ export class PlanUsageService {
     }
     if (connections.length === 0) return [];
 
-    const metricRows = (await this.messageRepo.query(METRICS_SQL, [
-      tenantId,
-      connections.map((connection) => connection.id),
-    ])) as MetricRow[];
+    const connectionIds = connections.map((connection) => connection.id);
+    const [metricRows, agentRows] = (await Promise.all([
+      this.messageRepo.query(METRICS_SQL, [tenantId, connectionIds]),
+      this.messageRepo.query(AGENT_METRICS_SQL, [tenantId, connectionIds]),
+    ])) as [MetricRow[], AgentMetricRow[]];
     const metricById = new Map(metricRows.map((row) => [row.tenant_provider_id, row]));
+    const agentsById = groupAgentMetrics(agentRows);
 
     const rows = await this.mapConcurrent(
       connections,
@@ -211,6 +291,7 @@ export class PlanUsageService {
               succeeded,
               success_rate: attempts > 0 ? (succeeded / attempts) * 100 : null,
               last_used_at: iso(metric.last_used_at),
+              by_agent: agentsById.get(connection.id) ?? [],
             }
           : emptyObserved();
         const automaticQuota = await this.quotaFor(

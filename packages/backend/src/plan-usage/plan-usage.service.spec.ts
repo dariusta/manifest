@@ -29,6 +29,7 @@ const provider = (over: Partial<TenantProvider>): TenantProvider =>
 function harness(options?: {
   providers?: TenantProvider[];
   metrics?: unknown[];
+  agentMetrics?: unknown[];
   probe?: jest.Mock;
   credential?: jest.Mock;
 }) {
@@ -45,7 +46,13 @@ function harness(options?: {
     save: jest.fn().mockImplementation(async (value) => value),
   };
   const messageRepo = {
-    query: jest.fn().mockResolvedValue(options?.metrics ?? []),
+    query: jest
+      .fn()
+      .mockImplementation(async (sql: string) =>
+        sql.includes('LEFT JOIN agents ag')
+          ? (options?.agentMetrics ?? [])
+          : (options?.metrics ?? []),
+      ),
   };
   const probe =
     options?.probe ??
@@ -152,6 +159,68 @@ describe('PlanUsageService', () => {
           last_used_at: new Date('2026-09-01T12:00:00.000Z'),
         },
       ],
+      agentMetrics: [
+        // Light harness listed first to prove the output is sorted by tokens.
+        {
+          tenant_provider_id: 'tp-a',
+          agent_id: 'ag-2',
+          agent_name: 'cursor-bot',
+          agent_platform: 'cursor',
+          requests: '1',
+          tokens: '20',
+        },
+        {
+          tenant_provider_id: 'tp-a',
+          agent_id: 'ag-1',
+          agent_name: 'claude-main',
+          agent_platform: 'claude-code',
+          requests: '2',
+          tokens: '100',
+        },
+        // Deleted agent: no join row, so only the message's own name is left.
+        {
+          tenant_provider_id: 'tp-a',
+          agent_id: 'ag-gone',
+          agent_name: null,
+          agent_platform: null,
+          requests: '0',
+          tokens: '5',
+        },
+        // Nothing counted → dropped rather than rendered as an empty bar.
+        {
+          tenant_provider_id: 'tp-a',
+          agent_id: 'ag-idle',
+          agent_name: 'idle',
+          agent_platform: 'other',
+          requests: '0',
+          tokens: '0',
+        },
+        // Ties on tokens fall back to requests.
+        {
+          tenant_provider_id: 'tp-a',
+          agent_id: 'ag-3',
+          agent_name: 'tie-low',
+          agent_platform: 'other',
+          requests: '1',
+          tokens: '20',
+        },
+        {
+          tenant_provider_id: 'tp-a',
+          agent_id: 'ag-4',
+          agent_name: 'tie-high',
+          agent_platform: 'other',
+          requests: '3',
+          tokens: '20',
+        },
+        {
+          tenant_provider_id: 'tp-a',
+          agent_id: 'ag-5',
+          agent_name: 'sixth',
+          agent_platform: 'other',
+          requests: '1',
+          tokens: '1',
+        },
+      ],
     });
 
     const rows = await service.getPlanUsage('tenant-1');
@@ -168,6 +237,12 @@ describe('PlanUsageService', () => {
       "AND at.status NOT IN ('error', 'fallback_error', 'rate_limited', 'auto_fixed', 'failed')",
     );
     expect(messageRepo.query.mock.calls[0][0]).toContain('playag.is_playground = true');
+    expect(messageRepo.query).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'LEFT JOIN agents ag ON ag.tenant_id = at.tenant_id AND ag.id = at.agent_id',
+      ),
+      ['tenant-1', ['tp-a', 'tp-b']],
+    );
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       tenant_provider_id: 'tp-a',
@@ -183,6 +258,38 @@ describe('PlanUsageService', () => {
         last_used_at: '2026-09-01T12:00:00.000Z',
       },
     });
+    // Heaviest harness first, idle rows dropped, capped to five.
+    expect(rows[0].observed_30d.by_agent).toEqual([
+      {
+        agent_id: 'ag-1',
+        agent_name: 'claude-main',
+        agent_platform: 'claude-code',
+        requests: 2,
+        tokens: 100,
+      },
+      {
+        agent_id: 'ag-4',
+        agent_name: 'tie-high',
+        agent_platform: 'other',
+        requests: 3,
+        tokens: 20,
+      },
+      {
+        agent_id: 'ag-2',
+        agent_name: 'cursor-bot',
+        agent_platform: 'cursor',
+        requests: 1,
+        tokens: 20,
+      },
+      { agent_id: 'ag-3', agent_name: 'tie-low', agent_platform: 'other', requests: 1, tokens: 20 },
+      {
+        agent_id: 'ag-gone',
+        agent_name: 'Unknown agent',
+        agent_platform: null,
+        requests: 0,
+        tokens: 5,
+      },
+    ]);
     expect(rows[1].observed_30d).toEqual({
       requests: 0,
       tokens: 0,
@@ -191,6 +298,7 @@ describe('PlanUsageService', () => {
       succeeded: 0,
       success_rate: null,
       last_used_at: null,
+      by_agent: [],
     });
   });
 

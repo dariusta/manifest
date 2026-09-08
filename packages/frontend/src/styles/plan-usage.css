@@ -267,6 +267,95 @@
   flex: 1;
 }
 
+/* Which harnesses are drawing the plan down, heaviest first. Share bars are
+   relative to the connection's own 30-day tokens so the top row reads as
+   "this one is eating N% of the plan". */
+.plan-usage-agents {
+  margin-top: var(--gap-md);
+  padding-top: var(--gap-md);
+  border-top: 1px solid hsl(var(--border));
+}
+
+.plan-usage-agents__title {
+  margin-bottom: var(--gap-sm);
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-xs);
+}
+
+.plan-usage-agents__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-usage-agent {
+  display: grid;
+  gap: 3px;
+}
+
+.plan-usage-agent__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+}
+
+.plan-usage-agent__icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+}
+
+.plan-usage-agent__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--foreground));
+}
+
+.plan-usage-agent--top .plan-usage-agent__name {
+  font-weight: 600;
+}
+
+.plan-usage-agent__platform {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-xs);
+}
+
+.plan-usage-agent__tokens {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.plan-usage-agent__bar {
+  height: 4px;
+  background: hsl(var(--muted));
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.plan-usage-agent__fill {
+  height: 100%;
+  min-width: 2px;
+  border-radius: var(--radius-pill);
+  background: hsl(var(--chart-1));
+  opacity: 0.55;
+}
+
+.plan-usage-agent--top .plan-usage-agent__fill {
+  opacity: 1;
+}
+
 /* Observed usage footer: label-over-value cells so long token counts never
    wrap mid-number, pinned to the card bottom. */
 .plan-usage-observed {

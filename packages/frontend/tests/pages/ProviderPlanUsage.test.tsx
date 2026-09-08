@@ -32,6 +32,22 @@ const liveAnthropic = {
     succeeded: 11,
     success_rate: 91.666,
     last_used_at: '2026-09-01T12:00:00.000Z',
+    by_agent: [
+      {
+        agent_id: 'ag-1',
+        agent_name: 'claude-main',
+        agent_platform: 'claude-code',
+        requests: 10,
+        tokens: 30000,
+      },
+      {
+        agent_id: 'ag-2',
+        agent_name: 'cursor-bot',
+        agent_platform: 'cursor',
+        requests: 2,
+        tokens: 4000,
+      },
+    ],
   },
   quota: {
     status: 'live',
@@ -64,6 +80,7 @@ const unsupportedOpenAI = {
     succeeded: 4,
     success_rate: 100,
     last_used_at: null,
+    by_agent: [],
   },
   quota: {
     status: 'unsupported',
@@ -475,5 +492,66 @@ describe('Plan Usage page', () => {
     render(() => <PlanUsage />);
     await screen.findByText('Max 20x');
     expect(screen.getByText('Unlimited')).toBeDefined();
+  });
+
+  it('ranks the harnesses drawing on a subscription, heaviest first', async () => {
+    mocks.getProviderPlanUsage.mockResolvedValue({
+      connections: [liveAnthropic, unsupportedOpenAI],
+    });
+    render(() => <PlanUsage />);
+    await screen.findByText('Claude Max');
+
+    // Only the subscription card reports harnesses; the empty list hides the block.
+    expect(screen.getAllByText('Top harnesses (30d)')).toHaveLength(1);
+    const rows = document.querySelectorAll('.plan-usage-agent');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].classList.contains('plan-usage-agent--top')).toBe(true);
+    expect(rows[0].querySelector('.plan-usage-agent__name')?.textContent).toBe('claude-main');
+    expect(rows[0].querySelector('.plan-usage-agent__platform')?.textContent).toBe('Claude Code');
+    expect(rows[0].querySelector('.plan-usage-agent__tokens')?.textContent).toBe(
+      '30k tok · 10 req',
+    );
+    expect(rows[0].querySelector('.plan-usage-agent__icon')?.getAttribute('src')).toBeTruthy();
+    expect(rows[1].classList.contains('plan-usage-agent--top')).toBe(false);
+    expect(rows[1].querySelector('.plan-usage-agent__name')?.textContent).toBe('cursor-bot');
+
+    // Share bars scale against the connection's own 30-day token total.
+    const fills = document.querySelectorAll<HTMLElement>('.plan-usage-agent__fill');
+    expect(fills[0].style.width).toBe(`${(30000 / 34000) * 100}%`);
+    expect(fills[1].style.width).toBe(`${(4000 / 34000) * 100}%`);
+  });
+
+  it('falls back to a generic platform when a harness is unknown or tokens are unreported', async () => {
+    mocks.getProviderPlanUsage.mockResolvedValue({
+      connections: [
+        {
+          ...liveAnthropic,
+          observed_30d: {
+            ...liveAnthropic.observed_30d,
+            tokens: 0,
+            by_agent: [
+              {
+                agent_id: null,
+                agent_name: 'Unknown agent',
+                agent_platform: null,
+                requests: 3,
+                tokens: 0,
+              },
+            ],
+          },
+        },
+        {
+          ...unsupportedOpenAI,
+          observed_30d: { ...unsupportedOpenAI.observed_30d, by_agent: undefined },
+        },
+      ],
+    });
+    render(() => <PlanUsage />);
+    await screen.findByText('Claude Max');
+
+    const row = document.querySelector('.plan-usage-agent');
+    expect(row?.querySelector('.plan-usage-agent__name')?.textContent).toBe('Unknown agent');
+    expect(row?.querySelector('.plan-usage-agent__platform')?.textContent).toBe('Other');
+    expect(row?.querySelector<HTMLElement>('.plan-usage-agent__fill')?.style.width).toBe('0%');
   });
 });

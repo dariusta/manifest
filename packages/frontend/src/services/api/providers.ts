@@ -176,6 +176,15 @@ export interface ProviderPlanUsageQuota {
   stale?: boolean;
 }
 
+/** One harness (agent) drawing on a connection over the last 30 days. */
+export interface ProviderPlanUsageAgent {
+  agent_id: string | null;
+  agent_name: string;
+  agent_platform: string | null;
+  requests: number;
+  tokens: number;
+}
+
 export interface ProviderPlanUsageObserved {
   requests: number;
   tokens: number;
@@ -184,6 +193,8 @@ export interface ProviderPlanUsageObserved {
   succeeded: number;
   success_rate: number | null;
   last_used_at: string | null;
+  /** Heaviest harnesses first; empty when nothing used the connection. */
+  by_agent?: ProviderPlanUsageAgent[];
 }
 
 export interface ProviderPlanUsage {

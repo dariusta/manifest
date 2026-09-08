@@ -96,7 +96,7 @@
 --z-toast: 8000
 --z-tooltip: 9999
 
-## Blocks (331 BEM blocks, 1758 classes)
+## Blocks (333 BEM blocks, 1770 classes)
 account-back-btn (agents.css): account-back-btn
 account-email-footer (agents.css): account-email-footer
 account-email-toggle (agents.css): account-email-toggle--disabled
@@ -283,6 +283,8 @@ page-header (analytics-overview.css, layout.css, theme.css): page-header page-he
 pagination (data.css): pagination pagination__btn pagination__controls pagination__summary
 panel (analytics-overview.css, cards.css, charts.css, limits.css, plan-usage.css, request-drawer.css, routing-providers.css, routing-tabs.css, theme.css, welcome.css, wizard.css): panel panel--disabled panel__header panel__tab panel__tab--active panel__tab-icon panel__tabs panel__title
 plan-picker (auth.css): plan-picker plan-picker__amount plan-picker__badge plan-picker__card plan-picker__card--expanded plan-picker__card--pro plan-picker__cta plan-picker__details plan-picker__features plan-picker__name plan-picker__period plan-picker__price-inline plan-picker__radio plan-picker__radio-dot plan-picker__row plan-picker__section-header plan-picker__section-subtitle plan-picker__section-title plan-picker__usage
+plan-usage-agent (plan-usage.css): plan-usage-agent plan-usage-agent--top plan-usage-agent__bar plan-usage-agent__fill plan-usage-agent__icon plan-usage-agent__name plan-usage-agent__platform plan-usage-agent__row plan-usage-agent__tokens
+plan-usage-agents (plan-usage.css): plan-usage-agents plan-usage-agents__list plan-usage-agents__title
 plan-usage-badge (plan-usage.css): plan-usage-badge plan-usage-badge--cached plan-usage-badge--live plan-usage-badge--needs_reconnect plan-usage-badge--unavailable plan-usage-badge--unsupported
 plan-usage-balance (plan-usage.css): plan-usage-balance plan-usage-balance--headline plan-usage-balance__value
 plan-usage-bar (plan-usage.css): plan-usage-bar plan-usage-bar__fill
