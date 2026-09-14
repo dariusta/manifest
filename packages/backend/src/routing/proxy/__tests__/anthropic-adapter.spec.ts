@@ -6,6 +6,7 @@ import {
   fromAnthropicResponse,
   transformAnthropicStreamChunk,
   createAnthropicStreamTransformer,
+  takeClaudeCodeToolAliases,
 } from '../anthropic-adapter';
 import { injectOpenRouterCacheControl } from '../cache-injection';
 
@@ -852,7 +853,7 @@ describe('Anthropic Adapter', () => {
     });
 
     it('restores caller tool names after a Claude Code subscription remap', () => {
-      toAnthropicRequest(
+      const request = toAnthropicRequest(
         {
           messages: [{ role: 'user', content: 'Hi' }],
           tools: [{ type: 'function', function: { name: 'read_file', description: 'Read' } }],
@@ -866,11 +867,54 @@ describe('Anthropic Adapter', () => {
           stop_reason: 'tool_use',
         },
         'claude-opus-5',
+        takeClaudeCodeToolAliases(request),
       );
       const message = (
         result.choices as Array<{ message: { tool_calls: Array<{ function: { name: string } }> } }>
       )[0].message;
       expect(message.tool_calls[0].function.name).toBe('read_file');
+    });
+
+    it('does not leak Claude Code names after a later subscription remap', () => {
+      const first = toAnthropicRequest(
+        {
+          messages: [{ role: 'user', content: 'Hi' }],
+          tools: [
+            { type: 'function', function: { name: 'vision_analyze', description: 'Vision' } },
+            { type: 'function', function: { name: 'execute_code', description: 'Code' } },
+            { type: 'function', function: { name: 'terminal', description: 'Shell' } },
+          ],
+        },
+        'claude-opus-5',
+        { injectSubscriptionIdentity: true },
+      );
+      const firstAliases = takeClaudeCodeToolAliases(first);
+
+      toAnthropicRequest(
+        {
+          messages: [{ role: 'user', content: 'Hi' }],
+          tools: [{ type: 'function', function: { name: 'web_search', description: 'Search' } }],
+        },
+        'claude-opus-5',
+        { injectSubscriptionIdentity: true },
+      );
+
+      const result = fromAnthropicResponse(
+        {
+          content: [
+            { type: 'tool_use', id: '1', name: 'LSP', input: {} },
+            { type: 'tool_use', id: '2', name: 'NotebookEdit', input: {} },
+            { type: 'tool_use', id: '3', name: 'Bash', input: {} },
+          ],
+          stop_reason: 'tool_use',
+        },
+        'claude-opus-5',
+        firstAliases,
+      );
+      const names = (
+        result.choices as Array<{ message: { tool_calls: Array<{ function: { name: string } }> } }>
+      )[0].message.tool_calls.map((call) => call.function.name);
+      expect(names).toEqual(['vision_analyze', 'execute_code', 'terminal']);
     });
 
     it('maps end_turn to stop', () => {

@@ -621,6 +621,7 @@ export async function handleStreamResponse(
     const anthropicTransformer = providerClient.createAnthropicStreamTransformer(
       meta.model,
       onThinkingBlocks,
+      forward.claudeCodeToolAliases,
     );
     // Anthropic Messages inbound + Anthropic upstream: forward the upstream
     // SSE bytes byte-for-byte so Anthropic SSE framing (`event:` headers,
@@ -779,7 +780,11 @@ export async function handleNonStreamResponse(
     responseBody = anthropicData;
   } else if (forward.isAnthropic) {
     const anthropicData = (await forward.response.json()) as Record<string, unknown>;
-    responseBody = providerClient.convertAnthropicResponse(anthropicData, meta.model);
+    responseBody = providerClient.convertAnthropicResponse(
+      anthropicData,
+      meta.model,
+      forward.claudeCodeToolAliases,
+    );
     const extracted = (responseBody as Record<string, unknown>)?._extractedThinkingBlocks as
       ExtractedThinkingBlocks | undefined;
     if (extracted && thinkingCache && sessionKey) {

@@ -117,8 +117,6 @@ type ClaudeCodeToolRemapper = {
   aliases: Map<string, string>;
 };
 
-let lastClaudeCodeToolAliases: Map<string, string> | undefined;
-
 function createClaudeCodeToolRemapper(): ClaudeCodeToolRemapper {
   const aliases = new Map<string, string>();
   const originalToMapped = new Map<string, string>();
@@ -146,7 +144,6 @@ function createClaudeCodeToolRemapper(): ClaudeCodeToolRemapper {
   const remap = (original: string): string => claim(original, true);
   const remapUnique = (original: string): string => claim(original, false);
   const restore = (mapped: string): string => aliases.get(mapped) ?? mapped;
-  lastClaudeCodeToolAliases = aliases;
   return { remap, remapUnique, restore, aliases };
 }
 
@@ -188,11 +185,8 @@ function attachClaudeCodeToolAliases(
 export function takeClaudeCodeToolAliases(
   body: Record<string, unknown> | undefined,
 ): Map<string, string> | undefined {
-  if (!body) return lastClaudeCodeToolAliases;
-  const aliases = (body as { _claudeCodeToolAliases?: Map<string, string> })._claudeCodeToolAliases;
-  if (aliases)
-    delete (body as { _claudeCodeToolAliases?: Map<string, string> })._claudeCodeToolAliases;
-  return aliases ?? lastClaudeCodeToolAliases;
+  if (!body) return undefined;
+  return (body as { _claudeCodeToolAliases?: Map<string, string> })._claudeCodeToolAliases;
 }
 
 function restoreClaudeCodeToolName(
@@ -200,7 +194,7 @@ function restoreClaudeCodeToolName(
   aliases?: Map<string, string>,
 ): string {
   if (!name) return '';
-  return (aliases ?? lastClaudeCodeToolAliases)?.get(name) ?? name;
+  return aliases?.get(name) ?? name;
 }
 
 function remapAnthropicToolName(
@@ -796,6 +790,7 @@ export interface ExtractedThinkingBlocks {
 export function fromAnthropicResponse(
   resp: Record<string, unknown>,
   model: string,
+  aliases?: Map<string, string>,
 ): Record<string, unknown> & { _extractedThinkingBlocks?: ExtractedThinkingBlocks } {
   const content = (resp.content as Array<Record<string, unknown>>) || [];
   let textContent = '';
@@ -814,7 +809,7 @@ export function fromAnthropicResponse(
         id: block.id as string,
         type: 'function',
         function: {
-          name: restoreClaudeCodeToolName(block.name as string),
+          name: restoreClaudeCodeToolName(block.name as string, aliases),
           arguments: JSON.stringify(block.input ?? {}),
         },
       });
@@ -932,6 +927,7 @@ interface StreamState {
   thinkingBlocksByIndex: Map<number, ThinkingBlock>;
   firstToolUseId: string | null;
   onThinkingBlocks?: ThinkingBlocksCallback;
+  toolAliases?: Map<string, string>;
 }
 
 function handleMessageStart(state: StreamState, data: Record<string, unknown>): string {
@@ -990,7 +986,10 @@ function handleContentBlockStart(state: StreamState, data: Record<string, unknow
             index: idx,
             id: toolUseId,
             type: 'function',
-            function: { name: restoreClaudeCodeToolName(block.name as string), arguments: '' },
+            function: {
+              name: restoreClaudeCodeToolName(block.name as string, state.toolAliases),
+              arguments: '',
+            },
           },
         ],
       },
@@ -1083,6 +1082,7 @@ function handleMessageDelta(state: StreamState, data: Record<string, unknown>): 
 export function createAnthropicStreamTransformer(
   model: string,
   onThinkingBlocks?: ThinkingBlocksCallback,
+  aliases?: Map<string, string>,
 ): (chunk: string) => string | null {
   const state: StreamState = {
     model,
@@ -1094,6 +1094,7 @@ export function createAnthropicStreamTransformer(
     thinkingBlocksByIndex: new Map(),
     firstToolUseId: null,
     onThinkingBlocks,
+    toolAliases: aliases,
   };
 
   return (chunk: string): string | null => {

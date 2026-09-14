@@ -1245,7 +1245,11 @@ describe('proxy-response-handler', () => {
       // `undefined` is the thinking-blocks callback — absent when no
       // thinking cache is provided to the handler (OpenAI-compat contract
       // tests don't wire one up).
-      expect(client.createAnthropicStreamTransformer).toHaveBeenCalledWith('gpt-4o', undefined);
+      expect(client.createAnthropicStreamTransformer).toHaveBeenCalledWith(
+        'gpt-4o',
+        undefined,
+        undefined,
+      );
     });
 
     it('should forward extracted thinking blocks into the thinking cache on Anthropic streams', async () => {
