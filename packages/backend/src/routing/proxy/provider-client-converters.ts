@@ -12,6 +12,7 @@ import {
   fromAnthropicResponse,
   transformAnthropicStreamChunk,
   createAnthropicStreamTransformer,
+  takeClaudeCodeToolAliases,
   type ThinkingBlocksCallback,
 } from './anthropic-adapter';
 import {
@@ -58,8 +59,9 @@ export function convertGoogleStreamChunk(chunk: string, model: string): GoogleSt
 export function convertAnthropicResponse(
   anthropicBody: Record<string, unknown>,
   model: string,
+  aliases?: Map<string, string>,
 ): Record<string, unknown> {
-  return fromAnthropicResponse(anthropicBody, model);
+  return fromAnthropicResponse(anthropicBody, model, aliases);
 }
 
 /** Convert an Anthropic SSE chunk to OpenAI SSE format. */
@@ -71,8 +73,9 @@ export function convertAnthropicStreamChunk(chunk: string, model: string): strin
 export function createAnthropicTransformer(
   model: string,
   onThinkingBlocks?: ThinkingBlocksCallback,
+  aliases?: Map<string, string>,
 ): (chunk: string) => string | null {
-  return createAnthropicStreamTransformer(model, onThinkingBlocks);
+  return createAnthropicStreamTransformer(model, onThinkingBlocks, aliases);
 }
 
 // Re-export adapter functions used by ProviderClient.forward()
@@ -84,6 +87,7 @@ export {
   toAnthropicRequest,
   toResponsesRequest,
   collectChatGptSseResponse,
+  takeClaudeCodeToolAliases,
 };
 export type { GoogleStreamChunkResult } from './google-adapter';
 export type { ThinkingBlocksCallback } from './anthropic-adapter';

@@ -30,6 +30,7 @@ import {
   convertAnthropicStreamChunk as anthropicStreamChunkConverter,
   createAnthropicTransformer,
   createReasoningContentStreamTransformer as reasoningContentStreamTransformer,
+  takeClaudeCodeToolAliases,
 } from './provider-client-converters';
 import {
   ForwardOptions,
@@ -85,6 +86,8 @@ export interface ForwardResult {
   structuredOutputToolName?: string;
   /** Internal: original Responses text.format metadata for synthesized Responses bodies. */
   responsesTextFormat?: Record<string, unknown>;
+  /** Per-request Claude Code tool-name aliases for restoring caller names. */
+  claudeCodeToolAliases?: Map<string, string>;
 }
 
 function wireApiMode(endpoint: ProviderEndpoint): ProxyApiMode | undefined {
@@ -456,6 +459,7 @@ export class ProviderClient {
         isCodeAssist,
         structuredOutputToolName,
         responsesTextFormat: textFormat,
+        claudeCodeToolAliases: takeClaudeCodeToolAliases(wireRequestBody),
       });
       const response =
         !stream &&
@@ -866,6 +870,7 @@ export class ProviderClient {
       isCodeAssist?: boolean;
       structuredOutputToolName?: string;
       responsesTextFormat?: Record<string, unknown>;
+      claudeCodeToolAliases?: Map<string, string>;
     },
   ): Promise<ForwardResult> {
     let fetchSignal: AbortSignal;

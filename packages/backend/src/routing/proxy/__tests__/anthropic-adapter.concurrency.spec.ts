@@ -6,7 +6,11 @@
  * handling to verify state isolation — no cross-stream bleeding of usage
  * counters, tool-call indices, or thinking-block accumulators.
  */
-import { createAnthropicStreamTransformer } from '../anthropic-adapter';
+import {
+  createAnthropicStreamTransformer,
+  takeClaudeCodeToolAliases,
+  toAnthropicRequest,
+} from '../anthropic-adapter';
 
 describe('createAnthropicStreamTransformer concurrent use', () => {
   it('keeps tool_use indices isolated between two interleaved transformers', () => {
@@ -284,5 +288,39 @@ describe('createAnthropicStreamTransformer concurrent use', () => {
       expect(usage.usage.prompt_tokens).toBe(i + 1);
       expect(usage.usage.completion_tokens).toBe((i + 1) * 10);
     });
+  });
+
+  it('restores caller tool names from the stream that owns the aliases', () => {
+    const first = toAnthropicRequest(
+      {
+        messages: [{ role: 'user', content: 'Hi' }],
+        tools: [{ type: 'function', function: { name: 'vision_analyze', description: 'Vision' } }],
+      },
+      'claude-opus-5',
+      { injectSubscriptionIdentity: true },
+    );
+    const firstAliases = takeClaudeCodeToolAliases(first);
+    toAnthropicRequest(
+      {
+        messages: [{ role: 'user', content: 'Hi' }],
+        tools: [{ type: 'function', function: { name: 'web_search', description: 'Search' } }],
+      },
+      'claude-opus-5',
+      { injectSubscriptionIdentity: true },
+    );
+
+    const transform = createAnthropicStreamTransformer(
+      'claude-sonnet-4-20250514',
+      undefined,
+      firstAliases,
+    );
+    transform(
+      'event: message_start\n{"type":"message_start","message":{"usage":{"input_tokens":1}}}',
+    );
+    const chunk = transform(
+      'event: content_block_start\n{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"LSP"}}',
+    );
+    const data = JSON.parse(chunk!.replace('data: ', '').trim());
+    expect(data.choices[0].delta.tool_calls[0].function.name).toBe('vision_analyze');
   });
 });
