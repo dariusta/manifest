@@ -107,12 +107,21 @@ const HERMES_TO_CLAUDE_CODE_TOOLS: Record<string, string> = {
   mem0_delete: 'KillBash',
 };
 
+/** Static reverse of the preferred alias table — the restore safety net. */
+const CLAUDE_CODE_TO_HERMES_TOOLS: Record<string, string> = Object.fromEntries(
+  Object.entries(HERMES_TO_CLAUDE_CODE_TOOLS).map(([hermesName, claudeCodeName]) => [
+    claudeCodeName,
+    hermesName,
+  ]),
+);
+
 const THIRD_PARTY_SYSTEM_RE =
   /\b(sharky|hermes operator|hermes agent|openclaw|soul\.md|you are sharky)\b/i;
 
 type ClaudeCodeToolRemapper = {
   remap: (original: string) => string;
   remapUnique: (original: string) => string;
+  remapKnown: (original: string) => string;
   restore: (mapped: string) => string;
   aliases: Map<string, string>;
 };
@@ -143,8 +152,12 @@ function createClaudeCodeToolRemapper(): ClaudeCodeToolRemapper {
   };
   const remap = (original: string): string => claim(original, true);
   const remapUnique = (original: string): string => claim(original, false);
+  // Remap only names that belong to the current tool set. Unknown/stale
+  // history names (e.g. a rejected "Bash_2" stored by the client) are left
+  // untouched so they never mint new aliases and cascade into Bash_2_2_3…
+  const remapKnown = (original: string): string => originalToMapped.get(original) ?? original;
   const restore = (mapped: string): string => aliases.get(mapped) ?? mapped;
-  return { remap, remapUnique, restore, aliases };
+  return { remap, remapUnique, remapKnown, restore, aliases };
 }
 
 function buildClaudeCodeBillingHeaderBlock(): ContentBlock {
@@ -194,7 +207,19 @@ function restoreClaudeCodeToolName(
   aliases?: Map<string, string>,
 ): string {
   if (!name) return '';
-  return aliases?.get(name) ?? name;
+  // 1. Per-request alias map (exact).
+  const direct = aliases?.get(name);
+  if (direct) return direct;
+  // 2. Strip cascaded suffixes (Bash_2_2_3 -> Bash) and retry the map.
+  const stripped = name.replace(/(?:_\d+)+$/, '');
+  if (stripped !== name) {
+    const unsuffixed = aliases?.get(stripped);
+    if (unsuffixed) return unsuffixed;
+  }
+  // 3. Static reverse table — works even when no alias map reached this path.
+  const staticReverse = CLAUDE_CODE_TO_HERMES_TOOLS[name] ?? CLAUDE_CODE_TO_HERMES_TOOLS[stripped];
+  if (staticReverse) return staticReverse;
+  return name;
 }
 
 function remapAnthropicToolName(
@@ -535,8 +560,15 @@ export function toAnthropicRequest(
 
   const thinkingLookup = options?.thinkingLookup;
   const thinkingRouteContext = options?.thinkingRouteContext;
+  const tools = convertTools(body.tools as Array<Record<string, unknown>> | undefined) ?? [];
+  if (remapper) {
+    // Tool list first: it claims the preferred Claude Code names. History is
+    // remapped AFTER so both agree on one name per tool (remapKnown only
+    // rewrites names present in the current tool set).
+    for (const tool of tools) tool.name = remapper.remapUnique(tool.name);
+  }
   const converted = messages
-    .map((msg) => convertMessage(msg, thinkingLookup, thinkingRouteContext, remapper?.remap))
+    .map((msg) => convertMessage(msg, thinkingLookup, thinkingRouteContext, remapper?.remapKnown))
     .filter(Boolean);
   const result: Record<string, unknown> = {
     messages: converted,
@@ -549,10 +581,6 @@ export function toAnthropicRequest(
   // bypass translation entirely via applyAnthropicMessagesMutations, so
   // server tools never reach this code path and the OpenAI function-shape
   // assumption is safe.
-  const tools = convertTools(body.tools as Array<Record<string, unknown>> | undefined) ?? [];
-  if (remapper) {
-    for (const tool of tools) tool.name = remapper.remapUnique(tool.name);
-  }
   if (tools.length > 0) {
     tools[tools.length - 1].cache_control = CACHE;
     result.tools = tools;
@@ -709,7 +737,10 @@ export function applyAnthropicMessagesMutations(
         let content = sanitized.content;
         let messageChanged = sanitized.changed;
         if (remapper) {
-          const remapped = content.map((block) => remapToolUseName(block, remapper.remap));
+          // History AFTER the tool list (see convertOpenAIToAnthropic): only
+          // names in the current tool set are rewritten; stale names like
+          // Bash_2 pass through untouched instead of re-suffixing.
+          const remapped = content.map((block) => remapToolUseName(block, remapper.remapKnown));
           if (remapped.some((block, index) => block !== content[index])) {
             content = remapped;
             messageChanged = true;

@@ -3064,3 +3064,112 @@ describe('Anthropic Adapter', () => {
     });
   });
 });
+
+describe('Anthropic Adapter — Claude Code alias determinism (regression)', () => {
+  it('keeps history and tool list on ONE name per tool (tool list claims first)', () => {
+    const request = toAnthropicRequest(
+      {
+        messages: [
+          { role: 'user', content: 'run it' },
+          {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              { id: 'call_1', type: 'function', function: { name: 'terminal', arguments: '{}' } },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_1', content: 'ok' },
+        ],
+        tools: [{ type: 'function', function: { name: 'terminal', description: 'Shell' } }],
+      },
+      'claude-opus-5',
+      { injectSubscriptionIdentity: true },
+    );
+    const tools = (request.tools as Array<{ name: string }>).map((t) => t.name);
+    const historyNames: string[] = [];
+    for (const msg of request.messages as Array<{ role: string; content?: unknown }>) {
+      if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+      for (const block of msg.content as Array<{ type: string; name?: string }>) {
+        if (block.type === 'tool_use' && block.name) historyNames.push(block.name);
+      }
+    }
+    expect(tools).toEqual(['Bash']);
+    expect(historyNames).toEqual(['Bash']);
+  });
+
+  it('leaves stale suffixed history names untouched (no Bash_2_2 cascade)', () => {
+    const request = toAnthropicRequest(
+      {
+        messages: [
+          { role: 'user', content: 'go' },
+          {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              { id: 'c1', type: 'function', function: { name: 'Bash_2_2', arguments: '{}' } },
+              { id: 'c2', type: 'function', function: { name: 'terminal', arguments: '{}' } },
+            ],
+          },
+        ],
+        tools: [{ type: 'function', function: { name: 'terminal', description: 'Shell' } }],
+      },
+      'claude-opus-5',
+      { injectSubscriptionIdentity: true },
+    );
+    const historyNames: string[] = [];
+    for (const msg of request.messages as Array<{ role: string; content?: unknown }>) {
+      if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+      for (const block of msg.content as Array<{ type: string; name?: string }>) {
+        if (block.type === 'tool_use' && block.name) historyNames.push(block.name);
+      }
+    }
+    // Stale name passes through unchanged; known name gets the alias.
+    expect(historyNames).toEqual(['Bash_2_2', 'Bash']);
+    // And the stale name still restores to the Hermes name via the static map.
+    const result = fromAnthropicResponse(
+      {
+        content: [{ type: 'tool_use', id: 'x', name: 'Bash_2_2', input: {} }],
+        stop_reason: 'tool_use',
+      },
+      'claude-opus-5',
+      takeClaudeCodeToolAliases(request),
+    );
+    const names = (
+      result.choices as Array<{ message: { tool_calls: Array<{ function: { name: string } }> } }>
+    )[0].message.tool_calls.map((c) => c.function.name);
+    expect(names).toEqual(['terminal']);
+  });
+
+  it('restores aliases with NO alias map at all (static safety net)', () => {
+    const result = fromAnthropicResponse(
+      {
+        content: [
+          { type: 'tool_use', id: '1', name: 'NotebookEdit', input: {} },
+          { type: 'tool_use', id: '2', name: 'Task', input: {} },
+          { type: 'tool_use', id: '3', name: 'Bash_2', input: {} },
+          { type: 'tool_use', id: '4', name: 'Grep', input: {} },
+        ],
+        stop_reason: 'tool_use',
+      },
+      'claude-opus-5',
+      undefined,
+    );
+    const names = (
+      result.choices as Array<{ message: { tool_calls: Array<{ function: { name: string } }> } }>
+    )[0].message.tool_calls.map((c) => c.function.name);
+    expect(names).toEqual(['execute_code', 'delegate_task', 'terminal', 'search_files']);
+  });
+
+  it('stream transformer restores aliases without an alias map', () => {
+    const transform = createAnthropicStreamTransformer('claude-opus-5');
+    transform(
+      'event: message_start\n{"type":"message_start","message":{"usage":{"input_tokens":10}}}',
+    );
+    const result = transform(
+      'event: content_block_start\n{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"NotebookEdit"}}',
+    );
+    expect(result).not.toBeNull();
+    const data = JSON.parse(result!.replace('data: ', '').trim());
+    expect(data.choices[0].delta.tool_calls[0].function.name).toBe('execute_code');
+  });
+});
