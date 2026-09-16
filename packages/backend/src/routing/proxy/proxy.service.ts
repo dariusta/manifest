@@ -80,6 +80,11 @@ type ResolvedRouting = Awaited<ReturnType<ResolveService['resolve']>> & {
   explicit_model_unavailable?: string;
 };
 
+/** True when the client named MiniMax and that name is not a connected route. */
+function isUnconnectedMinimaxRequest(requestedModel: string): boolean {
+  return explicitModelRouteCandidate(requestedModel)?.provider === 'minimax';
+}
+
 /**
  * Roles excluded from scoring. AI agents (OpenClaw, Hermes, and
  * similar tools) inject a large, keyword-rich system prompt with every
@@ -934,16 +939,23 @@ export class ProxyService {
     if (requestedModel && requestedModel !== OPENAI_MODEL_ID_AUTO) {
       const explicit = await this.resolveExplicitModel(agentId, tenantId, requestedModel, headers);
       if (explicit) return explicit;
-      return {
-        tier: 'default' as const,
-        route: null,
-        fallback_routes: null,
-        response_mode: DEFAULT_RESPONSE_MODE,
-        confidence: 0,
-        score: 0,
-        reason: 'default' as const,
-        explicit_model_unavailable: requestedModel,
-      };
+      // Claude Code always sends a concrete `model`. Pekka (and other
+      // Claude Code agents) may name MiniMax even when that provider is
+      // not connected; M302-ing that request ignores the dashboard Claude
+      // override. Fall through to automatic routing only for MiniMax.
+      // Unknown / ambiguous names still fail closed.
+      if (!isUnconnectedMinimaxRequest(requestedModel)) {
+        return {
+          tier: 'default' as const,
+          route: null,
+          fallback_routes: null,
+          response_mode: DEFAULT_RESPONSE_MODE,
+          confidence: 0,
+          score: 0,
+          reason: 'default' as const,
+          explicit_model_unavailable: requestedModel,
+        };
+      }
     }
 
     const isHeartbeat = this.detectHeartbeatBody(body, apiMode);

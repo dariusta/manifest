@@ -1389,6 +1389,74 @@ describe('ProxyService — orchestration', () => {
       );
     });
 
+    it('falls through to dashboard routing when MiniMax is named but not connected', async () => {
+      // Claude Code always sends a concrete `model`. Pekka's dashboard override
+      // is Claude; MiniMax is not connected. A MiniMax id must not M302 — it
+      // should use the operator's configured route instead.
+      modelDiscovery.getModelsForAgent.mockResolvedValue([
+        discoveredModel({ id: 'claude-opus-5', provider: 'anthropic', authType: 'subscription' }),
+      ]);
+      resolveService.resolve.mockResolvedValue({
+        tier: 'default',
+        route: route('anthropic', 'subscription', 'claude-opus-5'),
+        fallback_routes: null,
+        confidence: 1,
+        score: 0,
+        reason: 'default',
+      });
+      fallbackService.tryForwardToProvider.mockResolvedValue({
+        response: okResponse(200),
+        isGoogle: false,
+        isAnthropic: true,
+        isChatGpt: false,
+      });
+
+      await svc.proxyRequest(
+        baseOpts({
+          body: { model: 'minimax-m2.7', messages: [{ role: 'user', content: 'hi' }] },
+        }),
+      );
+
+      expect(resolveService.resolve).toHaveBeenCalled();
+      expect(fallbackService.tryForwardToProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'anthropic',
+          authType: 'subscription',
+          model: 'claude-opus-5',
+        }),
+      );
+    });
+
+    it('falls through for a provider-qualified MiniMax id that is not connected', async () => {
+      modelDiscovery.getModelsForAgent.mockResolvedValue([
+        discoveredModel({ id: 'claude-opus-5', provider: 'anthropic', authType: 'subscription' }),
+      ]);
+      resolveService.resolve.mockResolvedValue({
+        tier: 'default',
+        route: route('anthropic', 'subscription', 'claude-opus-5'),
+        fallback_routes: null,
+        confidence: 1,
+        score: 0,
+        reason: 'default',
+      });
+      fallbackService.tryForwardToProvider.mockResolvedValue({
+        response: okResponse(200),
+        isGoogle: false,
+        isAnthropic: true,
+        isChatGpt: false,
+      });
+
+      await svc.proxyRequest(
+        baseOpts({
+          body: { model: 'minimax/MiniMax-M2.7', messages: [{ role: 'user', content: 'hi' }] },
+        }),
+      );
+
+      expect(fallbackService.tryForwardToProvider).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'anthropic', model: 'claude-opus-5' }),
+      );
+    });
+
     it('returns model-not-available for a model no connection carries', async () => {
       modelDiscovery.getModelsForAgent.mockResolvedValue([
         discoveredModel({ id: 'gpt-4o-mini', provider: 'openai', authType: 'api_key' }),
