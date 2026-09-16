@@ -146,6 +146,11 @@ export class ProviderKeyService {
    * thin projections of this — callers that also need the `tenant_providers` row
    * id (e.g. the proxy, to stamp `agent_messages.tenant_provider_id`) call it
    * directly so the id selected and the key forwarded can never diverge.
+   *
+   * A label that matches no connection returns null — fail closed. Serving the
+   * default key would silently bill a connection the operator did not choose;
+   * the caller turns the null into an M100 for that hop and the explicit
+   * fallback chain decides what runs next.
    */
   async selectProviderKey(
     tenantId: string,
@@ -160,9 +165,9 @@ export class ProviderKeyService {
       const match = keys.find((k) => k.label.toLowerCase() === label.toLowerCase());
       if (match) return match;
       // A pin that names no connection is a stale route (the key was renamed
-      // or deleted). Serving the default keeps traffic flowing, but it silently
-      // bills a connection the operator did not choose. Throttle identical
-      // warnings so subscription re-reads and fallback retries stay diagnosable
+      // or deleted). Fail the hop: silently billing a different connection
+      // is exactly the unassigned-plan drain this service must prevent.
+      // Throttle identical warnings so fallback retries stay diagnosable
       // without producing one log line per lookup.
       const warningKey = [tenantId, agentId ?? '', provider.toLowerCase(), authType ?? '', label]
         .join('\0')
@@ -178,38 +183,17 @@ export class ProviderKeyService {
         }
         this.logger.warn(
           `Key label "${forLog(label)}" matches no ${provider} connection for tenant=${tenantId} ` +
-            `authType=${authType ?? 'any'} — falling back to "${forLog(keys[0].label)}"`,
+            `authType=${authType ?? 'any'} — failing this hop instead of serving a different connection`,
         );
       }
+      return null;
     }
-    return this.firstUsableKey(keys, tenantId, provider, authType);
-  }
-
-  /**
-   * Prefer a connection the provider has not just rejected for billing.
-   * Anthropic answers a spent subscription with a 400 on every call, so
-   * without this a tenant whose default connection is exhausted burns every
-   * request on it and never reaches a sibling that still works.
-   *
-   * When every connection is sidelined we still return the first one: the
-   * caller gets the provider's own error instead of a synthetic "no key".
-   */
-  private firstUsableKey(
-    keys: CachedProviderKey[],
-    tenantId: string,
-    provider: string,
-    authType?: AuthType,
-  ): CachedProviderKey {
-    if (!this.credentialHealth || keys.length === 1) return keys[0];
-    const usable = keys.find(
-      (k) => !this.credentialHealth?.isExhausted({ tenantId, provider, authType, label: k.label }),
-    );
-    if (usable && usable !== keys[0]) {
-      this.logger.log(
-        `Routing ${provider} to "${forLog(usable.label)}" — "${forLog(keys[0].label)}" is sidelined`,
-      );
-    }
-    return usable ?? keys[0];
+    // Deterministic selection: always the priority-0 key. Credential-health
+    // sideline-hopping is deliberately removed — silently switching to a
+    // sibling subscription is how an unassigned plan gets drained. A spent
+    // connection surfaces its provider error and the operator-configured
+    // fallback chain handles failover.
+    return keys[0];
   }
 
   /**

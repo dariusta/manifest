@@ -55,43 +55,20 @@ describe('ProviderKeyService — selection projections', () => {
       expect(sel?.id).toBe('up-work');
     });
 
-    it('falls back to the first key when the label does not match', async () => {
+    it('returns null when a supplied label matches no connection (fail closed)', async () => {
+      // A stale pin names a connection that no longer exists (renamed or
+      // deleted). Serving the default key would silently bill a connection
+      // the operator did not choose — the exact leak that burned an
+      // unassigned Claude plan. The hop must fail with M100 instead and let
+      // the explicit fallback chain decide what runs next.
       jest
         .spyOn(svc, 'getProviderKeys')
         .mockResolvedValue([key({ id: 'up-default', label: 'Default' })]);
       const sel = await svc.selectProviderKey('u', 'openai', 'api_key', 'nonexistent');
-      expect(sel?.id).toBe('up-default');
+      expect(sel).toBeNull();
     });
 
-    // Serving the default key silently bills a connection the operator never
-    // chose. The fallback stays (traffic keeps flowing) but it must be visible.
-    it('warns when a supplied label matches no connection', async () => {
-      jest
-        .spyOn(svc, 'getProviderKeys')
-        .mockResolvedValue([key({ id: 'up-default', label: 'Default' })]);
-      const warn = jest
-        .spyOn(svc['logger'], 'warn')
-        .mockImplementation(() => undefined as unknown as void);
-
-      await svc.selectProviderKey('u', 'openai', 'api_key', 'Retired');
-
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"Retired"'));
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"Default"'));
-    });
-
-    it('throttles repeated warnings for the same stale pin', async () => {
-      jest.spyOn(svc, 'getProviderKeys').mockResolvedValue([key({ label: 'Default' })]);
-      const warn = jest
-        .spyOn(svc['logger'], 'warn')
-        .mockImplementation(() => undefined as unknown as void);
-
-      await svc.selectProviderKey('u', 'openai', 'api_key', 'Retired', 'agent-1');
-      await svc.selectProviderKey('u', 'openai', 'api_key', 'Retired', 'agent-1');
-
-      expect(warn).toHaveBeenCalledTimes(1);
-    });
-
-    it('warns again after the stale-pin throttle window', async () => {
+    it('logs a stale pin once per window for diagnosability', async () => {
       jest.spyOn(svc, 'getProviderKeys').mockResolvedValue([key({ label: 'Default' })]);
       const warn = jest
         .spyOn(svc['logger'], 'warn')
@@ -175,6 +152,44 @@ describe('ProviderKeyService — selection projections', () => {
         .mockResolvedValue([key({ id: 'up-default' }), key({ id: 'up-2', label: 'Two' })]);
       const sel = await svc.selectProviderKey('u', 'openai', 'api_key');
       expect(sel?.id).toBe('up-default');
+    });
+  });
+
+  describe('selectProviderKey — deterministic selection (no sideline hop)', () => {
+    it('returns the priority-0 key even when a sibling is healthier', async () => {
+      // Credential-health sideline-hop removed: silently switching to a
+      // sibling subscription is exactly how an unassigned plan gets drained.
+      // Failover belongs to the explicit fallback chain, not to key selection.
+      const health = { isExhausted: jest.fn((s: { label: string }) => s.label === 'A') };
+      const svcWithHealth = new ProviderKeyService(
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        null,
+        null,
+        health as never,
+      );
+      jest
+        .spyOn(svcWithHealth, 'getProviderKeys')
+        .mockResolvedValue([key({ label: 'A' }), key({ id: 'up-2', label: 'B' })]);
+
+      const sel = await svcWithHealth.selectProviderKey('tenant-1', 'anthropic', 'subscription');
+      expect(sel?.label).toBe('A');
+      expect(health.isExhausted).not.toHaveBeenCalled();
+    });
+
+    it('honors an explicit label pin even when multiple keys exist', async () => {
+      jest
+        .spyOn(svc, 'getProviderKeys')
+        .mockResolvedValue([
+          key({ id: 'up-default', label: 'Default' }),
+          key({ id: 'up-work', label: 'Work' }),
+          key({ id: 'up-other', label: 'Other Claude' }),
+        ]);
+      const sel = await svc.selectProviderKey('u', 'anthropic', 'subscription', 'Other Claude');
+      expect(sel?.id).toBe('up-other');
     });
   });
 
@@ -452,7 +467,11 @@ describe('ProviderKeyService — sidelined credentials', () => {
       health as never,
     );
 
-  it('skips a connection the provider rejected for billing and uses the sibling', async () => {
+  it('returns the priority-0 connection even when it is sidelined (deterministic)', async () => {
+    // Sideline-hop removed: selection must stay deterministic. A spent
+    // connection surfaces its provider error to the caller and the explicit
+    // fallback chain (operator-configured routes) decides failover. Key
+    // selection must never silently switch subscriptions.
     const health = { isExhausted: jest.fn((s: { label: string }) => s.label === 'Exhausted') };
     const svc = build(health);
     jest
@@ -461,19 +480,8 @@ describe('ProviderKeyService — sidelined credentials', () => {
 
     const selected = await svc.selectProviderKey('tenant-1', 'anthropic', 'subscription');
 
-    expect(selected?.label).toBe('Healthy');
-  });
-
-  it('still returns the first connection when every sibling is sidelined', async () => {
-    const health = { isExhausted: jest.fn().mockReturnValue(true) };
-    const svc = build(health);
-    jest
-      .spyOn(svc, 'getProviderKeys')
-      .mockResolvedValue([key({ label: 'A' }), key({ id: 'up-2', label: 'B' })]);
-
-    const selected = await svc.selectProviderKey('tenant-1', 'anthropic', 'subscription');
-
-    expect(selected?.label).toBe('A');
+    expect(selected?.label).toBe('Exhausted');
+    expect(health.isExhausted).not.toHaveBeenCalled();
   });
 
   it('honors an explicit label pin even when that connection is sidelined', async () => {
