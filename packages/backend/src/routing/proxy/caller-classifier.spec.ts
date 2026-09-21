@@ -34,6 +34,24 @@ describe('classifyCaller', () => {
     expect(result?.sdkVersion).toBe('0.20.0');
   });
 
+  it('classifies the Google Gen AI SDKs from their shared User-Agent', () => {
+    const python = classifyCaller({
+      'user-agent': 'google-genai-sdk/1.45.0 gl-python/3.12.4',
+    });
+    expect(python?.sdk).toBe('google-genai-python');
+    expect(python?.sdkVersion).toBe('1.45.0');
+
+    const node = classifyCaller({ 'user-agent': 'google-genai-sdk/1.28.0 gl-node/22.17.1' });
+    expect(node?.sdk).toBe('google-genai-node');
+    expect(node?.sdkVersion).toBe('1.28.0');
+  });
+
+  it('classifies a Google Gen AI SDK that omits the language token', () => {
+    const result = classifyCaller({ 'user-agent': 'google-genai-sdk/1.45.0' });
+    expect(result?.sdk).toBe('google-genai');
+    expect(result?.sdkVersion).toBe('1.45.0');
+  });
+
   it('classifies curl', () => {
     const result = classifyCaller({ 'user-agent': 'curl/8.14.1' });
     expect(result?.sdk).toBe('curl');

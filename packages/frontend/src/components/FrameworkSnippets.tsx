@@ -148,6 +148,7 @@ const FrameworkSnippets: Component<Props> = (props) => {
           when={
             activeTab() === 'openai-sdk' ||
             activeTab() === 'anthropic-sdk' ||
+            activeTab() === 'google-genai-sdk' ||
             activeTab() === 'vercel-ai-sdk'
           }
         >

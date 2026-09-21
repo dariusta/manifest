@@ -1276,6 +1276,41 @@ describe('parseUsageObject', () => {
     });
   });
 
+  it('reads the Gemini usageMetadata shape without double-counting the cache', () => {
+    expect(
+      parseUsageObject({
+        promptTokenCount: 120,
+        candidatesTokenCount: 30,
+        cachedContentTokenCount: 40,
+        totalTokenCount: 150,
+      }),
+    ).toEqual({
+      prompt_tokens: 120,
+      completion_tokens: 30,
+      cache_read_tokens: 40,
+      cache_creation_tokens: 0,
+    });
+  });
+
+  it('defaults the Gemini candidate count and leaves the cache unset', () => {
+    expect(parseUsageObject({ promptTokenCount: 9 })).toEqual({
+      prompt_tokens: 9,
+      completion_tokens: 0,
+      cache_read_tokens: undefined,
+      cache_creation_tokens: 0,
+    });
+  });
+
+  it('carries a reported cost through the Gemini shape', () => {
+    expect(parseUsageObject({ promptTokenCount: 4, candidatesTokenCount: 1, cost: 0.25 })).toEqual({
+      prompt_tokens: 4,
+      completion_tokens: 1,
+      cache_read_tokens: undefined,
+      cache_creation_tokens: 0,
+      reported_cost_usd: 0.25,
+    });
+  });
+
   it('defaults output_tokens to 0 in the Anthropic shape when missing', () => {
     expect(parseUsageObject({ input_tokens: 4 })).toEqual({
       prompt_tokens: 4,
@@ -1384,6 +1419,39 @@ describe('extractUsageFromSse', () => {
       cache_read_tokens: 12,
       cache_creation_tokens: undefined,
     });
+  });
+
+  it('should extract usage from a Gemini usageMetadata frame', () => {
+    const sseText = `data: ${JSON.stringify({
+      candidates: [],
+      usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 6, cachedContentTokenCount: 2 },
+    })}\n\n`;
+
+    expect(extractUsageFromSse(sseText)).toEqual({
+      prompt_tokens: 11,
+      completion_tokens: 6,
+      cache_read_tokens: 2,
+      cache_creation_tokens: 0,
+    });
+  });
+
+  it('should extract usage from a CodeAssist-wrapped Gemini frame', () => {
+    const sseText = `data: ${JSON.stringify({
+      response: { usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 } },
+    })}\n\n`;
+
+    expect(extractUsageFromSse(sseText)).toEqual({
+      prompt_tokens: 5,
+      completion_tokens: 2,
+      cache_read_tokens: undefined,
+      cache_creation_tokens: 0,
+    });
+  });
+
+  it('should return null for a wrapped frame with no usage at all', () => {
+    expect(
+      extractUsageFromSse(`data: ${JSON.stringify({ response: { candidates: [] } })}\n\n`),
+    ).toBeNull();
   });
 
   it('should extract usage from response.completed events', () => {

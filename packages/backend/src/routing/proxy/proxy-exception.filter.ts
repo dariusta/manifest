@@ -7,6 +7,7 @@ import type { RequestWithManifestErrorContext } from '../../otlp/interfaces/inge
 import { ProxyMessageRecorder } from './proxy-message-recorder';
 import { sanitizeRequestHeaders } from './request-headers';
 import { getDashboardUrl, sendFriendlyResponse } from './proxy-friendly-response';
+import { isGenerateContentPath } from './google-generate-content-adapter';
 
 /** Guard-thrown messages that should become friendly chat responses. */
 const AUTH_ERROR_CODES: Record<string, ManifestErrorCode> = {
@@ -36,6 +37,10 @@ const PASSTHROUGH_STATUSES = new Set([429]);
  * code instead of accepting a stub response as success.
  */
 export function isChatRenderingClient(req: Request): boolean {
+  // A Gemini-native caller renders nothing: it parses GenerateContentResponse.
+  // Its streaming requests carry a synthesized `stream: true`, which would
+  // otherwise hand it an OpenAI chat envelope it cannot read.
+  if (isGenerateContentPath(req.originalUrl)) return false;
   const body = req.body as Record<string, unknown> | undefined;
   if (body && body['stream'] === true) return true;
   const accept = req.headers['accept'];

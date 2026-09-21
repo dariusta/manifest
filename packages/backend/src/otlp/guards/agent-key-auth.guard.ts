@@ -27,6 +27,18 @@ function cacheKey(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/**
+ * The Google Gen AI SDK has no hook for an Authorization header — it always
+ * sends the key as `x-goog-api-key`. Treat that header as an equivalent bearer
+ * source so a Gemini-native caller authenticates with the same `mnfst_*` key.
+ */
+function googleApiKeyHeader(request: Request): string | undefined {
+  const raw = request.headers['x-goog-api-key'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 interface CachedKey {
   keyId: string;
   tenantId: string;
@@ -108,7 +120,7 @@ export class AgentKeyAuthGuard implements CanActivate, OnModuleInit, OnModuleDes
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
-    const authHeader = request.headers['authorization'];
+    const authHeader = request.headers['authorization'] ?? googleApiKeyHeader(request);
 
     // Use socket.remoteAddress (TCP peer) — request.ip honors X-Forwarded-For
     // and is spoofable when `trust proxy` is enabled.

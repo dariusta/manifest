@@ -22,7 +22,8 @@ export type ThinkingBlockLookup = (
   routeContext?: ThinkingBlockRouteContext,
 ) => ThinkingBlock[] | null;
 
-export type ProxyApiMode = 'chat_completions' | 'responses' | 'messages' | 'count_tokens';
+export type ProxyApiMode =
+  'chat_completions' | 'responses' | 'messages' | 'count_tokens' | 'generate_content';
 
 /** Lazily derive the Chat Completions view used by legacy routing or cross-protocol adapters. */
 export type ResolveChatBody = () => Promise<Record<string, unknown>>;

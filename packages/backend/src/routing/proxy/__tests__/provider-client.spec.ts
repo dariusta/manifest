@@ -5228,6 +5228,97 @@ describe('ProviderClient', () => {
     });
   });
 
+  describe('Gemini-native inbound (generate_content)', () => {
+    const geminiBody = {
+      // `model` and `stream` are synthesized by the `/v1beta` route so routing,
+      // validation and stream detection work; they must not reach Google.
+      model: 'gemini-3-pro',
+      stream: false,
+      contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+      safetySettings: [{ category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }],
+      generationConfig: { thinkingConfig: { thinkingBudget: 128 } },
+      cachedContent: 'cachedContents/abc',
+    };
+
+    it('forwards the caller payload untranslated to the Gemini API', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+      const resolveChatBody = jest.fn().mockResolvedValue({ messages: [] });
+
+      const result = await client.forward({
+        provider: 'gemini',
+        apiKey: 'AIza-test',
+        model: 'gemini-3-pro',
+        body: geminiBody,
+        resolveChatBody,
+        stream: false,
+        apiMode: 'generate_content',
+      });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain('models/gemini-3-pro:generateContent');
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+        contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+        safetySettings: [{ category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }],
+        generationConfig: { thinkingConfig: { thinkingBudget: 128 } },
+        cachedContent: 'cachedContents/abc',
+      });
+      expect(resolveChatBody).not.toHaveBeenCalled();
+      expect(result.isGoogle).toBe(true);
+    });
+
+    it('wraps the untranslated payload in the CodeAssist envelope for a subscription', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+      const resolveChatBody = jest.fn().mockResolvedValue({ messages: [] });
+
+      const result = await client.forward({
+        provider: 'gemini',
+        apiKey: 'access-token',
+        model: 'gemini-pro-agent',
+        body: geminiBody,
+        resolveChatBody,
+        stream: false,
+        apiMode: 'generate_content',
+        authType: 'subscription',
+        providerResource: 'proj-code-assist-1',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.model).toBe('gemini-pro-agent');
+      expect(sentBody.project).toBe('proj-code-assist-1');
+      expect(sentBody.userAgent).toBe('antigravity');
+      expect(sentBody.request).toEqual({
+        contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+        safetySettings: [{ category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }],
+        generationConfig: { thinkingConfig: { thinkingBudget: 128 } },
+        cachedContent: 'cachedContents/abc',
+      });
+      expect(resolveChatBody).not.toHaveBeenCalled();
+      expect(result.isCodeAssist).toBe(true);
+    });
+
+    it('falls back to the Chat Completions view for a non-Google upstream', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+      const resolveChatBody = jest
+        .fn()
+        .mockResolvedValue({ messages: [{ role: 'user', content: 'Hello' }] });
+
+      await client.forward({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+        body: geminiBody,
+        resolveChatBody,
+        stream: false,
+        apiMode: 'generate_content',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.messages).toEqual([{ role: 'user', content: 'Hello' }]);
+      expect(sentBody.contents).toBeUndefined();
+      expect(resolveChatBody).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('Gemini subscription (CodeAssist envelope)', () => {
     it('wraps the request body in the CodeAssist envelope for gemini subscription', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));

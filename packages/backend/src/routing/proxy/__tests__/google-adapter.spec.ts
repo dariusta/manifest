@@ -971,6 +971,58 @@ describe('Google Adapter', () => {
       ]);
     });
 
+    // Gemini takes video, audio and PDF inline, and the remote-URL branch
+    // forwards them without inspecting the type. An image-only guard here made
+    // the same function accept a hosted .mp4 and silently drop an inline one,
+    // so the model answered about a video it was never sent.
+    it.each([
+      ['video/mp4', 'AAAAIGZ0eXBpc29t'],
+      ['audio/mpeg', 'SUQzBAAAAAA='],
+      ['application/pdf', 'JVBERi0xLjQK'],
+    ])('maps inline %s data URLs to Gemini inlineData', (mimeType, data) => {
+      const body = {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Describe this.' },
+              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${data}` } },
+            ],
+          },
+        ],
+      };
+
+      const result = toGoogleRequest(body, 'gemini-3.8-flash-medium');
+
+      const contents = result.contents as Array<{ parts: Array<Record<string, unknown>> }>;
+      expect(contents[0].parts).toEqual([
+        { text: 'Describe this.' },
+        { inlineData: { mimeType, data } },
+      ]);
+    });
+
+    it('drops inline data URLs whose type Gemini cannot take', () => {
+      const body = {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Read this.' },
+              {
+                type: 'image_url',
+                image_url: { url: 'data:text/html;base64,PGh0bWw+' },
+              },
+            ],
+          },
+        ],
+      };
+
+      const result = toGoogleRequest(body, 'gemini-3.8-flash-medium');
+
+      const contents = result.contents as Array<{ parts: Array<Record<string, unknown>> }>;
+      expect(contents[0].parts).toEqual([{ text: 'Read this.' }]);
+    });
+
     it('maps Responses input_image data URLs to Gemini inlineData', () => {
       const body = {
         messages: [

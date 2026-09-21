@@ -287,6 +287,24 @@ describe('ProxyService — orchestration', () => {
       ).not.toThrow();
     });
 
+    it('accepts a Gemini body on the generate_content surface and rejects one without contents', () => {
+      const validatePayload = (
+        svc as unknown as {
+          validatePayload: (body: Record<string, unknown>, apiMode: string) => void;
+        }
+      ).validatePayload.bind(svc);
+
+      expect(() =>
+        validatePayload(
+          { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] },
+          'generate_content',
+        ),
+      ).not.toThrow();
+      expect(() => validatePayload({ messages: [] }, 'generate_content')).toThrow(
+        expect.objectContaining({ code: 'M300', status: 400 }),
+      );
+    });
+
     it('forwards long message arrays unchanged', async () => {
       resolveService.resolve.mockResolvedValue({
         tier: 'standard',

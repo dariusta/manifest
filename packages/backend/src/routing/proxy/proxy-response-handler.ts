@@ -31,6 +31,10 @@ import {
   chatCompletionsResponseToMessages,
   createMessagesStreamTransformer,
 } from './anthropic-messages-adapter';
+import {
+  chatResponseToGenerateContent,
+  createGenerateContentStreamTransformer,
+} from './google-generate-content-adapter';
 import type { ProxyApiMode } from './proxy-types';
 import type { ThoughtSignatureCache } from './thought-signature-cache';
 import type {
@@ -579,7 +583,15 @@ export async function handleStreamResponse(
           textFormat: forward.responsesTextFormat,
         })
       : null;
-  const streamTransformer = messagesTransformer ?? responsesTransformer;
+  // Gemini-native inbound over a non-Google upstream: translate the upstream's
+  // Chat Completions SSE into Gemini SSE. A Google upstream is handled by the
+  // passthrough branch below, which needs no translation at all.
+  const generateContentTransformer =
+    apiMode === 'generate_content' && !forward.isGoogle
+      ? createGenerateContentStreamTransformer(meta.model)
+      : null;
+  const streamTransformer =
+    messagesTransformer ?? responsesTransformer ?? generateContentTransformer;
   const finalize = streamTransformer ? () => streamTransformer.finalize() : undefined;
   const toClientChunk = streamTransformer
     ? (chunk: string) => streamTransformer.transform(chunk)
@@ -587,6 +599,26 @@ export async function handleStreamResponse(
 
   if (apiMode === 'responses' && forward.isResponses) {
     return pipeStream(forward.response.body!, res, undefined, undefined, onClient, relayOptions);
+  }
+
+  if (apiMode === 'generate_content' && forward.isGoogle) {
+    // Gemini SSE has no `[DONE]` sentinel, so the CodeAssist branch supplies a
+    // null `finalize` — pipeStream appends its own `[DONE]` whenever a
+    // transform runs without one.
+    if (!forward.isCodeAssist) {
+      return pipeStream(forward.response.body!, res, undefined, undefined, onClient, relayOptions);
+    }
+    return pipeStream(
+      forward.response.body!,
+      res,
+      (chunk) => {
+        const inner = unwrapCodeAssistStreamPayload(chunk);
+        return inner && inner !== '[DONE]' ? `data: ${inner}\n\n` : null;
+      },
+      () => null,
+      onClient,
+      relayOptions,
+    );
   }
 
   if (forward.isGoogle) {
@@ -659,7 +691,7 @@ export async function handleStreamResponse(
       res,
       (chunk) => {
         const out = chatGptTransformer(chunk);
-        if (!messagesTransformer) return out;
+        if (!streamTransformer) return out;
         return out ? toClientChunk(out) : null;
       },
       finalize,
@@ -695,7 +727,7 @@ export async function handleStreamResponse(
       relayOptions,
     );
   }
-  if (apiMode === 'responses' || apiMode === 'messages') {
+  if (apiMode === 'responses' || apiMode === 'messages' || apiMode === 'generate_content') {
     return pipeStream(forward.response.body!, res, toClientChunk, finalize, onClient, relayOptions);
   }
   return pipeStream(forward.response.body!, res, undefined, undefined, onClient, relayOptions);
@@ -749,6 +781,12 @@ export async function handleNonStreamResponse(
 
   if (apiMode === 'responses' && forward.isResponses) {
     responseBody = await readNativeResponsesBody(forward.response);
+  } else if (apiMode === 'generate_content' && forward.isGoogle) {
+    // Gemini-native inbound over a Google upstream: hand back the provider's
+    // own GenerateContentResponse. A Chat Completions round-trip would drop
+    // groundingMetadata, safetyRatings, inline image parts and thought parts.
+    const rawData = (await forward.response.json()) as Record<string, unknown>;
+    responseBody = forward.isCodeAssist ? unwrapCodeAssistResponse(rawData) : rawData;
   } else if (forward.isGoogle) {
     const rawData = (await forward.response.json()) as Record<string, unknown>;
     const googleData = forward.isCodeAssist ? unwrapCodeAssistResponse(rawData) : rawData;
@@ -839,10 +877,16 @@ export async function handleNonStreamResponse(
       responseBody as Record<string, unknown>,
       meta.model,
     );
+  } else if (apiMode === 'generate_content' && !forward.isGoogle) {
+    responseBody = chatResponseToGenerateContent(
+      responseBody as Record<string, unknown>,
+      meta.model,
+    );
   }
 
   const body = responseBody as Record<string, unknown> | undefined;
-  const streamUsage = parseUsageObject(body?.usage);
+  // A Gemini-shaped body reports tokens in `usageMetadata`, not `usage`.
+  const streamUsage = parseUsageObject(body?.usage) ?? parseUsageObject(body?.usageMetadata);
 
   if (recordedResponse && capture) {
     const raw = await recordedResponse.text();

@@ -12,7 +12,8 @@ export const FRAMEWORK_TABS: FrameworkTab[] = [
   { id: 'curl', label: 'cURL' },
 ];
 
-export type ToolkitId = 'openai-sdk' | 'anthropic-sdk' | 'vercel-ai-sdk' | 'langchain' | 'curl';
+export type ToolkitId =
+  'openai-sdk' | 'anthropic-sdk' | 'google-genai-sdk' | 'vercel-ai-sdk' | 'langchain' | 'curl';
 export type OpenAILangId = 'python' | 'typescript';
 export type OpenAIApiId = 'responses' | 'chat-completions';
 
@@ -25,6 +26,7 @@ export interface ToolkitTab {
 export const TOOLKIT_TABS: ToolkitTab[] = [
   { id: 'openai-sdk', label: 'OpenAI SDK', icon: '/icons/providers/openai.svg' },
   { id: 'anthropic-sdk', label: 'Anthropic SDK', icon: '/icons/providers/anthropic.svg' },
+  { id: 'google-genai-sdk', label: 'Google Gen AI SDK', icon: '/icons/gemini.svg' },
   { id: 'vercel-ai-sdk', label: 'Vercel AI SDK', icon: '/icons/vercel.svg' },
   { id: 'langchain', label: 'LangChain', icon: '/icons/langchain.svg' },
   { id: 'curl', label: 'cURL' },
@@ -214,6 +216,62 @@ const message = await client.messages.create({
   max_tokens: 1024,
   messages: [{ role: "user", content: "Hello" }],
 });`,
+  };
+}
+
+/**
+ * Both Google Gen AI SDKs append their own `api_version` (`/v1beta`) to the
+ * configured base URL, so the rendered URL must not already end in `/v1` —
+ * same reason as the Anthropic snippets. Custom headers ride inside
+ * `http_options`, not as a separate constructor argument.
+ */
+function getGoogleGenAiPythonSnippet(
+  baseUrl: string,
+  apiKey: string,
+  customHeaders?: CustomHeaders,
+): Snippet {
+  const dict = renderHeadersDict(customHeaders, 'py');
+  const headersEntry = dict ? `, "headers": ${dict}` : '';
+  const url = stripV1Suffix(baseUrl);
+  return {
+    title: 'Google Gen AI Python SDK',
+    code: `from google import genai
+
+client = genai.Client(
+    api_key="${apiKey}",
+    http_options={"base_url": "${url}"${headersEntry}},
+)
+
+response = client.models.generate_content(
+    model="auto",
+    contents="Hello",
+)
+print(response.text)`,
+  };
+}
+
+function getGoogleGenAiTypeScriptSnippet(
+  baseUrl: string,
+  apiKey: string,
+  customHeaders?: CustomHeaders,
+): Snippet {
+  const dict = renderHeadersDict(customHeaders, 'ts');
+  const headersEntry = dict ? `, headers: ${dict}` : '';
+  const url = stripV1Suffix(baseUrl);
+  return {
+    title: 'Google Gen AI TypeScript SDK',
+    code: `import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({
+  apiKey: "${apiKey}",
+  httpOptions: { baseUrl: "${url}"${headersEntry} },
+});
+
+const response = await ai.models.generateContent({
+  model: "auto",
+  contents: "Hello",
+});
+console.log(response.text);`,
   };
 }
 
@@ -488,6 +546,10 @@ export function getSnippetForToolkit(
       return openaiLang === 'python'
         ? getAnthropicPythonSnippet(baseUrl, apiKey, customHeaders)
         : getAnthropicTypeScriptSnippet(baseUrl, apiKey, customHeaders);
+    case 'google-genai-sdk':
+      return openaiLang === 'python'
+        ? getGoogleGenAiPythonSnippet(baseUrl, apiKey, customHeaders)
+        : getGoogleGenAiTypeScriptSnippet(baseUrl, apiKey, customHeaders);
     case 'vercel-ai-sdk':
       return openaiLang === 'python'
         ? getVercelPythonSnippet(baseUrl, apiKey, customHeaders)
@@ -504,6 +566,8 @@ export function getLangForToolkit(id: ToolkitId, openaiLang?: OpenAILangId): str
     case 'openai-sdk':
       return openaiLang === 'typescript' ? 'typescript' : 'python';
     case 'anthropic-sdk':
+      return openaiLang === 'typescript' ? 'typescript' : 'python';
+    case 'google-genai-sdk':
       return openaiLang === 'typescript' ? 'typescript' : 'python';
     case 'vercel-ai-sdk':
       return openaiLang === 'typescript' ? 'typescript' : 'python';

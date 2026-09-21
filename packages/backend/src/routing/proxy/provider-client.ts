@@ -38,6 +38,7 @@ import {
   ProviderWireFormat,
   type ProviderAttemptRef,
 } from './proxy-types';
+import { stripSyntheticGenerateContentKeys } from './google-generate-content-adapter';
 import { CodexSessionAffinity } from './codex-session-affinity';
 import { toNativeResponsesRequest } from './responses-adapter';
 import { forwardKiroChat } from './kiro-adapter';
@@ -112,7 +113,25 @@ const INPUT_WIRE_FORMATS: Record<ProxyApiMode, ProviderWireFormat> = {
   messages: 'anthropic_messages',
   count_tokens: 'anthropic_messages',
   responses: 'openai_responses',
+  generate_content: 'google_generate_content',
 };
+
+/**
+ * True when the inbound protocol and the resolved upstream speak the same wire
+ * format, so the body can be forwarded natively instead of round-tripping
+ * through Chat Completions. Gemini-native input counts both Google formats as
+ * native: the CodeAssist envelope wraps an unmodified generateContent payload.
+ */
+function isNativeWireFormat(
+  apiMode: ProxyApiMode,
+  wireFormat: ProviderWireFormat | undefined,
+): boolean {
+  if (wireFormat === undefined) return false;
+  if (apiMode === 'generate_content') {
+    return wireFormat === 'google_generate_content' || wireFormat === 'google_code_assist';
+  }
+  return INPUT_WIRE_FORMATS[apiMode] === wireFormat;
+}
 
 interface BuiltProviderRequest {
   url: string;
@@ -350,7 +369,7 @@ export class ProviderClient {
     const needsChatBody =
       resolveChatBody !== undefined &&
       (opts.apiMode === 'chat_completions' ||
-        (opts.apiMode !== undefined && INPUT_WIRE_FORMATS[opts.apiMode] !== resolvedWireFormat));
+        (opts.apiMode !== undefined && !isNativeWireFormat(opts.apiMode, resolvedWireFormat)));
     const chatBody = needsChatBody ? await resolveChatBody() : undefined;
 
     const bareModel = stripModelPrefix(model, endpointKey);
@@ -670,7 +689,15 @@ export class ProviderClient {
           : endpoint.buildPath(bareModel);
       let url = `${endpoint.baseUrl}${path}`;
       if (stream) url += '?alt=sse';
-      const innerBody = toGoogleRequest(requestSource, bareModel, ctx.signatureLookup);
+      // Gemini-native inbound (`POST /v1beta/models/x:generateContent`) over a
+      // Google upstream: forward the caller's own payload and skip the OpenAI
+      // translation round-trip, which would drop Gemini-only fields
+      // (safetySettings, thinkingConfig, cachedContent, fileData parts, ...).
+      // Only the routing fields the `/v1beta` route synthesized are removed.
+      const innerBody =
+        ctx.apiMode === 'generate_content'
+          ? stripSyntheticGenerateContentKeys(body)
+          : toGoogleRequest(requestSource, bareModel, ctx.signatureLookup);
       const requestBody = endpoint.codeAssistEnvelope
         ? // Cloud Code routes by `cloudaicompanionProject` rather than URL
           // path; the project id was stashed in the OAuth blob's `u` field

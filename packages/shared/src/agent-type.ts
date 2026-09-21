@@ -11,6 +11,7 @@ export const AGENT_PLATFORMS = [
   'opencode',
   'openai-sdk',
   'anthropic-sdk',
+  'google-genai-sdk',
   'vercel-ai-sdk',
   'langchain',
   'curl',
@@ -41,6 +42,7 @@ export const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
   opencode: 'OpenCode',
   'openai-sdk': 'OpenAI SDK',
   'anthropic-sdk': 'Anthropic SDK',
+  'google-genai-sdk': 'Google Gen AI SDK',
   'vercel-ai-sdk': 'Vercel AI SDK',
   langchain: 'LangChain',
   curl: 'cURL',
@@ -49,7 +51,7 @@ export const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
 
 export const PLATFORMS_BY_CATEGORY: Readonly<Record<AgentCategory, readonly AgentPlatform[]>> = {
   personal: ['openclaw', 'hermes', 'nanobot', 'craft', 'other'],
-  app: ['openai-sdk', 'anthropic-sdk', 'vercel-ai-sdk', 'langchain', 'other'],
+  app: ['openai-sdk', 'anthropic-sdk', 'google-genai-sdk', 'vercel-ai-sdk', 'langchain', 'other'],
   coding: ['claude-code', 'cursor', 'opencode', 'other'],
 };
 
@@ -63,6 +65,7 @@ export const PLATFORM_ICONS: Readonly<Partial<Record<AgentPlatform, string>>> = 
   opencode: '/icons/providers/opencode.svg',
   'openai-sdk': '/icons/providers/openai.svg',
   'anthropic-sdk': '/icons/providers/anthropic.svg',
+  'google-genai-sdk': '/icons/gemini.svg',
   'vercel-ai-sdk': '/icons/vercel.svg',
   langchain: '/icons/langchain.svg',
   other: '/icons/other.svg',

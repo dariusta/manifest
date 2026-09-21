@@ -113,6 +113,15 @@ function makeInterruptedSseResponse(firstChunk: string): Response {
   });
 }
 
+/**
+ * `models()` answers the Gemini envelope on `/v1beta` and the OpenAI one on
+ * `/v1`; every case in this file is `/v1`.
+ */
+function openAiModelData(list: Awaited<ReturnType<ProxyController['models']>>) {
+  if (!('data' in list)) throw new Error('expected the OpenAI-shaped model list');
+  return list.data;
+}
+
 describe('ProxyController', () => {
   let controller: ProxyController;
   let proxyService: { proxyRequest: jest.Mock };
@@ -439,8 +448,10 @@ describe('ProxyController', () => {
       }),
     ]);
 
-    const withCosts = await controller.models(mockRequest({}) as never, undefined, 'true');
-    expect(withCosts.data).toEqual([
+    const withCosts = openAiModelData(
+      await controller.models(mockRequest({}) as never, undefined, 'true'),
+    );
+    expect(withCosts).toEqual([
       { id: 'auto', object: 'model', created: 0, owned_by: 'manifest' },
       {
         id: 'openai/input-only',
@@ -459,8 +470,10 @@ describe('ProxyController', () => {
       { id: 'openai/unknown', object: 'model', created: 0, owned_by: 'openai' },
     ]);
 
-    const withoutCosts = await controller.models(mockRequest({}) as never, undefined, '1');
-    expect(withoutCosts.data.every((model) => !('cost' in model))).toBe(true);
+    const withoutCosts = openAiModelData(
+      await controller.models(mockRequest({}) as never, undefined, '1'),
+    );
+    expect(withoutCosts.every((model) => !('cost' in model))).toBe(true);
   });
 
   it('should omit the capabilities field for models with unknown metadata and for auto', async () => {
@@ -2160,6 +2173,223 @@ describe('ProxyController', () => {
         headers: expect.any(Object),
       }),
     );
+  });
+
+  describe('Gemini-native surface (/v1beta)', () => {
+    /** The Google Gen AI SDK appends `/v1beta` itself, so requests arrive there. */
+    function geminiRequest(body: Record<string, unknown>, segment: string) {
+      return {
+        ...mockRequest(body),
+        originalUrl: `/v1beta/models/${segment}`,
+        params: { modelAction: segment },
+      };
+    }
+
+    /**
+     * Express 5 hands a splat param back as an array of path segments, which is
+     * how every provider-qualified model id (`gemini/gemini-pro-agent`) arrives.
+     */
+    function geminiSplatRequest(body: Record<string, unknown>, segments: string[]) {
+      return {
+        ...mockRequest(body),
+        originalUrl: `/v1beta/models/${segments.join('/')}`,
+        params: { modelAction: segments },
+      };
+    }
+
+    function okJsonForward(body: Record<string, unknown>) {
+      return {
+        forward: {
+          response: new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+          isGoogle: true,
+          isAnthropic: false,
+          isChatGpt: false,
+          isCodeAssist: false,
+        },
+        meta: {
+          tier: 'standard',
+          model: 'gemini-3-pro',
+          provider: 'Google',
+          confidence: 0.9,
+          reason: 'scored',
+        },
+      };
+    }
+
+    it('answers GET /v1beta/models in the Gemini envelope', async () => {
+      modelDiscovery.getModelsForAgent.mockResolvedValue([
+        makeDiscoveredModel({ id: 'gemini-3-pro', provider: 'gemini', authType: 'api_key' }),
+      ]);
+
+      const req = { ...mockRequest({}), originalUrl: '/v1beta/models' };
+
+      await expect(controller.models(req as never)).resolves.toEqual({
+        models: [
+          {
+            name: 'models/auto',
+            baseModelId: 'auto',
+            displayName: 'auto',
+            supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+          },
+          {
+            name: 'models/gemini/gemini-3-pro',
+            baseModelId: 'gemini/gemini-3-pro',
+            displayName: 'gemini/gemini-3-pro',
+            supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+          },
+        ],
+      });
+    });
+
+    it('synthesizes the model from the URL for :generateContent', async () => {
+      proxyService.proxyRequest.mockResolvedValue(
+        okJsonForward({ candidates: [{ content: { role: 'model', parts: [{ text: 'Hi' }] } }] }),
+      );
+
+      const req = geminiRequest(
+        { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] },
+        'gemini-3-pro:generateContent',
+      );
+      const { res } = mockResponse();
+
+      await controller.generateContent(req as never, res as never);
+
+      expect(req.body).toMatchObject({ model: 'gemini-3-pro' });
+      expect(req.body['stream']).toBeUndefined();
+      expect(proxyService.proxyRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiMode: 'generate_content',
+          body: expect.objectContaining({ model: 'gemini-3-pro' }),
+        }),
+      );
+      expect(res.json).toHaveBeenCalledWith({
+        candidates: [{ content: { role: 'model', parts: [{ text: 'Hi' }] } }],
+      });
+    });
+
+    it('synthesizes stream: true for :streamGenerateContent and routes `auto`', async () => {
+      proxyService.proxyRequest.mockResolvedValue({
+        forward: {
+          response: new Response('data: {"candidates":[]}\n\n', {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          }),
+          isGoogle: true,
+          isAnthropic: false,
+          isChatGpt: false,
+          isCodeAssist: false,
+        },
+        meta: {
+          tier: 'standard',
+          model: 'gemini-3-pro',
+          provider: 'Google',
+          confidence: 0.9,
+          reason: 'scored',
+        },
+      });
+
+      const req = geminiRequest(
+        { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] },
+        'auto:streamGenerateContent',
+      );
+      const { res } = mockResponse();
+
+      await controller.generateContent(req as never, res as never);
+
+      expect(req.body).toMatchObject({ model: 'auto', stream: true });
+      expect(proxyService.proxyRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiMode: 'generate_content',
+          body: expect.objectContaining({ model: 'auto', stream: true }),
+        }),
+      );
+    });
+
+    it('defaults a missing body so an empty POST still routes', async () => {
+      proxyService.proxyRequest.mockResolvedValue(okJsonForward({ candidates: [] }));
+
+      const req = { ...geminiRequest({}, 'gemini-3-pro:generateContent'), body: undefined };
+      const { res } = mockResponse();
+
+      await controller.generateContent(req as never, res as never);
+
+      expect(req.body).toEqual({ model: 'gemini-3-pro' });
+    });
+
+    it('404s on an unsupported method or a missing model', async () => {
+      const { res } = mockResponse();
+
+      await expect(
+        controller.generateContent(
+          geminiRequest({}, 'gemini-3-pro:countTokens') as never,
+          res as never,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        controller.generateContent(geminiRequest({}, 'gemini-3-pro') as never, res as never),
+      ).rejects.toThrow('Unsupported route "models/gemini-3-pro"');
+      await expect(
+        controller.generateContent(geminiRequest({}, ':generateContent') as never, res as never),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        controller.generateContent({ ...mockRequest({}), params: {} } as never, res as never),
+      ).rejects.toBeInstanceOf(HttpException);
+      expect(proxyService.proxyRequest).not.toHaveBeenCalled();
+    });
+
+    it('reports a mid-stream failure as an in-band Gemini error frame', async () => {
+      proxyService.proxyRequest.mockResolvedValue({
+        forward: {
+          response: makeInterruptedSseResponse('data: {"candidates":[]}\n\n'),
+          isGoogle: true,
+          isAnthropic: false,
+          isChatGpt: false,
+          isCodeAssist: false,
+        },
+        meta: { tier: 'standard', model: 'gemini-3-pro', provider: 'Google', confidence: 0.9 },
+      });
+
+      const req = geminiRequest(
+        { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] },
+        'gemini-3-pro:streamGenerateContent',
+      );
+      const { res, written } = mockResponse();
+
+      await controller.generateContent(req as never, res as never);
+
+      const payload = written.join('');
+      expect(JSON.parse(payload.slice(payload.lastIndexOf('data: ') + 6))).toEqual({
+        error: {
+          code: 503,
+          message: 'Upstream provider stream was interrupted.',
+          status: 'stream_interrupted',
+        },
+      });
+      // Gemini has no `[DONE]` sentinel; writing one would break the SDK parse.
+      expect(payload).not.toContain('[DONE]');
+      expect(payload).not.toContain('event: error');
+      expect(res.end).toHaveBeenCalled();
+    });
+    it('rejoins a provider-qualified model id split across path segments', async () => {
+      // `/v1beta/models` advertises `models/gemini/gemini-pro-agent-subscription`,
+      // and the SDK requests exactly that back, so the slash must survive routing.
+      const req = geminiSplatRequest({ contents: [] }, [
+        'gemini',
+        'gemini-pro-agent-subscription:streamGenerateContent',
+      ]);
+      const { res } = mockResponse();
+      proxyService.proxyRequest.mockResolvedValue(okJsonForward({ candidates: [] }));
+
+      await controller.generateContent(req as never, res as never);
+
+      expect(req.body).toMatchObject({
+        model: 'gemini/gemini-pro-agent-subscription',
+        stream: true,
+      });
+    });
   });
 
   describe('rate limiting', () => {

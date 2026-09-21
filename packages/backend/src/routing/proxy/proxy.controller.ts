@@ -61,6 +61,7 @@ import type {
 } from './proxy-types';
 import { ResponsesSseError } from './chatgpt-adapter';
 import { redactInlineImageDataUrls } from './inline-image-redaction';
+import { isGenerateContentPath, parseModelAction } from './google-generate-content-adapter';
 import { openAiModelId, subscriptionOpenAiModelId } from './openai-model-id';
 import { openAiModelCapabilities, type OpenAiModelCapabilities } from './openai-model-capabilities';
 import { PlanService } from '../../billing/plan.service';
@@ -99,6 +100,35 @@ interface OpenAiModelList {
   data: OpenAiModelObject[];
 }
 
+interface GeminiModelObject {
+  name: string;
+  baseModelId: string;
+  displayName: string;
+  supportedGenerationMethods: readonly string[];
+}
+
+interface GeminiModelList {
+  models: GeminiModelObject[];
+}
+
+const GEMINI_GENERATION_METHODS = ['generateContent', 'streamGenerateContent'] as const;
+
+/**
+ * The Google Gen AI SDK lists models with `GET /v1beta/models` and reads
+ * `{ models: [...] }`; an OpenAI `{ object:'list', data:[...] }` body makes
+ * `client.models.list()` yield nothing. Same catalogue, Gemini envelope.
+ */
+function toGeminiModelList(list: OpenAiModelList): GeminiModelList {
+  return {
+    models: list.data.map((model) => ({
+      name: `models/${model.id}`,
+      baseModelId: model.id,
+      displayName: model.id,
+      supportedGenerationMethods: GEMINI_GENERATION_METHODS,
+    })),
+  };
+}
+
 function openAiModelCost(
   inputPricePerToken: number | null,
   outputPricePerToken: number | null,
@@ -118,7 +148,7 @@ function openAiModelCost(
   };
 }
 
-@Controller('v1')
+@Controller(['v1', 'v1beta'])
 @Public()
 @UseGuards(AgentKeyAuthGuard)
 @UseFilters(ProxyExceptionFilter)
@@ -152,6 +182,16 @@ export class ProxyController {
     @Query('capabilities') capabilities?: string,
     @Query('cost') cost?: string,
     @Query('route_metadata') routeMetadata?: string,
+  ): Promise<OpenAiModelList | GeminiModelList> {
+    const list = await this.openAiModels(req, capabilities, cost, routeMetadata);
+    return isGenerateContentPath(req.originalUrl) ? toGeminiModelList(list) : list;
+  }
+
+  private async openAiModels(
+    req: Request & { ingestionContext: IngestionContext },
+    capabilities?: string,
+    cost?: string,
+    routeMetadata?: string,
   ): Promise<OpenAiModelList> {
     const includeCapabilities = capabilities === 'true';
     const includeCost = cost === 'true';
@@ -240,6 +280,41 @@ export class ProxyController {
     @Res() res: ExpressResponse,
   ): Promise<void> {
     await this.handleProxyRequest(req, res, 'count_tokens');
+  }
+
+  /**
+   * Gemini-native surface: `POST /v1beta/models/<model>:generateContent` and
+   * `:streamGenerateContent`. Gemini puts the model and the streaming choice in
+   * the URL, never the body, so both are synthesized onto the body here — the
+   * one place that can happen without teaching routing, scoring, validation,
+   * recording and stream detection a second way to find them. The Google
+   * transport strips them again (`stripSyntheticGenerateContentKeys`), so the
+   * provider still sees a clean `GenerateContentRequest`.
+   */
+  @Post('models/*modelAction')
+  async generateContent(
+    @Req() req: Request & { ingestionContext: IngestionContext },
+    @Res() res: ExpressResponse,
+  ): Promise<void> {
+    // A wildcard, not `:modelAction`, because Manifest's own model ids are
+    // provider-qualified (`gemini/gemini-pro-agent-subscription`) and the SDK
+    // requests whatever `/v1beta/models` advertised verbatim. Express 5 hands a
+    // splat param back as an array of segments, so rejoin it before parsing.
+    const raw = req.params['modelAction'] as string | string[] | undefined;
+    const segment = Array.isArray(raw) ? raw.join('/') : String(raw ?? '');
+    const { model, action } = parseModelAction(segment);
+    if (!model || (action !== 'generateContent' && action !== 'streamGenerateContent')) {
+      throw new HttpException(
+        `Unsupported route "models/${segment}". Manifest serves ` +
+          'models/{model}:generateContent and models/{model}:streamGenerateContent.',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    body['model'] = model;
+    if (action === 'streamGenerateContent') body['stream'] = true;
+    req.body = body;
+    await this.handleProxyRequest(req, res, 'generate_content');
   }
 
   private async handleProxyRequest(
@@ -869,6 +944,19 @@ export class ProxyController {
         `event: error\ndata: ${JSON.stringify({
           type: 'error',
           error: { type: 'api_error', message: streamError.message },
+        })}\n\n`,
+      );
+    } else if (apiMode === 'generate_content') {
+      // Gemini's SSE has no `[DONE]` sentinel and no `event:` names; an
+      // in-band `{"error":{...}}` frame is how Google reports a mid-stream
+      // failure, so that is what a Gemini-native client is prepared to see.
+      res.write(
+        `data: ${JSON.stringify({
+          error: {
+            code: streamError.status,
+            message: streamError.message,
+            status: streamError.reason,
+          },
         })}\n\n`,
       );
     } else if (apiMode === 'responses') {

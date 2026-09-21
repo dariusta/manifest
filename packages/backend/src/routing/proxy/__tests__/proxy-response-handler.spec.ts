@@ -3382,6 +3382,277 @@ describe('proxy-response-handler', () => {
     });
   });
 
+  describe('Gemini-native inbound (generate_content)', () => {
+    function streamForward(flags: { isGoogle?: boolean; isCodeAssist?: boolean } = {}) {
+      return {
+        response: { body: { getReader: jest.fn() }, headers: new Headers() },
+        isGoogle: flags.isGoogle ?? false,
+        isAnthropic: false,
+        isChatGpt: false,
+        isResponses: false,
+        isCodeAssist: flags.isCodeAssist ?? false,
+      };
+    }
+
+    function nonStreamForward(
+      body: unknown,
+      flags: { isGoogle?: boolean; isCodeAssist?: boolean } = {},
+    ) {
+      return {
+        response: {
+          json: jest.fn().mockResolvedValue(body),
+          text: jest.fn().mockResolvedValue(JSON.stringify(body)),
+          headers: { get: jest.fn().mockReturnValue('application/json') },
+        },
+        isGoogle: flags.isGoogle ?? false,
+        isAnthropic: false,
+        isChatGpt: false,
+        isResponses: false,
+        isCodeAssist: flags.isCodeAssist ?? false,
+      };
+    }
+
+    function client() {
+      return {
+        convertGoogleStreamChunk: jest.fn(),
+        convertGoogleResponse: jest.fn().mockReturnValue({ id: 'converted' }),
+        createAnthropicStreamTransformer: jest.fn().mockReturnValue(jest.fn()),
+        createReasoningContentStreamTransformer: jest.fn().mockReturnValue(jest.fn()),
+        createChatGptStreamTransformer: jest.fn().mockReturnValue(jest.fn()),
+      };
+    }
+
+    let pipeStreamSpy: jest.SpyInstance;
+    let initSseHeadersSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const streamWriter = require('../stream-writer');
+      pipeStreamSpy = jest.spyOn(streamWriter, 'pipeStream').mockResolvedValue(null);
+      initSseHeadersSpy = jest.spyOn(streamWriter, 'initSseHeaders').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      pipeStreamSpy?.mockRestore();
+      initSseHeadersSpy?.mockRestore();
+    });
+
+    it('relays a Gemini API stream untouched', async () => {
+      const { res } = mockResponse();
+      const forward = streamForward({ isGoogle: true });
+
+      await handleStreamResponse(
+        res as any,
+        forward as any,
+        makeMeta({ provider: 'gemini', model: 'gemini-3-pro' }),
+        {},
+        client() as any,
+        undefined,
+        undefined,
+        undefined,
+        'generate_content',
+      );
+
+      expect(pipeStreamSpy).toHaveBeenCalledWith(
+        forward.response.body,
+        res,
+        undefined,
+        undefined,
+        undefined,
+        { protocol: 'google_generate_content' },
+      );
+    });
+
+    it('unwraps the CodeAssist envelope and never appends a [DONE] sentinel', async () => {
+      const { res } = mockResponse();
+      const forward = streamForward({ isGoogle: true, isCodeAssist: true });
+
+      await handleStreamResponse(
+        res as any,
+        forward as any,
+        makeMeta({ provider: 'gemini', model: 'gemini-pro-agent' }),
+        {},
+        client() as any,
+        undefined,
+        undefined,
+        undefined,
+        'generate_content',
+      );
+
+      const [, , transform, finalize] = pipeStreamSpy.mock.calls[0] as [
+        unknown,
+        unknown,
+        (chunk: string) => string | null,
+        () => string | null,
+      ];
+      const inner = { candidates: [{ content: { parts: [{ text: 'hi' }] } }] };
+      expect(transform(JSON.stringify({ response: inner }))).toBe(
+        `data: ${JSON.stringify(inner)}\n\n`,
+      );
+      expect(transform('[DONE]')).toBeNull();
+      // Gemini clients read no sentinel, so `finalize` must stay empty rather
+      // than letting pipeStream write its own `data: [DONE]`.
+      expect(finalize()).toBeNull();
+    });
+
+    it('translates a non-Google stream into Gemini SSE', async () => {
+      const { res } = mockResponse();
+      const forward = streamForward();
+
+      await handleStreamResponse(
+        res as any,
+        forward as any,
+        makeMeta({ model: 'gpt-4o' }),
+        {},
+        client() as any,
+        undefined,
+        undefined,
+        undefined,
+        'generate_content',
+      );
+
+      const [, , transform, finalize] = pipeStreamSpy.mock.calls[0] as [
+        unknown,
+        unknown,
+        (chunk: string) => string | null,
+        () => string | null,
+      ];
+      const frame = transform(
+        `data: ${JSON.stringify({ choices: [{ delta: { content: 'Hi' }, finish_reason: null }] })}\n\n`,
+      );
+      expect(JSON.parse(frame!.slice(6))).toMatchObject({
+        candidates: [{ content: { role: 'model', parts: [{ text: 'Hi' }] } }],
+        modelVersion: 'gpt-4o',
+      });
+      expect(finalize()).toBeNull();
+    });
+
+    it('wraps a ChatGPT-converted chunk through the Gemini transformer', async () => {
+      const { res } = mockResponse();
+      const forward = { ...streamForward(), isChatGpt: true };
+      const providerClient = client();
+      providerClient.createChatGptStreamTransformer.mockReturnValue(
+        jest
+          .fn()
+          .mockReturnValueOnce(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: 'Hi' } }] })}\n\n`,
+          )
+          .mockReturnValueOnce(null),
+      );
+
+      await handleStreamResponse(
+        res as any,
+        forward as any,
+        makeMeta({ model: 'gpt-5.4' }),
+        {},
+        providerClient as any,
+        undefined,
+        undefined,
+        undefined,
+        'generate_content',
+      );
+
+      const transform = pipeStreamSpy.mock.calls[0][2] as (chunk: string) => string | null;
+      expect(JSON.parse(transform('anything')!.slice(6))).toMatchObject({
+        candidates: [{ content: { parts: [{ text: 'Hi' }] } }],
+      });
+      expect(transform('anything')).toBeNull();
+    });
+
+    it('returns the Gemini API body verbatim and reads usageMetadata', async () => {
+      const { res } = mockResponse();
+      const providerClient = client();
+      const upstream = {
+        candidates: [
+          {
+            content: { role: 'model', parts: [{ text: 'Hello' }] },
+            groundingMetadata: { webSearchQueries: ['q'] },
+            safetyRatings: [{ category: 'HARM_CATEGORY_HARASSMENT', probability: 'NEGLIGIBLE' }],
+          },
+        ],
+        usageMetadata: { promptTokenCount: 8, candidatesTokenCount: 2 },
+      };
+      const forward = nonStreamForward(upstream, { isGoogle: true });
+
+      const usage = await handleNonStreamResponse(
+        res as any,
+        forward as any,
+        makeMeta({ provider: 'gemini', model: 'gemini-3-pro' }),
+        {},
+        providerClient as any,
+        undefined,
+        undefined,
+        undefined,
+        'generate_content',
+      );
+
+      expect(providerClient.convertGoogleResponse).not.toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith(upstream);
+      expect(usage).toMatchObject({ prompt_tokens: 8, completion_tokens: 2 });
+    });
+
+    it('unwraps a CodeAssist non-stream envelope', async () => {
+      const { res } = mockResponse();
+      const providerClient = client();
+      const inner = { candidates: [{ content: { role: 'model', parts: [{ text: 'Hello' }] } }] };
+      const forward = nonStreamForward(
+        { response: inner, traceId: 'abc' },
+        { isGoogle: true, isCodeAssist: true },
+      );
+
+      await handleNonStreamResponse(
+        res as any,
+        forward as any,
+        makeMeta({ provider: 'gemini', model: 'gemini-pro-agent' }),
+        {},
+        providerClient as any,
+        undefined,
+        undefined,
+        undefined,
+        'generate_content',
+      );
+
+      expect(res.json).toHaveBeenCalledWith(inner);
+      expect(providerClient.convertGoogleResponse).not.toHaveBeenCalled();
+    });
+
+    it('converts a non-Google non-stream body into a GenerateContentResponse', async () => {
+      const { res } = mockResponse();
+      const forward = nonStreamForward({
+        id: 'chatcmpl-1',
+        choices: [{ index: 0, message: { content: 'Hello' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+      });
+
+      const usage = await handleNonStreamResponse(
+        res as any,
+        forward as any,
+        makeMeta({ model: 'gpt-4o' }),
+        {},
+        client() as any,
+        undefined,
+        undefined,
+        undefined,
+        'generate_content',
+      );
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          candidates: [
+            {
+              content: { role: 'model', parts: [{ text: 'Hello' }] },
+              finishReason: 'STOP',
+              index: 0,
+            },
+          ],
+          modelVersion: 'gpt-4o',
+          responseId: 'chatcmpl-1',
+        }),
+      );
+      expect(usage).toMatchObject({ prompt_tokens: 3, completion_tokens: 1 });
+    });
+  });
+
   describe('handleProviderError with specificity', () => {
     it('should pass specificityCategory to recordProviderError', async () => {
       const { res } = mockResponse();

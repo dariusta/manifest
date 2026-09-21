@@ -51,6 +51,22 @@ describe('ProxyExceptionFilter', () => {
     } as unknown as ProxyMessageRecorder);
   });
 
+  describe('Gemini-native callers (/v1beta)', () => {
+    it('sends a structured error instead of a friendly chat stub', () => {
+      // `stream: true` is synthesized by the controller for
+      // :streamGenerateContent, so it must not be read as "this caller renders
+      // an OpenAI chat envelope".
+      const { host, res, req } = createMockHost({ stream: true, contents: [] });
+      req['originalUrl'] = '/v1beta/models/gemini-3-pro:streamGenerateContent';
+
+      filter.catch(new BadRequestException('Bad contents'), host);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalled();
+      expect(res.send).not.toHaveBeenCalled();
+    });
+  });
+
   describe('auth errors (401) — chat client', () => {
     it('converts "Authorization header required" to friendly message', () => {
       const { host, res } = chatHost();

@@ -62,6 +62,10 @@ import { peekStream, STREAM_WARMUP_MS } from './stream-warmup';
 import { toChatCompletionsRequest } from './responses-adapter';
 import { messagesToChatCompletionsRequest } from './anthropic-messages-adapter';
 import { isResponsesShapedChatBody } from './cursor-compat';
+import {
+  generateContentToChatRequest,
+  isGenerateContentBody,
+} from './google-generate-content-adapter';
 import { effectiveRoutesForResponseMode } from '../routing-core/response-mode-guard';
 import { subscriptionPreferredRoute } from '../routing-core/route-helpers';
 import {
@@ -713,6 +717,7 @@ export class ProxyService {
     if (apiMode === 'messages' || apiMode === 'count_tokens') {
       return messagesToChatCompletionsRequest(body);
     }
+    if (apiMode === 'generate_content') return generateContentToChatRequest(body);
     // Cursor's Agent and Plan modes POST a Responses-shaped body to
     // /chat/completions (see cursor-compat.ts). Translating it here gives the
     // scorer real `messages` to route on and hands the provider a body it
@@ -883,6 +888,12 @@ export class ProxyService {
   }
 
   private validatePayload(body: ProxyRequestOptions['body'], apiMode: ProxyApiMode): void {
+    if (apiMode === 'generate_content') {
+      // Gemini carries the turn list in `contents`, never `messages`. Without
+      // this branch every Gemini-native request would be refused as M300.
+      if (isGenerateContentBody(body)) return;
+      throw new ManifestError('M300', HttpStatus.BAD_REQUEST);
+    }
     if (apiMode === 'responses' || isResponsesShapedChatBody(body)) {
       const hasInstructions =
         typeof body.instructions === 'string' && body.instructions.trim().length > 0;

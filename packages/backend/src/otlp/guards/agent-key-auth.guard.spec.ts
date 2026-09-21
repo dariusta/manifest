@@ -153,6 +153,36 @@ describe('AgentKeyAuthGuard', () => {
     await expect(guard.canActivate(ctx)).rejects.toThrow('Authorization header required');
   });
 
+  // The Google Gen AI SDK has no way to send an Authorization header for an
+  // API-key client — it only ever sets `x-goog-api-key`.
+  it('accepts an mnfst_ key sent as x-goog-api-key, bare or as a repeated header', async () => {
+    const token = 'mnfst_goog-key';
+    mockGetMany.mockResolvedValue([
+      {
+        id: 'key-1',
+        tenant_id: 'tenant-1',
+        agent_id: 'agent-1',
+        key_hash: hashKey(token),
+        expires_at: null,
+        agent: { name: 'test-agent' },
+        tenant: { owner_user_id: 'user-1' },
+      },
+    ]);
+
+    const bare = makeContext({ 'x-goog-api-key': ` ${token} ` });
+    await expect(guard.canActivate(bare.ctx)).resolves.toBe(true);
+    expect(bare.req.ingestionContext).toMatchObject({ agentId: 'agent-1' });
+
+    const repeated = makeContext({});
+    (repeated.req.headers as Record<string, unknown>)['x-goog-api-key'] = [token, 'ignored'];
+    await expect(guard.canActivate(repeated.ctx)).resolves.toBe(true);
+  });
+
+  it('treats a blank x-goog-api-key as no credential at all', async () => {
+    const { ctx } = makeContext({ 'x-goog-api-key': '   ' });
+    await expect(guard.canActivate(ctx)).rejects.toThrow('Authorization header required');
+  });
+
   it('throws UnauthorizedException when token is empty (Bearer with no value)', async () => {
     const { ctx } = makeContext({ authorization: 'Bearer ' });
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);

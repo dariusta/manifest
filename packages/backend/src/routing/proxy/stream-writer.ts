@@ -168,6 +168,21 @@ export function parseUsageObject(usage: unknown): StreamUsage | null {
     };
   }
 
+  // Gemini native (`generateContent` passthrough): counts live in
+  // `usageMetadata`, and `promptTokenCount` already includes the cached
+  // portion — no summing, or the cache would be double-counted.
+  if (typeof u.promptTokenCount === 'number') {
+    const cacheRead =
+      typeof u.cachedContentTokenCount === 'number' ? u.cachedContentTokenCount : undefined;
+    return {
+      prompt_tokens: u.promptTokenCount,
+      completion_tokens: typeof u.candidatesTokenCount === 'number' ? u.candidatesTokenCount : 0,
+      cache_read_tokens: cacheRead,
+      cache_creation_tokens: 0,
+      ...(reportedCostUsd !== undefined ? { reported_cost_usd: reportedCostUsd } : {}),
+    };
+  }
+
   return null;
 }
 
@@ -191,9 +206,14 @@ function extractUsageFromObject(obj: unknown): StreamUsage | null {
   const record = obj as Record<string, unknown>;
   const fromUsage = parseUsageObject(record.usage);
   if (fromUsage) return fromUsage;
+  const fromGemini = parseUsageObject(record.usageMetadata);
+  if (fromGemini) return fromGemini;
   const response = record.response;
   if (response && typeof response === 'object') {
-    return parseUsageObject((response as Record<string, unknown>).usage);
+    const nested = response as Record<string, unknown>;
+    // `{ response: … }` is both the OpenAI Responses event envelope and the
+    // CodeAssist wrapper around a Gemini payload.
+    return parseUsageObject(nested.usage) ?? parseUsageObject(nested.usageMetadata);
   }
   return null;
 }

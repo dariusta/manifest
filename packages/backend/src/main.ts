@@ -218,9 +218,13 @@ export async function bootstrap() {
   // Re-add body parsing for NestJS routes. The OpenAI-compatible proxy has a
   // separate parser because clients may legitimately send large inline image
   // payloads. Regular Manifest API/auth routes stay small.
-  expressApp.use('/v1', createProxyBodyBudgetMiddleware());
-  expressApp.use('/v1', express.json({ limit: PROXY_BODY_LIMIT }));
-  expressApp.use('/v1', express.urlencoded({ extended: true, limit: PROXY_BODY_LIMIT }));
+  // `/v1beta` is the Gemini-native proxy surface and carries the same inline
+  // media payloads, so it needs the proxy budget too — Express matches `/v1`
+  // as a path segment and would otherwise leave it on the small API parser.
+  const PROXY_PREFIXES = ['/v1', '/v1beta'];
+  expressApp.use(PROXY_PREFIXES, createProxyBodyBudgetMiddleware());
+  expressApp.use(PROXY_PREFIXES, express.json({ limit: PROXY_BODY_LIMIT }));
+  expressApp.use(PROXY_PREFIXES, express.urlencoded({ extended: true, limit: PROXY_BODY_LIMIT }));
   expressApp.use(express.json({ limit: API_BODY_LIMIT }));
   expressApp.use(express.urlencoded({ extended: true, limit: API_BODY_LIMIT }));
   expressApp.use(bodyParserErrorHandler);

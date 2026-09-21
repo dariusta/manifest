@@ -22,6 +22,7 @@ describe('agent-type', () => {
       'opencode',
       'openai-sdk',
       'anthropic-sdk',
+      'google-genai-sdk',
       'vercel-ai-sdk',
       'langchain',
       'curl',

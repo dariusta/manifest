@@ -44,6 +44,15 @@ interface GeminiPart {
 
 const DATA_IMAGE_URL_RE = /^data:([^;,]+)(?:;[^,]*)?;base64,(.*)$/is;
 
+/** Inline part types Gemini accepts on a generateContent request. */
+const INLINE_MEDIA_PREFIXES = ['image/', 'video/', 'audio/'] as const;
+
+function isInlineMediaType(mimeType: string): boolean {
+  const lower = mimeType.toLowerCase();
+  if (lower === 'application/pdf') return true;
+  return INLINE_MEDIA_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
+
 /**
  * JSON Schema fields not supported by the Gemini API.
  * These must be stripped recursively before sending tool parameters.
@@ -166,7 +175,14 @@ function imageUrlToGooglePart(imageUrl: unknown): GeminiPart | null {
   const dataUrl = DATA_IMAGE_URL_RE.exec(url);
   if (dataUrl) {
     const mimeType = dataUrl[1] || 'image/png';
-    if (!mimeType.toLowerCase().startsWith('image/')) return null;
+    // Gemini takes video, audio and PDF inline as well as images, and the
+    // remote-URL branch below already forwards any of them without inspecting
+    // the type. Rejecting them only here made the same function accept a
+    // hosted .mp4 but silently drop an inline one — the part vanished and the
+    // model answered as though nothing had been attached. Keep the allow-list
+    // to what Gemini documents so a genuinely unsupported type still fails
+    // fast rather than travelling as junk.
+    if (!isInlineMediaType(mimeType)) return null;
     return { inlineData: { mimeType, data: dataUrl[2] } };
   }
 
@@ -270,8 +286,7 @@ function convertTools(tools?: Record<string, unknown>[]): Record<string, unknown
   const declarations = tools
     .map((t) => {
       const fn = t.function as
-        | { name: string; description?: string; parameters?: unknown }
-        | undefined;
+        { name: string; description?: string; parameters?: unknown } | undefined;
       if (!fn) return null;
       return {
         name: fn.name,

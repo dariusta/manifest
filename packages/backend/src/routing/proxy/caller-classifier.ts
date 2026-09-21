@@ -95,6 +95,18 @@ function detectSdk(
       return { sdk: `anthropic-${anthropic[1].toLowerCase()}`, sdkVersion: anthropic[2] };
     }
 
+    // Both Google Gen AI SDKs send `google-genai-sdk/<ver> gl-<lang>/<ver>` as
+    // their User-Agent (and as `x-goog-api-client`), so the language rides in
+    // the same header rather than a Stainless one.
+    const googleGenai = ua.match(/^google-genai-sdk\/([\w.-]+)/i);
+    if (googleGenai) {
+      const lang = ua.match(/\bgl-(\w+)\//);
+      return {
+        sdk: lang ? `google-genai-${lang[1].toLowerCase()}` : 'google-genai',
+        sdkVersion: googleGenai[1],
+      };
+    }
+
     const curl = ua.match(/^curl\/([\d.]+)/i);
     if (curl) return { sdk: 'curl', sdkVersion: curl[1] };
 

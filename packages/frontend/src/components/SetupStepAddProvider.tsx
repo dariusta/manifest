@@ -22,6 +22,7 @@ interface Props {
 const PLATFORM_TO_TOOLKIT: Record<string, ToolkitId> = {
   'openai-sdk': 'openai-sdk',
   'anthropic-sdk': 'anthropic-sdk',
+  'google-genai-sdk': 'google-genai-sdk',
   'vercel-ai-sdk': 'vercel-ai-sdk',
   langchain: 'langchain',
   curl: 'curl',
