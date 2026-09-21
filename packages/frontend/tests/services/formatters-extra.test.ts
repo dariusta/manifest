@@ -24,7 +24,12 @@ describe("formatNumber edge cases", () => {
   });
 
   it("formats very large millions", () => {
-    expect(formatNumber(1_500_000_000)).toBe("1500M");
+    expect(formatNumber(999_000_000)).toBe("999M");
+  });
+
+  it("rolls over to billions at 1e9", () => {
+    expect(formatNumber(1_000_000_000)).toBe("1B");
+    expect(formatNumber(1_500_000_000)).toBe("1.5B");
   });
 
   it("formats whole thousands without decimal", () => {
