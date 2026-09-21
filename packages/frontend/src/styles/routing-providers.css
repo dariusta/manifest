@@ -1516,3 +1516,26 @@ tr:hover .connection-label-cell__edit,
 .connections-panel__toggle[aria-expanded='true'] .connections-panel__chevron {
   transform: rotate(180deg);
 }
+
+/* -- Connection test result -------------------------------------------------
+   Sits under the "Connected via …" subtitle in every account card. Wraps
+   instead of ellipsing: a provider error is the whole point of the line, so
+   truncating it to one line would hide what the user clicked Test to find. */
+.connection-test__result {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.connection-test__result--ok {
+  color: hsl(var(--success));
+}
+
+.connection-test__result--failed {
+  color: hsl(var(--destructive));
+}
+
+.connection-test__result--muted {
+  color: hsl(var(--muted-foreground));
+}

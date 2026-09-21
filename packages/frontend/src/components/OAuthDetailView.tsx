@@ -17,6 +17,7 @@ import {
 } from '../services/api.js';
 import { toast } from '../services/toast-store.js';
 import { monitorOAuthPopup } from '../services/oauth-popup.js';
+import { ConnectionTestButton, ConnectionTestResultLine } from './ConnectionTest.js';
 
 const MAX_LABEL_LENGTH = 50;
 
@@ -426,7 +427,13 @@ const OAuthDetailView: Component<Props> = (props) => {
                             <div style="font-size: var(--font-size-xs); color: hsl(var(--muted-foreground));">
                               Connected via {props.provDef.subscriptionLabel ?? 'subscription'}
                             </div>
+                            <ConnectionTestResultLine connectionId={k.id} />
                           </div>
+                          <ConnectionTestButton
+                            connectionId={k.id}
+                            label={k.label}
+                            busy={props.busy()}
+                          />
                           <button
                             class="btn btn--outline btn--sm"
                             style="flex-shrink: 0;"

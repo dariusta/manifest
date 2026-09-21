@@ -331,3 +331,37 @@ export function mergeUsage(
     };
   });
 }
+
+/** Outcome of a live credential test. Mirrors the backend `ConnectionTestResult`. */
+export type ConnectionTestStatus = 'ok' | 'needs_reconnect' | 'failed' | 'untestable';
+
+export interface ConnectionTestResult {
+  connection_id: string;
+  provider: string;
+  label: string;
+  status: ConnectionTestStatus;
+  model: string | null;
+  latency_ms: number | null;
+  http_status: number | null;
+  message: string;
+  tested_at: string;
+}
+
+/**
+ * Send one real completion through this exact connection to prove it works.
+ *
+ * Deliberately a raw fetch rather than {@link fetchMutate}: a test changes no
+ * data, so dropping the whole SWR GET cache on every click would be pure waste.
+ * A *failed test* comes back 200 with `status: 'failed'` — only transport and
+ * 4xx/5xx (e.g. an unknown connection id) throw.
+ */
+export async function testProviderConnection(connectionId: string) {
+  const res = await fetch(
+    `${BASE_URL}/providers/connection-test/${encodeURIComponent(connectionId)}`,
+    { method: 'POST', credentials: 'include' },
+  );
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res));
+  }
+  return (await res.json()) as ConnectionTestResult;
+}

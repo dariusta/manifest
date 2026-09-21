@@ -20,6 +20,7 @@ import {
   type RoutingProvider,
 } from '../services/api.js';
 import { toast } from '../services/toast-store.js';
+import { ConnectionTestButton, ConnectionTestResultLine } from './ConnectionTest.js';
 import CopyButton from './CopyButton.js';
 
 interface Props {
@@ -313,6 +314,11 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
                             </svg>
                           </button>
                           <div class="anthropic-account__actions">
+                            <ConnectionTestButton
+                              connectionId={k.id}
+                              label={k.label}
+                              busy={props.busy()}
+                            />
                             <button
                               class="btn btn--outline btn--sm"
                               disabled={props.busy()}
@@ -376,6 +382,7 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
                         </button>
                       </div>
                     </Show>
+                    <ConnectionTestResultLine connectionId={k.id} />
                     <Show when={expandedAccountId() === k.id && renamingId() !== k.id}>
                       <div
                         id={`anthropic-account-credential-${k.id}`}

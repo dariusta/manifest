@@ -96,7 +96,7 @@
 --z-toast: 8000
 --z-tooltip: 9999
 
-## Blocks (333 BEM blocks, 1770 classes)
+## Blocks (334 BEM blocks, 1774 classes)
 account-back-btn (agents.css): account-back-btn
 account-email-footer (agents.css): account-email-footer
 account-email-toggle (agents.css): account-email-toggle--disabled
@@ -153,6 +153,7 @@ complexity-empty (routing.css): complexity-empty complexity-empty__desc complexi
 confirm-modal (limits.css): confirm-modal__confirm-row confirm-modal__footer confirm-modal__warning
 connection-delete-confirmation (routing-providers.css): connection-delete-confirmation connection-delete-confirmation__copy connection-delete-confirmation__footer connection-delete-confirmation__label connection-delete-confirmation__title connection-delete-confirmation__warning
 connection-label-cell (routing-providers.css): connection-label-cell connection-label-cell__edit
+connection-test (routing-providers.css): connection-test__result connection-test__result--failed connection-test__result--muted connection-test__result--ok
 connections-panel (routing-providers.css): connections-panel connections-panel--collapsed connections-panel__body connections-panel__chevron connections-panel__toggle connections-panel__viewport
 container (layout.css, theme.css): container--full container--lg container--md container--sm
 conv-outline-row (request-drawer.css): conv-outline-row conv-outline-row--active conv-outline-row__badge conv-outline-row__badge--assistant conv-outline-row__badge--system conv-outline-row__badge--tool conv-outline-row__badge--unknown conv-outline-row__badge--user conv-outline-row__num conv-outline-row__preview conv-outline-row__tokens

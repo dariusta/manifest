@@ -36,6 +36,7 @@ import { WaitlistModule } from './waitlist/waitlist.module';
 import { BillingModule } from './billing/billing.module';
 import { DiscoveryModule } from './discovery/discovery.module';
 import { PlanUsageModule } from './plan-usage/plan-usage.module';
+import { ConnectionTestModule } from './connection-test/connection-test.module';
 import { DebugSentryController } from './sentry/debug-sentry.controller';
 
 const frontendPath = resolveFrontendDir();
@@ -108,6 +109,7 @@ const sentryDebugControllers =
     BillingModule,
     DiscoveryModule,
     PlanUsageModule,
+    ConnectionTestModule,
   ],
   providers: [
     ...sentryProviders,

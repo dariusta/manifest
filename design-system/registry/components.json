@@ -927,6 +927,17 @@
         "routing-providers.css"
       ]
     },
+    "connection-test": {
+      "classes": [
+        "connection-test__result",
+        "connection-test__result--failed",
+        "connection-test__result--muted",
+        "connection-test__result--ok"
+      ],
+      "files": [
+        "routing-providers.css"
+      ]
+    },
     "connections-panel": {
       "classes": [
         "connections-panel",
@@ -5322,8 +5333,8 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 333,
-    "classes": 1770,
+    "blocks": 334,
+    "classes": 1774,
     "canonicalRules": 48,
     "ghostRules": 48
   }

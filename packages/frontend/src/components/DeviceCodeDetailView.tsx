@@ -20,6 +20,7 @@ import {
 import { suggestNextProviderKeyLabel } from '../services/provider-key-labels.js';
 import { validateSubscriptionKey } from '../services/provider-utils.js';
 import { toast } from '../services/toast-store.js';
+import { ConnectionTestButton, ConnectionTestResultLine } from './ConnectionTest.js';
 import Select from './Select.jsx';
 
 interface Props {
@@ -554,7 +555,13 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
                             <div style="font-size: var(--font-size-xs); color: hsl(var(--muted-foreground));">
                               Connected via {props.provDef.subscriptionLabel ?? 'subscription'}
                             </div>
+                            <ConnectionTestResultLine connectionId={k.id} />
                           </div>
+                          <ConnectionTestButton
+                            connectionId={k.id}
+                            label={k.label}
+                            busy={props.busy()}
+                          />
                           <button
                             class="btn btn--outline btn--sm"
                             style="flex-shrink: 0;"

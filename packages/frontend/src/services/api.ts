@@ -15,6 +15,7 @@ export {
   getProviders as getGlobalProviders,
   getProviderUsage as getGlobalProviderUsage,
   getProviderPlanUsage,
+  testProviderConnection,
   mergeUsage,
   type ProvidersResponse,
   type ProviderUsageResponse,
@@ -22,4 +23,6 @@ export {
   type TenantProviderConfig,
   type TenantProviderUsage,
   type TenantProviderSummary,
+  type ConnectionTestStatus,
+  type ConnectionTestResult,
 } from './api/providers.js';
