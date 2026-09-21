@@ -1393,6 +1393,10 @@ describe('ProxyController', () => {
       usage: { input_tokens: 10, output_tokens: 5 },
     };
     const convertedBody = { choices: [{ message: { content: 'hello' } }] };
+    // Claude Code renames Hermes' tools on the way out, so the aliases captured
+    // on the request have to reach the converter for the reply to name the
+    // tools the caller actually sent.
+    const toolAliases = new Map([['Bash', 'shell']]);
 
     const mockProviderResp = new Response(JSON.stringify(anthropicBody), {
       status: 200,
@@ -1400,7 +1404,13 @@ describe('ProxyController', () => {
     });
 
     proxyService.proxyRequest.mockResolvedValue({
-      forward: { response: mockProviderResp, isGoogle: false, isAnthropic: true, isChatGpt: false },
+      forward: {
+        response: mockProviderResp,
+        isGoogle: false,
+        isAnthropic: true,
+        isChatGpt: false,
+        claudeCodeToolAliases: toolAliases,
+      },
       meta: {
         tier: 'complex',
         model: 'claude-sonnet-4-20250514',
@@ -1419,6 +1429,7 @@ describe('ProxyController', () => {
     expect(providerClient.convertAnthropicResponse).toHaveBeenCalledWith(
       anthropicBody,
       'claude-sonnet-4-20250514',
+      toolAliases,
     );
     expect(res.json).toHaveBeenCalledWith(convertedBody);
   });
@@ -3797,6 +3808,7 @@ describe('ProxyController', () => {
         'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":10}}}\n\n',
         'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}\n\n',
       ]);
+      const toolAliases = new Map([['Bash', 'shell']]);
 
       proxyService.proxyRequest.mockResolvedValue({
         forward: {
@@ -3804,6 +3816,7 @@ describe('ProxyController', () => {
           isGoogle: false,
           isAnthropic: true,
           isChatGpt: false,
+          claudeCodeToolAliases: toolAliases,
         },
         meta: {
           tier: 'standard',
@@ -3835,7 +3848,7 @@ describe('ProxyController', () => {
 
       expect(
         (providerClient as Record<string, jest.Mock>).createAnthropicStreamTransformer,
-      ).toHaveBeenCalledWith('claude-sonnet-4-20250514', expect.any(Function));
+      ).toHaveBeenCalledWith('claude-sonnet-4-20250514', expect.any(Function), toolAliases);
       expect(written.some((w) => w.includes('content'))).toBe(true);
     });
 
