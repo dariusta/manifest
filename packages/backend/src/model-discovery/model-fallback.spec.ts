@@ -411,13 +411,16 @@ describe('supplementWithKnownModels', () => {
     expect(opusEntries).toHaveLength(1);
   });
 
-  it('keeps explicit gemini preview known models separate in exact mode', () => {
+  it('keeps curated gemini wire ids when discovery returns a longer variant', () => {
+    // Exact mode is what protects the Cloud Code effort ladder: in prefix
+    // mode this longer id would mark `gemini-pro-agent` covered and the
+    // curated wire id would never be added.
     const raw = [
       {
-        id: 'gemini-3.1-flash-lite',
-        displayName: 'Gemini 3.1 Flash-Lite',
+        id: 'gemini-pro-agent-preview',
+        displayName: 'Gemini Pro Agent Preview',
         provider: 'gemini',
-        contextWindow: 1000000,
+        contextWindow: 1048576,
         inputPricePerToken: 0.0000001,
         outputPricePerToken: 0.0000008,
         capabilityReasoning: false,
@@ -429,10 +432,12 @@ describe('supplementWithKnownModels', () => {
     const result = supplementWithKnownModels(raw, 'gemini');
     const ids = result.map((m) => m.id);
 
-    expect(ids).toContain('gemini-3.1-flash-lite');
-    expect(ids).toContain('gemini-3.1-flash-lite-preview');
+    expect(ids).toContain('gemini-pro-agent');
+    expect(ids).toContain('gemini-3.1-pro-low');
+    expect(ids).toContain('gemini-3.8-flash-high');
+    expect(ids).toContain('gemini-3.7-flash-tiered');
+    expect(ids).not.toContain('gemini-2.5-pro');
     expect(ids).not.toContain('gemini-3.1-pro-preview');
-    expect(ids).not.toContain('gemini-3-flash-preview');
   });
 });
 

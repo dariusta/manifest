@@ -285,17 +285,21 @@ describe('getSubscriptionProviderConfig', () => {
     });
     expect(config?.knownModels).toEqual(
       expect.arrayContaining([
-        'gemini-3.1-flash-lite',
-        'gemini-3.1-flash-lite-preview',
-        'gemini-2.5-pro',
-        'gemini-2.5-flash',
-        'gemini-2.5-flash-lite',
+        'gemini-pro-agent',
+        'gemini-3.1-pro-low',
+        'gemini-3.8-flash-high',
+        'gemini-3.8-flash-medium',
+        'gemini-3.8-flash-low',
+        'gemini-3.7-flash-tiered',
       ]),
     );
+    // Public Gemini API ids are not Cloud Code wire ids; the envelope
+    // forwards `model` verbatim, so these 404 on the subscription route.
+    expect(config?.knownModels).not.toContain('gemini-2.5-pro');
     expect(config?.knownModels).not.toContain('gemini-3.1-pro-preview');
     expect(config?.knownModels).not.toContain('gemini-3-flash-preview');
     expect(config?.subscriptionCapabilities).toMatchObject({
-      maxContextWindow: 1000000,
+      maxContextWindow: 1048576,
       supportsPromptCaching: true,
       supportsBatching: false,
     });
@@ -451,11 +455,13 @@ describe('getSubscriptionKnownModels', () => {
 
   it('returns known models for gemini', () => {
     const models = getSubscriptionKnownModels('gemini');
-    expect(models).toContain('gemini-3.1-flash-lite');
-    expect(models).toContain('gemini-3.1-flash-lite-preview');
-    expect(models).toContain('gemini-2.5-pro');
-    expect(models).toContain('gemini-2.5-flash');
-    expect(models).toContain('gemini-2.5-flash-lite');
+    expect(models).toContain('gemini-pro-agent');
+    expect(models).toContain('gemini-3.1-pro-low');
+    expect(models).toContain('gemini-3.8-flash-high');
+    expect(models).toContain('gemini-3.8-flash-medium');
+    expect(models).toContain('gemini-3.8-flash-low');
+    expect(models).toContain('gemini-3.7-flash-tiered');
+    expect(models).not.toContain('gemini-2.5-pro');
     expect(models).not.toContain('gemini-3.1-pro-preview');
     expect(models).not.toContain('gemini-3-flash-preview');
   });
@@ -639,7 +645,7 @@ describe('getSubscriptionCapabilities', () => {
   it('returns capabilities for Gemini subscription', () => {
     const caps = getSubscriptionCapabilities('gemini');
     expect(caps).toMatchObject({
-      maxContextWindow: 1000000,
+      maxContextWindow: 1048576,
       supportsPromptCaching: true,
       supportsBatching: false,
     });

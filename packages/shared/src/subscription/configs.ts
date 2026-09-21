@@ -262,20 +262,33 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     supportsSubscription: true as const,
     subscriptionLabel: 'Sign in with Google',
     subscriptionAuthMode: 'popup_oauth' as const,
-    // Antigravity Cloud Code supports a fixed list of Gemini models. The
-    // dashboard uses these as fallback when no native /models call returns
-    // (Cloud Code does not expose one). Keep this list strict to models that
-    // the Cloud Code route recognizes.
+    // Antigravity Cloud Code serves a fixed model list and exposes no
+    // `/models` endpoint, so this list is the dashboard's only catalog for
+    // the route. Every entry must be a CCA **wire id** — `provider-client`
+    // puts `model` into the CodeAssist envelope verbatim, with no alias
+    // mapping in between, so a public Gemini API id (`gemini-2.5-pro`) is
+    // simply not a name this backend answers to.
+    //
+    // Reasoning effort rides the wire id rather than a request field, which
+    // is why one model appears as several entries: 3.8 Flash publishes one
+    // id per tier, 3.7 Flash collapses its tiers into a single `-tiered` id,
+    // and 3.1 Pro spells its high rung `gemini-pro-agent`.
     knownModels: Object.freeze([
-      'gemini-3.1-flash-lite',
-      'gemini-3.1-flash-lite-preview',
-      'gemini-2.5-pro',
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
+      // Gemini 3.1 Pro — the only Pro-tier Gemini 3 text model CCA serves.
+      'gemini-pro-agent',
+      'gemini-3.1-pro-low',
+      // Gemini 3.8 Flash — current Flash generation; `medium` is Google's
+      // documented default and the tier CCA marks recommended.
+      'gemini-3.8-flash-high',
+      'gemini-3.8-flash-medium',
+      'gemini-3.8-flash-low',
+      // Gemini 3.7 Flash — previous generation, still served alongside 3.8.
+      'gemini-3.7-flash-tiered',
     ]),
     knownModelsMatch: 'exact' as const,
     subscriptionCapabilities: Object.freeze({
-      maxContextWindow: 1000000,
+      // CCA's own `:fetchAvailableModels` maxTokens for every Gemini wire id.
+      maxContextWindow: 1048576,
       supportsPromptCaching: true,
       supportsBatching: false,
     }),

@@ -268,11 +268,23 @@ const PROVIDER_UI: Record<string, ProviderUIOverlay> = {
   },
   gemini: {
     initial: 'G',
-    subtitle: 'Gemini 3.6 Flash, 3.1 Pro, Gemini 2.5',
+    subtitle: 'Gemini 3.8 Flash, 3.7 Flash, 3.1 Pro',
     supportsSubscription: true,
     subscriptionLabel: 'Sign in with Google',
     subscriptionAuthMode: 'popup_oauth',
-    models: [],
+    // Label-only entries: this list never adds rows to a picker (the model
+    // lists come from the API), it just names them. Antigravity's Cloud Code
+    // wire ids encode the reasoning tier and one of them — `gemini-pro-agent`
+    // — does not name its model at all, so without these the routing UI would
+    // offer the user a row reading "Gemini Pro Agent".
+    models: [
+      { label: 'Gemini 3.1 Pro (High)', value: 'gemini-pro-agent' },
+      { label: 'Gemini 3.1 Pro (Low)', value: 'gemini-3.1-pro-low' },
+      { label: 'Gemini 3.8 Flash (High)', value: 'gemini-3.8-flash-high' },
+      { label: 'Gemini 3.8 Flash (Medium)', value: 'gemini-3.8-flash-medium' },
+      { label: 'Gemini 3.8 Flash (Low)', value: 'gemini-3.8-flash-low' },
+      { label: 'Gemini 3.7 Flash', value: 'gemini-3.7-flash-tiered' },
+    ],
   },
   'gemini-free': {
     initial: 'GF',

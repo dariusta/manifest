@@ -2545,10 +2545,11 @@ describe('ModelDiscoveryService', () => {
     });
 
     it('should use subscription fallback for gemini when token present but fetcher returns empty', async () => {
-      // Gemini CodeAssist does not expose a /models endpoint, so the fetcher
-      // returns [] immediately (no HTTP). The discovery service then falls through
-      // to buildSubscriptionFallbackModels (exact match) to produce the curated
-      // model list from the OpenRouter cache.
+      // Antigravity Cloud Code does not expose a /models endpoint, so the
+      // fetcher returns [] immediately (no HTTP). The discovery service then
+      // falls through to buildSubscriptionFallbackModels, whose ids are Cloud
+      // Code wire ids — none of which have an OpenRouter counterpart, so the
+      // pricing cache can neither add nor price a model on this route.
       const blob = JSON.stringify({
         t: 'ya29.google-access-token',
         r: 'refresh-token',
@@ -2560,7 +2561,8 @@ describe('ModelDiscoveryService', () => {
       fetcher.fetch.mockResolvedValue([]);
 
       const orMap = new Map([
-        // Exact matches — should be included
+        // Public Gemini API ids. Cloud Code does not answer to these, so no
+        // amount of pricing-cache coverage may put them on this route.
         [
           'google/gemini-2.5-pro',
           {
@@ -2570,25 +2572,6 @@ describe('ModelDiscoveryService', () => {
             displayName: 'Gemini 2.5 Pro',
           },
         ],
-        [
-          'google/gemini-2.5-flash',
-          {
-            input: 0.0000003,
-            output: 0.0000025,
-            contextWindow: 1000000,
-            displayName: 'Gemini 2.5 Flash',
-          },
-        ],
-        [
-          'google/gemini-3.1-flash-lite',
-          {
-            input: 0.000002,
-            output: 0.000012,
-            contextWindow: 1000000,
-            displayName: 'Gemini 3.1 Flash Lite',
-          },
-        ],
-        // Suffixed variants — should be EXCLUDED in exact mode
         [
           'google/gemini-2.5-pro-preview-06-05',
           {
@@ -2615,19 +2598,21 @@ describe('ModelDiscoveryService', () => {
       );
 
       const ids = result.map((m) => m.id);
-      // Exact matches included
-      expect(ids).toContain('gemini-2.5-pro');
-      expect(ids).toContain('gemini-2.5-flash');
-      expect(ids).toContain('gemini-3.1-flash-lite');
-      // Suffixed preview NOT included (exact match mode)
+      // Every curated Cloud Code wire id is offered.
+      expect(ids).toContain('gemini-pro-agent');
+      expect(ids).toContain('gemini-3.1-pro-low');
+      expect(ids).toContain('gemini-3.8-flash-high');
+      expect(ids).toContain('gemini-3.8-flash-medium');
+      expect(ids).toContain('gemini-3.8-flash-low');
+      expect(ids).toContain('gemini-3.7-flash-tiered');
+      // The pricing cache contributes no ids to a subscription catalog.
+      expect(ids).not.toContain('gemini-2.5-pro');
       expect(ids).not.toContain('gemini-2.5-pro-preview-06-05');
-      // Non-gemini models excluded
       expect(ids).not.toContain('gpt-4o');
-      // gemini-2.5-flash-lite added directly (not in OpenRouter cache) as zero-cost
-      expect(ids).toContain('gemini-2.5-flash-lite');
-      // All stamped as subscription
+      // All stamped as subscription, at Cloud Code's advertised window.
       for (const m of result) {
         expect(m.authType).toBe('subscription');
+        expect(m.contextWindow).toBe(1048576);
       }
       // Fetcher IS called but returns [] (it short-circuits internally without HTTP).
       // Gemini blobs are NOT unwrapped in the service (only openai/minimax are),
@@ -2674,17 +2659,17 @@ describe('ModelDiscoveryService', () => {
       );
 
       const ids = result.map((m) => m.id);
-      // Exact match: gemini-2.5-flash included
-      expect(ids).toContain('gemini-2.5-flash');
-      // Preview suffix: excluded in exact mode
+      // Curated wire ids are added as zero-cost entries.
+      expect(ids).toContain('gemini-pro-agent');
+      expect(ids).toContain('gemini-3.1-pro-low');
+      expect(ids).toContain('gemini-3.8-flash-high');
+      expect(ids).toContain('gemini-3.7-flash-tiered');
+      // Public Gemini API ids stay off the subscription route even when the
+      // pricing cache knows them.
+      expect(ids).not.toContain('gemini-2.5-flash');
       expect(ids).not.toContain('gemini-2.5-flash-preview-05-20');
-      // knownModels not in cache added as zero-cost
-      expect(ids).toContain('gemini-2.5-pro');
-      expect(ids).toContain('gemini-2.5-flash-lite');
-      expect(ids).toContain('gemini-3.1-flash-lite');
-      expect(ids).toContain('gemini-3.1-flash-lite-preview');
+      expect(ids).not.toContain('gemini-2.5-pro');
       expect(ids).not.toContain('gemini-3.1-pro-preview');
-      expect(ids).not.toContain('gemini-3-flash-preview');
       expect(fetcher.fetch).not.toHaveBeenCalled();
     });
   });
