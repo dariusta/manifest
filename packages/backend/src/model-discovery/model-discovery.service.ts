@@ -603,7 +603,15 @@ export class ModelDiscoveryService {
       const providerAuthType: AuthType = p.auth_type;
       const providerId = p.provider.toLowerCase();
       const filterKey = nonChatFilterKey(providerId, providerAuthType);
-      const cached = filterNonChatModels(rawCached, filterKey);
+      // cached_models is a discovery-time snapshot. For subscription
+      // connections, top it up with the curated catalog at read time so a
+      // knownModels addition reaches every existing connection immediately
+      // instead of waiting for a manual "Refresh models" on each one.
+      // supplementWithKnownModels mutates its input, so hand it a copy.
+      const cached =
+        providerAuthType === 'subscription'
+          ? supplementWithKnownModels([...filterNonChatModels(rawCached, filterKey)], p.provider)
+          : filterNonChatModels(rawCached, filterKey);
       for (const cachedModel of cached) {
         const m =
           providerAuthType === 'subscription'

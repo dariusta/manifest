@@ -938,6 +938,60 @@ describe('ModelDiscoveryService', () => {
       expect(plain?.capabilities).toBeUndefined();
     });
 
+    it('offers newly curated subscription models to existing connections without a refresh', async () => {
+      // cached_models is a snapshot from when the connection was made. A
+      // knownModels addition (claude-opus-5-5, grok-4.7) must reach the picker
+      // at read time — otherwise every catalog update silently waits for
+      // someone to click "Refresh models" on each connection.
+      providerRepo.find.mockResolvedValue([
+        makeProvider({
+          id: 'anthropic-sub',
+          provider: 'anthropic',
+          auth_type: 'subscription',
+          cached_models: [
+            makeModel({ id: 'claude-opus-5', provider: 'anthropic', authType: 'subscription' }),
+          ],
+        }),
+        makeProvider({
+          id: 'xai-sub',
+          provider: 'xai',
+          auth_type: 'subscription',
+          cached_models: [makeModel({ id: 'grok-4.6', provider: 'xai', authType: 'subscription' })],
+        }),
+      ]);
+      customProviderRepo.find.mockResolvedValue([]);
+
+      const result = await service.getModelsForAgent('tenant-1');
+
+      const opus55 = result.find((m) => m.id === 'claude-opus-5-5');
+      expect(opus55).toMatchObject({
+        provider: 'anthropic',
+        authType: 'subscription',
+        contextWindow: 1000000,
+        inputPricePerToken: 0,
+      });
+      const grok47 = result.find((m) => m.id === 'grok-4.7');
+      expect(grok47).toMatchObject({ provider: 'xai', authType: 'subscription' });
+      // The snapshot rows themselves are untouched and not duplicated.
+      expect(result.filter((m) => m.id === 'claude-opus-5')).toHaveLength(1);
+      expect(result.filter((m) => m.id === 'grok-4.6')).toHaveLength(1);
+    });
+
+    it('does not supplement api_key connections with the subscription catalog', async () => {
+      providerRepo.find.mockResolvedValue([
+        makeProvider({
+          provider: 'anthropic',
+          auth_type: 'api_key',
+          cached_models: [makeModel({ id: 'claude-opus-5', provider: 'anthropic' })],
+        }),
+      ]);
+      customProviderRepo.find.mockResolvedValue([]);
+
+      const result = await service.getModelsForAgent('tenant-1');
+
+      expect(result.map((m) => m.id)).toEqual(['claude-opus-5']);
+    });
+
     it('should filter stale unsupported OpenAI subscription cached models', async () => {
       const providers = [
         makeProvider({
@@ -956,7 +1010,12 @@ describe('ModelDiscoveryService', () => {
 
       const result = await service.getModelsForAgent('agent-1');
 
-      expect(result.map((m) => m.id)).toEqual(['gpt-5.5', 'gpt-5.3-codex-spark']);
+      const ids = result.map((m) => m.id);
+      // Stale snapshot rows the subscription no longer grants are dropped …
+      expect(ids).not.toContain('gpt-5.2-codex');
+      expect(ids).not.toContain('gpt-5.1-codex-max');
+      // … while the rows it still grants survive (curated top-up may add more).
+      expect(ids.slice(0, 2)).toEqual(['gpt-5.5', 'gpt-5.3-codex-spark']);
     });
 
     it('updates only explicitly configured subscription context windows', async () => {
@@ -983,7 +1042,8 @@ describe('ModelDiscoveryService', () => {
 
       const result = await service.getModelsForAgent('tenant-1');
 
-      expect(result.map((model) => [model.id, model.contextWindow])).toEqual([
+      // Snapshot rows come first; the curated top-up follows and is not under test here.
+      expect(result.slice(0, 3).map((model) => [model.id, model.contextWindow])).toEqual([
         ['gpt-5.6-sol', 1050000],
         ['gpt-5.6-terra', 272000],
         ['gpt-5.6-luna', 272000],
@@ -2770,8 +2830,9 @@ describe('ModelDiscoveryService', () => {
       const result = await service.getModelsForAgent('agent-1');
 
       // Both entries kept — one with inferred api_key, one with inferred subscription
-      expect(result).toHaveLength(2);
-      expect(result.map((m) => m.authType).sort()).toEqual(['api_key', 'subscription']);
+      const sonnet = result.filter((m) => m.id === 'claude-sonnet-4');
+      expect(sonnet).toHaveLength(2);
+      expect(sonnet.map((m) => m.authType).sort()).toEqual(['api_key', 'subscription']);
     });
   });
 
