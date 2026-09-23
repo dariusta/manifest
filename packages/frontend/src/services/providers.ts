@@ -156,7 +156,7 @@ const PROVIDER_UI: Record<string, ProviderUIOverlay> = {
   },
   anthropic: {
     initial: 'A',
-    subtitle: 'Claude Opus 5, Sonnet 5, Fable 5.1, Haiku 4.5',
+    subtitle: 'Claude Opus 5.5, Opus 5, Sonnet 5, Fable 5.1, Haiku 4.5',
     supportsSubscription: true,
     subscriptionLabel: 'Claude Max / Pro subscription',
     subscriptionAuthMode: 'popup_paste',
@@ -482,7 +482,7 @@ const PROVIDER_UI: Record<string, ProviderUIOverlay> = {
   },
   xai: {
     initial: 'X',
-    subtitle: 'Grok 4.5, Grok 4.3, Grok Build',
+    subtitle: 'Grok 4.7, Grok 4.6, Grok 4.5, Grok Build',
     supportsSubscription: true,
     subscriptionLabel: 'Grok subscription',
     subscriptionAuthMode: 'popup_oauth',

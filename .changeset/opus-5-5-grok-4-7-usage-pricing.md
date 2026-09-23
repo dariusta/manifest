@@ -1,0 +1,5 @@
+---
+'manifest': patch
+---
+
+Add Claude Opus 5.5 and Grok 4.7 to the subscription catalogs, and price every usage-based model. The curated subscription picker is literal, so `claude-opus-5` never offered `claude-opus-5-5` to a Claude Max connection and `grok-4.6` never offered `grok-4.7` to a Grok subscription; both now have their own entries (Opus 5.5 at 1M context). On the usage-based side, OpenAI's `/v1/models` lists `chat-latest`, `gpt-5-chat-latest`, `gpt-5.1-chat-latest`, `gpt-5-codex`, `gpt-4o-search-preview` and `gpt-4o-mini-search-preview` but returns no pricing and none of them exist in models.dev or OpenRouter any more, so they surfaced with no rate — they are now priced from OpenAI's official model pages. `gpt-live-1` is billed per minute of voice session, not per token, and is filtered out with the other non-chat models. NVIDIA's hosted NIM catalog is metered in free developer credits and models.dev lists every NIM entry at $0/$0, so the fetcher now pins the same price instead of leaving the long tail models.dev has not picked up unpriced.

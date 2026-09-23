@@ -313,6 +313,7 @@ describe('buildSubscriptionFallbackModels', () => {
       'claude-sonnet-4',
       'claude-haiku-4',
       'claude-opus-5',
+      'claude-opus-5-5',
       'claude-sonnet-5',
     ]);
     expect(result.every((model) => model.provider === 'anthropic')).toBe(true);
@@ -326,8 +327,19 @@ describe('buildSubscriptionFallbackModels', () => {
 
     expect(result.find((model) => model.id === 'claude-opus-4')?.contextWindow).toBe(200000);
     expect(result.find((model) => model.id === 'claude-opus-5')?.contextWindow).toBe(1000000);
+    expect(result.find((model) => model.id === 'claude-opus-5-5')?.contextWindow).toBe(1000000);
     expect(result.find((model) => model.id === 'claude-sonnet-5')?.contextWindow).toBe(1000000);
     expect(result.every((model) => model.contextWindowSource === 'subscription_config')).toBe(true);
+  });
+
+  it('offers grok-4.7 to Grok subscription connections at the 500k window', () => {
+    // xai matches knownModels by prefix, but the curated picker list is
+    // literal — grok-4.6 never expands to 4.7, so Grok Build's newest model
+    // was missing whenever live discovery was unavailable.
+    const result = buildSubscriptionFallbackModels('xai');
+
+    expect(result.map((model) => model.id)).toEqual(['grok-4.7', 'grok-4.6', 'grok-4.5']);
+    expect(result.find((model) => model.id === 'grok-4.7')?.contextWindow).toBe(500000);
   });
 
   it('applies moonshot per-model context windows without prefix bleed', () => {

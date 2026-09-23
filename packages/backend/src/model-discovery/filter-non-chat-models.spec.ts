@@ -101,6 +101,20 @@ describe('filterNonChatModels', () => {
       const result = filterNonChatModels(models, 'openai');
       expect(result.map((m) => m.id)).toEqual(['gpt-4o-search-preview']);
     });
+
+    it('filters GPT-Live voice-session models for openai', () => {
+      // gpt-live-1 is billed per minute of voice session, not per token, and
+      // is not a /v1/chat/completions model — it must not reach the picker
+      // as an unpriced usage-based option.
+      const models = [
+        makeModel('gpt-live-1'),
+        makeModel('gpt-live-1-mini'),
+        makeModel('gpt-live-transcribe'),
+        makeModel('gpt-4o'),
+      ];
+      const result = filterNonChatModels(models, 'openai');
+      expect(result.map((m) => m.id)).toEqual(['gpt-4o']);
+    });
   });
 
   describe('OpenAI subscription patterns', () => {

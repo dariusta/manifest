@@ -1633,6 +1633,29 @@ describe('ProviderModelFetcherService', () => {
       ]);
       expect(result.every((m) => m.provider === 'nvidia')).toBe(true);
     });
+
+    it('prices the hosted NIM catalog as free, matching models.dev', async () => {
+      // integrate.api.nvidia.com is NVIDIA's developer catalog: it is metered
+      // in free trial credits, not per-token dollars, and models.dev lists
+      // every NIM entry at $0/$0. Models missing from models.dev/OpenRouter
+      // (43 of 58 on a real key) previously surfaced with no price at all.
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'nvidia/llama-3.1-nemotron-70b-instruct' },
+            { id: 'writer/palmyra-fin-70b-32k' },
+          ],
+        }),
+      });
+
+      const result = await service.fetch('nvidia', 'nvapi-test-key');
+      expect(result).toHaveLength(2);
+      for (const model of result) {
+        expect(model.inputPricePerToken).toBe(0);
+        expect(model.outputPricePerToken).toBe(0);
+      }
+    });
   });
 
   /* ── OpenAI-compatible providers use same parser ── */

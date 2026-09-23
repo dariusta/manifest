@@ -24,6 +24,9 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
       // claude-opus-4 / claude-haiku-4 prefixes above. claude-opus-5 is not —
       // the 5 generation dropped the 4.x prefix, so it needs its own entry.
       'claude-opus-5',
+      // Same story one step on: the curated picker list is literal (see
+      // buildSubscriptionFallbackModels), so 'claude-opus-5' never offers 5.5.
+      'claude-opus-5-5',
       'claude-sonnet-5',
     ]),
     subscriptionCapabilities: Object.freeze({
@@ -32,6 +35,7 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
         'claude-fable-5-1': 1000000,
         'claude-opus-4-8': 1000000,
         'claude-opus-5': 1000000,
+        'claude-opus-5-5': 1000000,
         'claude-sonnet-5': 1000000,
       }),
       supportsPromptCaching: true,
@@ -297,7 +301,7 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     supportsSubscription: true as const,
     subscriptionLabel: 'Grok subscription',
     subscriptionAuthMode: 'popup_oauth' as const,
-    knownModels: Object.freeze(['grok-4.6', 'grok-4.5']),
+    knownModels: Object.freeze(['grok-4.7', 'grok-4.6', 'grok-4.5']),
     subscriptionCapabilities: Object.freeze({
       maxContextWindow: 500000,
       supportsPromptCaching: true,

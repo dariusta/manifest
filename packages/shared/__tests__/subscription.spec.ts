@@ -75,6 +75,14 @@ describe('getSubscriptionProviderConfig', () => {
     );
   });
 
+  it('lists claude-opus-5-5 explicitly — the curated catalog is literal, not prefix-expanded', () => {
+    // buildSubscriptionFallbackModels maps knownModels 1:1 into the picker, so
+    // the 'claude-opus-5' entry alone never offers Opus 5.5 to a Claude Max
+    // connection even though prefix matching would accept it at request time.
+    const config = getSubscriptionProviderConfig('anthropic');
+    expect(config?.knownModels).toContain('claude-opus-5-5');
+  });
+
   it('lists claude-fable-5-1 explicitly — it is a distinct model, not a fable-5 variant', () => {
     const config = getSubscriptionProviderConfig('anthropic');
     const knownModels = config?.knownModels ?? [];
@@ -272,7 +280,9 @@ describe('getSubscriptionProviderConfig', () => {
 
   it('publishes the curated xai subscription models', () => {
     const config = getSubscriptionProviderConfig('xai');
-    expect(config?.knownModels).toEqual(['grok-4.6', 'grok-4.5']);
+    // xai matches by prefix, so grok-4.6 does not cover grok-4.7 — each
+    // generation Grok Build offers needs its own entry.
+    expect(config?.knownModels).toEqual(['grok-4.7', 'grok-4.6', 'grok-4.5']);
   });
 
   it('returns config for gemini', () => {
@@ -468,7 +478,7 @@ describe('getSubscriptionKnownModels', () => {
 
   it('returns known models for xai', () => {
     const models = getSubscriptionKnownModels('xai');
-    expect(models).toEqual(['grok-4.6', 'grok-4.5']);
+    expect(models).toEqual(['grok-4.7', 'grok-4.6', 'grok-4.5']);
   });
 
   it('returns null for unsupported providers', () => {
@@ -533,6 +543,7 @@ describe('getSubscriptionCapabilities', () => {
     expect(caps?.modelContextWindows?.['claude-opus-4-8']).toBe(1000000);
     // Opus 5 is 1M too; without an entry it would fall back to the 200k default.
     expect(caps?.modelContextWindows?.['claude-opus-5']).toBe(1000000);
+    expect(caps?.modelContextWindows?.['claude-opus-5-5']).toBe(1000000);
   });
 
   it('returns capabilities for OpenAI subscription', () => {

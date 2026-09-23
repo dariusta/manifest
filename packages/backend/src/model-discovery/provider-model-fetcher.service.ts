@@ -399,6 +399,21 @@ function parseOpenAIDedupedById(body: unknown, provider: string): DiscoveredMode
   });
 }
 
+/**
+ * NVIDIA's hosted NIM catalog (integrate.api.nvidia.com) is metered in free
+ * developer credits, not per-token dollars, and models.dev lists every NIM
+ * entry at $0/$0. Pin the same price here so catalog entries that models.dev
+ * and OpenRouter have not picked up (most of the long tail) are still priced
+ * instead of surfacing as usage-based models with no rate at all.
+ */
+function parseNvidiaNim(body: unknown, provider: string): DiscoveredModel[] {
+  return parseOpenAIDedupedById(body, provider).map((m) => ({
+    ...m,
+    inputPricePerToken: 0,
+    outputPricePerToken: 0,
+  }));
+}
+
 /* ── Universal non-chat model filter ── */
 
 /**
@@ -414,8 +429,10 @@ export const UNIVERSAL_NON_CHAT_RE =
  * Keyed by the config key used in PROVIDER_CONFIGS.
  */
 export const PROVIDER_NON_CHAT: Record<string, RegExp> = {
+  // `^gpt-live-` covers GPT-Live voice sessions (billed per minute, not per
+  // token) so they never surface as unpriced chat models.
   openai:
-    /(?:moderation|davinci|babbage|^text-|realtime|-transcribe|^sora|^gpt-3\.5-turbo-instruct|audio|^chatgpt-image|^gpt-image-|search-api)/i,
+    /(?:moderation|davinci|babbage|^text-|realtime|-transcribe|^sora|^gpt-3\.5-turbo-instruct|audio|^chatgpt-image|^gpt-image-|search-api|^gpt-live-)/i,
   'openai-subscription':
     /(?:moderation|davinci|babbage|^text-|realtime|-transcribe|^sora|audio|^chatgpt-image|^gpt-image-)/i,
   // `flash-lite-preview-MM-YYYY` matches deprecated dated snapshots
@@ -964,7 +981,7 @@ export const PROVIDER_CONFIGS: Record<string, FetcherConfig> = {
   nvidia: {
     endpoint: 'https://integrate.api.nvidia.com/v1/models',
     buildHeaders: bearerHeaders,
-    parse: parseOpenAIDedupedById,
+    parse: parseNvidiaNim,
   },
   xai: {
     endpoint: 'https://api.x.ai/v1/models',
