@@ -9,6 +9,7 @@ import { INestApplication } from '@nestjs/common';
 import * as http from 'http';
 import request from 'supertest';
 import { createTestApp, TEST_API_KEY } from './helpers';
+import { toLocalSqlTimestamp } from '../src/common/utils/postgres-sql';
 
 /* ------------------------------------------------------------------ */
 /*  Mock LLM server                                                    */
@@ -156,8 +157,13 @@ describe('ST-03: Seed agent data', () => {
       [agentId],
     );
 
-    // Use a timestamp 60s in the past so period boundary comparisons are safe
-    const past = new Date(Date.now() - 60_000).toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+    // 60s in the past so period boundary comparisons are safe, and stamped in
+    // LOCAL time because that is what the pg driver writes into
+    // `timestamp without time zone` and what `computePeriodBoundaries` compares
+    // against. A UTC stamp (`toISOString`) put the row ahead of `periodEnd` by
+    // the process TZ offset, so ST-07/ST-08 read a consumption of 0 and only
+    // passed where the process happened to run at UTC.
+    const past = toLocalSqlTimestamp(new Date(Date.now() - 60_000));
 
     await ds.query(
       `INSERT INTO agent_messages (id, tenant_id, agent_id, timestamp, status, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, agent_name, user_id)
