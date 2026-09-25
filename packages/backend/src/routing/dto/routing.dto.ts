@@ -147,6 +147,13 @@ export class RenameProviderKeyDto {
   authType?: 'api_key' | 'subscription';
 }
 
+/** Query for the click-to-reveal key endpoint. Same auth scoping as rename. */
+export class RevealProviderKeyQueryDto {
+  @IsOptional()
+  @IsIn(AUTH_TYPES)
+  authType?: 'api_key' | 'subscription';
+}
+
 export class ReorderProviderKeysDto {
   @IsArray()
   @ArrayMinSize(1)

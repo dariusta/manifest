@@ -538,6 +538,23 @@ tr:hover .connection-label-cell__edit,
   white-space: nowrap;
 }
 
+/* Click-to-reveal: the masked prefix is a button, not a dead input. */
+button.provider-detail__key-reveal {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.05em;
+}
+button.provider-detail__key-reveal:disabled {
+  cursor: progress;
+}
+button.provider-detail__input.provider-detail__key-reveal {
+  cursor: pointer;
+}
+
 .provider-detail__action {
   width: auto;
   margin-top: 4px;
