@@ -15,6 +15,21 @@ function providerIssuer(providerId: string): string {
 }
 
 /**
+ * `account` belongs to Better Auth, which installs it through its own migration
+ * run — separate from, and not ordered against, the TypeORM chain. On a pristine
+ * database the TypeORM migrations run first (`migrationsRun` at boot), so the
+ * table legitimately does not exist yet and there is nothing to backfill:
+ * Better Auth 1.7 creates `issuer` itself. Only a populated 1.6 table needs this
+ * migration, so probe before touching it rather than assuming ownership.
+ */
+async function accountTableExists(queryRunner: QueryRunner): Promise<boolean> {
+  const rows = (await queryRunner.query(
+    `SELECT 1 FROM information_schema.tables WHERE table_name = 'account'`,
+  )) as unknown[];
+  return rows.length > 0;
+}
+
+/**
  * Better Auth 1.7 keys accounts by (issuer, accountId). Populated 1.6 tables
  * must be backfilled before the new required column and compound index can be
  * installed; applying the generated schema directly is intentionally blocked.
@@ -24,6 +39,8 @@ function providerIssuer(providerId: string): string {
  */
 export class AddBetterAuthAccountIssuer1802200000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
+    if (!(await accountTableExists(queryRunner))) return;
+
     await queryRunner.query(`ALTER TABLE "account" ADD COLUMN IF NOT EXISTS "issuer" text`);
 
     // Credential identity is the linked user's stable id in Better Auth 1.7.
@@ -79,6 +96,8 @@ export class AddBetterAuthAccountIssuer1802200000000 implements MigrationInterfa
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    if (!(await accountTableExists(queryRunner))) return;
+
     await queryRunner.query(`DROP INDEX IF EXISTS "account_issuer_accountId_uidx"`);
     await queryRunner.query(`ALTER TABLE "account" DROP COLUMN IF EXISTS "issuer"`);
   }

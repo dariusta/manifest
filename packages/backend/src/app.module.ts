@@ -46,7 +46,7 @@ const serveStaticImports = frontendPath
       ServeStaticModule.forRoot({
         rootPath: frontendPath,
         renderPath: '/__serve_static_never_match',
-        exclude: ['/api/{*path}', '/v1/{*path}', '/v1beta/{*path}'],
+        exclude: ['/api/{*path}', '/v1/{*path}', '/v1beta/{*path}', '/upload/{*path}'],
         serveStaticOptions: {
           maxAge: ONE_YEAR_S * 1000,
           immutable: true,

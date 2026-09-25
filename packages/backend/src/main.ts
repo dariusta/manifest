@@ -15,6 +15,7 @@ import {
   bodyParserErrorHandler,
   createProxyBodyBudgetMiddleware,
 } from './common/middleware/body-parser-limits';
+import { UPLOAD_SESSION_PREFIX } from './routing/gemini-native/google-native-wire';
 import {
   PIVOT_CLAIM_CLOUD_ORIGIN,
   applyPivotClaimCors,
@@ -221,8 +222,17 @@ export async function bootstrap() {
   // `/v1beta` is the Gemini-native proxy surface and carries the same inline
   // media payloads, so it needs the proxy budget too — Express matches `/v1`
   // as a path segment and would otherwise leave it on the small API parser.
-  const PROXY_PREFIXES = ['/v1', '/v1beta'];
+  // `/upload/v1beta` is the Gemini Files API. Its handshake leg is JSON like
+  // the rest of the surface, but the byte-transfer leg is raw media, so it
+  // needs both parsers below and the proxy budget in front of them.
+  const PROXY_PREFIXES = ['/v1', '/v1beta', '/upload/v1beta'];
   expressApp.use(PROXY_PREFIXES, createProxyBodyBudgetMiddleware());
+  // The resumable-upload byte leg carries video/mp4, image/png, application/pdf
+  // — never JSON. `express.raw` with `type: '*/*'` claims it first and hands the
+  // controller a Buffer; body-parser's `_body` flag then makes `express.json`
+  // below skip it, so the media is relayed unmodified rather than 400ing on the
+  // first non-UTF8 byte.
+  expressApp.use(UPLOAD_SESSION_PREFIX, express.raw({ type: '*/*', limit: PROXY_BODY_LIMIT }));
   expressApp.use(PROXY_PREFIXES, express.json({ limit: PROXY_BODY_LIMIT }));
   expressApp.use(PROXY_PREFIXES, express.urlencoded({ extended: true, limit: PROXY_BODY_LIMIT }));
   expressApp.use(express.json({ limit: API_BODY_LIMIT }));

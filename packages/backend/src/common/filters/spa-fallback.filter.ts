@@ -5,7 +5,7 @@ import { readFileSync } from 'fs';
 import { resolveFrontendDir } from '../utils/frontend-path';
 import { rewriteOgTags } from '../utils/og-rewrite';
 
-const NON_SPA_PREFIXES = ['/api/', '/otlp/', '/v1/', '/v1beta/', '/assets/'];
+const NON_SPA_PREFIXES = ['/api/', '/otlp/', '/v1/', '/v1beta/', '/upload/', '/assets/'];
 
 @Catch(NotFoundException)
 export class SpaFallbackFilter implements ExceptionFilter {

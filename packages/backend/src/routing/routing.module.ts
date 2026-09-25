@@ -5,6 +5,7 @@ import { ModelDiscoveryModule } from '../model-discovery/model-discovery.module'
 import { OtlpModule } from '../otlp/otlp.module';
 import { RoutingCoreModule } from './routing-core/routing-core.module';
 import { ProxyModule } from './proxy/proxy.module';
+import { GoogleNativeModule } from './gemini-native/google-native.module';
 import { OAuthModule } from './oauth/oauth.module';
 import { CustomProviderModule } from './custom-provider/custom-provider.module';
 import { ResolveModule } from './resolve/resolve.module';
@@ -51,6 +52,7 @@ import { InstallMetadata } from '../entities/install-metadata.entity';
     NotificationsModule,
     OtlpModule,
     ProxyModule,
+    GoogleNativeModule,
     OAuthModule,
     CustomProviderModule,
     ResolveModule,
