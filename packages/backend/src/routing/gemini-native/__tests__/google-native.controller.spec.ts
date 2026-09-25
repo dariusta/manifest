@@ -5,7 +5,10 @@ jest.mock('crypto', () => ({
 
 import { Logger } from '@nestjs/common';
 import type { Request, Response as ExpressResponse } from 'express';
-import { GoogleNativeController } from '../google-native.controller';
+import {
+  GoogleNativeController,
+  unwrapInteractionsErrorEnvelope,
+} from '../google-native.controller';
 import type {
   GoogleNativeForward,
   GoogleNativeService,
@@ -439,6 +442,45 @@ describe('GoogleNativeController', () => {
       expect(res._ended).toBe(true);
     });
 
+    // The Interactions API wraps a failure in a one-element array, which the
+    // SDK's error schema rejects. The caller must see `{ error }`, not `[{ error }]`.
+    it('unwraps the one-element error array the Interactions API returns', async () => {
+      const envelope =
+        '[{ "error": { "code": 403, "message": "insufficient scopes", "status": "PERMISSION_DENIED" } }]';
+      service.forward.mockResolvedValue(
+        upstream({ status: 403, body: streamOf(envelope.slice(0, 20), envelope.slice(20)) }),
+      );
+      const res = makeRes();
+
+      await controller.createInteraction(makeReq({ body: {} }), res);
+
+      expect(JSON.parse(Buffer.concat(res._chunks).toString())).toEqual({
+        error: { code: 403, message: 'insufficient scopes', status: 'PERMISSION_DENIED' },
+      });
+    });
+
+    it('relays an error object verbatim when Google already sent one', async () => {
+      service.forward.mockResolvedValue(
+        upstream({ status: 400, body: streamOf('{"error":{"code":400}}') }),
+      );
+      const res = makeRes();
+
+      await controller.listFiles(makeReq(), res);
+
+      expect(Buffer.concat(res._chunks).toString()).toBe('{"error":{"code":400}}');
+    });
+
+    it('does not reshape a success body, even one that is an array', async () => {
+      service.forward.mockResolvedValue(
+        upstream({ status: 200, body: streamOf('[{"error":{}}]') }),
+      );
+      const res = makeRes();
+
+      await controller.listFiles(makeReq(), res);
+
+      expect(Buffer.concat(res._chunks).toString()).toBe('[{"error":{}}]');
+    });
+
     it('closes a stream that dies mid-body instead of throwing at the filter', async () => {
       const logSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       let sentFirst = false;
@@ -467,5 +509,29 @@ describe('GoogleNativeController', () => {
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('upstream reset'));
       logSpy.mockRestore();
     });
+  });
+});
+
+describe('unwrapInteractionsErrorEnvelope', () => {
+  const raw = (text: string) => Buffer.from(text);
+
+  it('unwraps the single error object out of the array', () => {
+    const out = unwrapInteractionsErrorEnvelope(
+      raw('  [{ "error": { "code": 403, "message": "no" } }]  '),
+    );
+    expect(JSON.parse(out.toString())).toEqual({ error: { code: 403, message: 'no' } });
+  });
+
+  it.each([
+    ['an object already', '{"error":{"code":400}}'],
+    ['a list of several errors', '[{"error":{}},{"error":{}}]'],
+    ['an array whose element carries no error key', '[{"message":"nope"}]'],
+    ['an array of a non-object', '["nope"]'],
+    ['an array of null', '[null]'],
+    ['an empty array', '[]'],
+    ['JSON that fails to parse', '[ oops'],
+  ])('leaves %s untouched', (_label, text) => {
+    const body = raw(text);
+    expect(unwrapInteractionsErrorEnvelope(body)).toBe(body);
   });
 });

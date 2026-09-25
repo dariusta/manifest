@@ -261,6 +261,13 @@ export class GoogleNativeController {
    * byte. Streaming and non-streaming take the same path on purpose: an SSE
    * answer must reach the caller chunk by chunk, and buffering it here would
    * turn agentic mode's incremental steps into one late blob.
+   *
+   * One deliberate exception: an error body. The Interactions API answers a
+   * failure as a **one-element JSON array** (`[{ error }]`), while every other
+   * Gemini surface — and the SDK's own error schema — uses a bare `{ error }`
+   * object. The SDK raises `ResponseValidationError` on the array and the
+   * caller sees "response did not match schema" instead of Google's message.
+   * Unwrap that one shape; everything else passes through untouched.
    */
   private async relay(
     upstream: { status: number; headers: Headers; body: ReadableStream<Uint8Array> | null },
@@ -279,11 +286,21 @@ export class GoogleNativeController {
       return;
     }
     const reader = upstream.body.getReader();
+    // An error status is small and already complete, so it can be buffered and
+    // reshaped. A 2xx is not: it may be an open SSE stream, and buffering it
+    // would hold the whole answer before the caller saw a byte.
+    const reshape = upstream.status >= 400;
+    const buffered: Buffer[] = [];
     try {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        res.write(Buffer.from(value));
+        const chunk = Buffer.from(value);
+        if (reshape) {
+          buffered.push(chunk);
+          continue;
+        }
+        res.write(chunk);
         // SSE only reaches the caller live if each chunk is flushed; Node
         // buffers writes on a compressed/keep-alive socket otherwise.
         res.flush?.();
@@ -294,7 +311,34 @@ export class GoogleNativeController {
       // SDK see a truncated stream.
       this.logger.warn(`Gemini-native relay interrupted: ${String(err)}`);
     } finally {
+      if (reshape && buffered.length > 0) {
+        res.write(unwrapInteractionsErrorEnvelope(Buffer.concat(buffered)));
+      }
       res.end();
     }
   }
+}
+
+/**
+ * `[{ "error": {...} }]` -> `{ "error": {...} }`, for an error body only.
+ *
+ * Returns the bytes unchanged unless the whole body is a JSON array whose
+ * single element is an object carrying `error`. A truncated body, a list of
+ * several errors, or anything that is not JSON stays as Google sent it — a
+ * reshape that guesses would be worse than the mismatch it fixes.
+ */
+export function unwrapInteractionsErrorEnvelope(body: Buffer): Buffer {
+  const text = body.toString('utf8').trim();
+  if (!text.startsWith('[')) return body;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Truncated or non-JSON: relay what Google sent rather than guessing.
+    return body;
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 1) return body;
+  const only: unknown = parsed[0];
+  if (typeof only !== 'object' || only === null || !('error' in only)) return body;
+  return Buffer.from(JSON.stringify(only));
 }
