@@ -11,6 +11,7 @@ const disconnectProviderMock = vi.fn().mockResolvedValue({});
 const revokeOpenaiOAuthMock = vi.fn().mockResolvedValue(undefined);
 const renameProviderKeyMock = vi.fn().mockResolvedValue({});
 const reorderProviderKeysMock = vi.fn().mockResolvedValue([]);
+const revealProviderKeyMock = vi.fn().mockResolvedValue({ apiKey: 'sk-ant-api03-revealed-secret' });
 
 vi.mock('../../src/services/api.js', () => ({
   connectProvider: (...args: unknown[]) => connectProviderMock(...args),
@@ -18,6 +19,7 @@ vi.mock('../../src/services/api.js', () => ({
   revokeOpenaiOAuth: (...args: unknown[]) => revokeOpenaiOAuthMock(...args),
   renameProviderKey: (...args: unknown[]) => renameProviderKeyMock(...args),
   reorderProviderKeys: (...args: unknown[]) => reorderProviderKeysMock(...args),
+  revealProviderKey: (...args: unknown[]) => revealProviderKeyMock(...args),
 }));
 
 vi.mock('../../src/services/provider-utils.js', () => ({
@@ -205,10 +207,43 @@ describe('ProviderKeyForm', () => {
   });
 
   describe('connected view aria-labels', () => {
+    it('reveals the single connected key when its masked value is clicked', async () => {
+      const def = makeProviderDef({ id: 'openai', name: 'OpenAI' });
+      const { container, findByText } = mount({
+        provDef: def,
+        connected: true,
+        providers: [
+          {
+            id: 'p1',
+            provider: 'openai',
+            auth_type: 'api_key',
+            is_active: true,
+            has_api_key: true,
+            key_prefix: 'sk-old-',
+            label: 'Default',
+            priority: 0,
+            region: null,
+            connected_at: '2026-04-27',
+          },
+        ],
+      });
+      const masked = container.querySelector(
+        'button[aria-label="Current API key (masked)"]',
+      ) as HTMLButtonElement;
+      fireEvent.click(masked);
+      expect(await findByText('sk-ant-api03-revealed-secret')).toBeDefined();
+      expect(revealProviderKeyMock).toHaveBeenCalledWith(
+        'test-agent',
+        'openai',
+        'Default',
+        'api_key',
+      );
+    });
+
     it('labels the masked input "Current API key (masked)" for an api-key credential', () => {
       const def = makeProviderDef({ id: 'openai', name: 'OpenAI' });
       const { container } = mount({ provDef: def, connected: true, isSubMode: false });
-      const disabledInput = container.querySelector('input[disabled]');
+      const disabledInput = container.querySelector('button[aria-label^="Current"]');
       expect(disabledInput!.getAttribute('aria-label')).toBe('Current API key (masked)');
     });
 
@@ -219,7 +254,7 @@ describe('ProviderKeyForm', () => {
         supportsSubscription: true,
       });
       const { container } = mount({ provDef: def, connected: true, isSubMode: true });
-      const disabledInput = container.querySelector('input[disabled]');
+      const disabledInput = container.querySelector('button[aria-label^="Current"]');
       expect(disabledInput!.getAttribute('aria-label')).toBe('Current setup token (masked)');
     });
 
@@ -231,7 +266,7 @@ describe('ProviderKeyForm', () => {
         subscriptionCredentialKind: 'api-key',
       });
       const { container } = mount({ provDef: def, connected: true, isSubMode: true });
-      const disabledInput = container.querySelector('input[disabled]');
+      const disabledInput = container.querySelector('button[aria-label^="Current"]');
       expect(disabledInput!.getAttribute('aria-label')).toBe('Current API key (masked)');
     });
   });
@@ -875,8 +910,8 @@ describe('ProviderKeyForm', () => {
       });
       // Header still says "API Key" (singular).
       expect(container.querySelector('.provider-detail__label')!.textContent).toBe('API Key');
-      // The legacy disabled key input is rendered; there's no <ul role=list>.
-      expect(container.querySelector('input[disabled]')).toBeDefined();
+      // The masked key is rendered as a click-to-reveal button; there's no <ul role=list>.
+      expect(container.querySelector('button[aria-label="Current API key (masked)"]')).toBeDefined();
       expect(container.querySelector('ul[role="list"]')).toBeNull();
     });
 
@@ -996,6 +1031,37 @@ describe('ProviderKeyForm', () => {
         'api_key',
       );
       expect(onUpdate).toHaveBeenCalled();
+    });
+
+    it('clicking a masked key reveals it and clicking again hides it', async () => {
+      const def = makeProviderDef({ id: 'anthropic', name: 'Anthropic' });
+      const { container, findByText, queryByText } = mount({
+        provDef: def,
+        connected: true,
+        providers: [
+          makeProvider({ id: 'p1', provider: 'anthropic', label: '1k startup creds', key_prefix: 'sk-ant-a' }),
+          makeProvider({ id: 'p2', provider: 'anthropic', label: 'mimic-main', key_prefix: 'sk-ant-a' }),
+        ],
+      });
+      const reveal = container.querySelector(
+        'button[aria-label="Reveal key 1k startup creds"]',
+      ) as HTMLButtonElement;
+      expect(reveal.textContent).toContain('sk-ant-a');
+      fireEvent.click(reveal);
+
+      expect(await findByText('sk-ant-api03-revealed-secret')).toBeDefined();
+      expect(revealProviderKeyMock).toHaveBeenCalledWith(
+        'test-agent',
+        'anthropic',
+        '1k startup creds',
+        'api_key',
+      );
+
+      fireEvent.click(
+        container.querySelector('button[aria-label="Hide key 1k startup creds"]') as HTMLButtonElement,
+      );
+      expect(queryByText('sk-ant-api03-revealed-secret')).toBeNull();
+      expect(revealProviderKeyMock).toHaveBeenCalledTimes(1);
     });
 
     it('does not render reorder controls — keys are equal credentials, not a chain', () => {

@@ -6,6 +6,7 @@ import {
   getComplexityStatus,
   renameProviderKey,
   reorderProviderKeys,
+  revealProviderKey,
   toggleComplexity,
 } from "../../src/services/api/routing";
 
@@ -144,6 +145,23 @@ describe("multi-key provider API helpers", () => {
     expect(call[0]).toMatch(/\/routing\/my-agent\/providers\/openai\/keys\/Personal/);
     expect(call[1]!.method).toBe("PATCH");
     expect(JSON.parse(call[1]!.body as string)).toEqual({ newLabel: "Home", authType: "api_key" });
+  });
+
+  it("revealProviderKey GETs the labeled reveal endpoint", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ apiKey: "sk-secret" }),
+    } as Response);
+
+    await expect(revealProviderKey("my-agent", "anthropic", "Personal", "api_key")).resolves.toEqual({
+      apiKey: "sk-secret",
+    });
+
+    const call = vi.mocked(fetch).mock.calls[0]!;
+    expect(call[0]).toMatch(
+      /\/routing\/my-agent\/providers\/anthropic\/keys\/Personal\/reveal\?authType=api_key/,
+    );
   });
 
   it("reorderProviderKeys posts the labels array via PUT", async () => {

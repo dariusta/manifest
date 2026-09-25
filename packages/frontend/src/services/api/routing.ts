@@ -112,6 +112,24 @@ export function renameProviderKey(
   );
 }
 
+/** Fetch the decrypted key for one labeled provider credential. */
+export function revealProviderKey(
+  agentName: string,
+  provider: string,
+  label: string,
+  authType?: AuthType,
+) {
+  return fetchJson<{ apiKey: string }>(
+    routingPath(
+      agentName,
+      `providers/${encodeURIComponent(provider)}/keys/${encodeURIComponent(label)}/reveal`,
+    ),
+    authType ? { authType } : undefined,
+    // A revealed secret must never come back from the GET cache.
+    { cache: false },
+  );
+}
+
 export function reorderProviderKeys(
   agentName: string,
   provider: string,

@@ -604,8 +604,8 @@ describe('ProviderSelectModal', () => {
       auth_type: 'api_key',
     };
     openApiKey('openai', [noPrefix]);
-    const maskedInput = screen.getByLabelText('Current API key (masked)') as HTMLInputElement;
-    expect(maskedInput.value).toContain('••••••••••••');
+    const masked = screen.getByLabelText('Current API key (masked)');
+    expect(masked.textContent).toContain('••••••••••••');
   });
 
   describe('subscription detail views', () => {

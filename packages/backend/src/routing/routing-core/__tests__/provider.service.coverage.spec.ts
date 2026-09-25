@@ -8,6 +8,7 @@ import { HeaderTier } from '../../../entities/header-tier.entity';
 import type { Repository } from 'typeorm';
 import type { RoutingCacheService } from '../routing-cache.service';
 import type { ModelPricingCacheService } from '../../../model-prices/model-pricing-cache.service';
+import { encrypt, getEncryptionSecret } from '../../../common/utils/crypto.util';
 
 const route = (provider: string, model: string): ModelRoute =>
   ({ provider, authType: 'api_key', model }) as ModelRoute;
@@ -141,6 +142,58 @@ describe('ProviderService — coverage completion', () => {
       await svc.renameKey('agent-1', 'tenant-1', 'openai', 'api_key', 'Old', 'New');
       expect(specRepo.save).toHaveBeenCalled();
       expect(headerTierRepo.save).toHaveBeenCalled();
+    });
+  });
+
+  describe('revealKey', () => {
+    const previous = process.env['MANIFEST_ENCRYPTION_KEY'];
+
+    beforeAll(() => {
+      process.env['MANIFEST_ENCRYPTION_KEY'] = 'unit-test-encryption-key-1234567890';
+    });
+    afterAll(() => {
+      if (previous === undefined) delete process.env['MANIFEST_ENCRYPTION_KEY'];
+      else process.env['MANIFEST_ENCRYPTION_KEY'] = previous;
+    });
+
+    it('decrypts the key matching the label within the tenant', async () => {
+      providerRepo.find.mockResolvedValueOnce([
+        provRow({ id: 'other', label: 'Work', api_key_encrypted: 'nope' }),
+        provRow({
+          id: 'mine',
+          label: 'Personal',
+          api_key_encrypted: encrypt('sk-real-value', getEncryptionSecret()),
+        }),
+      ]);
+      await expect(svc.revealKey('tenant-1', 'openai', 'api_key', 'personal')).resolves.toBe(
+        'sk-real-value',
+      );
+      expect(providerRepo.find).toHaveBeenCalledWith({
+        where: { tenant_id: 'tenant-1', provider: 'openai', auth_type: 'api_key' },
+      });
+    });
+
+    it('throws when the label is not in this tenant', async () => {
+      providerRepo.find.mockResolvedValueOnce([]);
+      await expect(svc.revealKey('tenant-1', 'openai', 'api_key', 'Missing')).rejects.toThrow(
+        'Provider key not found',
+      );
+    });
+
+    it('throws when the row stores no key', async () => {
+      providerRepo.find.mockResolvedValueOnce([provRow({ label: 'Default', api_key_encrypted: null })]);
+      await expect(svc.revealKey('tenant-1', 'ollama', 'local', 'Default')).rejects.toThrow(
+        'no stored key',
+      );
+    });
+
+    it('throws when the ciphertext cannot be decrypted', async () => {
+      providerRepo.find.mockResolvedValueOnce([
+        provRow({ label: 'Default', api_key_encrypted: 'not-valid-ciphertext' }),
+      ]);
+      await expect(svc.revealKey('tenant-1', 'openai', 'api_key', 'Default')).rejects.toThrow(
+        'could not be decrypted',
+      );
     });
   });
 

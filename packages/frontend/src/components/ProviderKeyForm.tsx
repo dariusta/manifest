@@ -17,6 +17,7 @@ import {
   connectProvider,
   disconnectProvider,
   renameProviderKey,
+  revealProviderKey,
   revokeOpenaiOAuth,
   type AuthType,
   type RoutingProvider,
@@ -404,14 +405,16 @@ const ProviderKeyForm: Component<ProviderKeyFormProps> = (props) => {
           <label class="provider-detail__label">{fieldLabel()}</label>
           <Show when={!props.editing()}>
             <div class="provider-detail__key-row">
-              <input
-                class="provider-detail__input provider-detail__input--disabled"
-                type="text"
-                value={props.getKeyPrefixDisplay(props.selectedAuthType())}
-                disabled
-                aria-label={
+              <RevealedKey
+                masked={props.getKeyPrefixDisplay(props.selectedAuthType())}
+                agentName={props.agentName}
+                provId={props.provId}
+                label={activeKeys()[0]?.label}
+                authType={props.selectedAuthType()}
+                ariaLabel={
                   isApiKeyCredential() ? 'Current API key (masked)' : 'Current setup token (masked)'
                 }
+                disabled={props.busy()}
               />
               <button
                 class="btn btn--outline btn--sm"
@@ -787,6 +790,59 @@ export const AddAnotherKeyAction: Component<AddAnotherKeyActionProps> = (props) 
   );
 };
 
+interface RevealedKeyProps {
+  masked: string;
+  agentName: string;
+  provId: string;
+  label: string | undefined;
+  authType: AuthType;
+  ariaLabel: string;
+  disabled: boolean;
+}
+
+/** Masked key that reveals its plaintext on click and hides again on a second click. */
+const RevealedKey: Component<RevealedKeyProps> = (props) => {
+  const [value, setValue] = createSignal<string | null>(null);
+  const [pending, setPending] = createSignal(false);
+
+  const reveal = async () => {
+    if (!props.label || pending()) return;
+    setPending(true);
+    try {
+      const { apiKey } = await revealProviderKey(
+        props.agentName,
+        props.provId,
+        props.label,
+        props.authType,
+      );
+      setValue(apiKey);
+    } catch {
+      toast.error('Could not reveal this key');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      class="provider-detail__input provider-detail__input--disabled provider-detail__key-reveal"
+      disabled={props.disabled || pending() || !props.label}
+      aria-label={value() ? props.ariaLabel.replace('(masked)', '(revealed)') : props.ariaLabel}
+      title={value() ? 'Click to hide' : 'Click to reveal'}
+      onClick={() => {
+        if (value()) {
+          setValue(null);
+          return;
+        }
+        void reveal();
+      }}
+    >
+      {value() ?? props.masked}
+    </button>
+  );
+};
+
 interface KeyChainViewProps {
   provDef: ProviderDef;
   provId: string;
@@ -810,6 +866,26 @@ interface KeyChainViewProps {
 const KeyChainView: Component<KeyChainViewProps> = (props) => {
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
+  const [revealed, setRevealed] = createSignal<Record<string, string>>({});
+  const [revealingId, setRevealingId] = createSignal<string | null>(null);
+
+  const reveal = async (k: RoutingProvider) => {
+    if (revealed()[k.id] || revealingId()) return;
+    setRevealingId(k.id);
+    try {
+      const { apiKey } = await revealProviderKey(
+        props.agentName,
+        props.provId,
+        k.label,
+        props.authType(),
+      );
+      setRevealed((prev) => ({ ...prev, [k.id]: apiKey }));
+    } catch {
+      toast.error('Could not reveal this key');
+    } finally {
+      setRevealingId(null);
+    }
+  };
 
   const startRename = (k: RoutingProvider) => {
     setRenamingId(k.id);
@@ -854,13 +930,34 @@ const KeyChainView: Component<KeyChainViewProps> = (props) => {
                       <div style="font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                         {k.label}
                       </div>
-                      <div style="font-size: var(--font-size-xs); color: hsl(var(--muted-foreground));">
-                        {[
-                          k.key_prefix ? `${k.key_prefix}${'•'.repeat(12)}` : '••••••••••••',
-                          props.endpointRegionLabel(k.region),
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
+                      <div style="font-size: var(--font-size-xs); color: hsl(var(--muted-foreground)); display: flex; gap: 6px; min-width: 0;">
+                        <button
+                          type="button"
+                          class="provider-detail__key-reveal"
+                          style="font-size: inherit; color: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis;"
+                          disabled={props.busy() || revealingId() === k.id}
+                          aria-label={
+                            revealed()[k.id] ? `Hide key ${k.label}` : `Reveal key ${k.label}`
+                          }
+                          title={revealed()[k.id] ? 'Click to hide' : 'Click to reveal'}
+                          onClick={() => {
+                            if (revealed()[k.id]) {
+                              setRevealed((prev) => {
+                                const next = { ...prev };
+                                delete next[k.id];
+                                return next;
+                              });
+                              return;
+                            }
+                            void reveal(k);
+                          }}
+                        >
+                          {revealed()[k.id] ??
+                            (k.key_prefix ? `${k.key_prefix}${'•'.repeat(12)}` : '••••••••••••')}
+                        </button>
+                        <Show when={props.endpointRegionLabel(k.region)}>
+                          {(region) => <span style="flex-shrink: 0;">· {region()}</span>}
+                        </Show>
                       </div>
                     </div>
                     <button

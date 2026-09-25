@@ -32,6 +32,7 @@ describe('ProviderController', () => {
       upsertProvider: jest.fn().mockResolvedValue({ provider: {}, isNew: false }),
       removeProvider: jest.fn().mockResolvedValue({ notifications: 0 }),
       renameKey: jest.fn(),
+      revealKey: jest.fn(),
       reorderKeys: jest.fn(),
       deactivateAllProviders: jest.fn().mockResolvedValue(undefined),
       recalculateTiers: jest.fn().mockResolvedValue(undefined),
@@ -975,6 +976,43 @@ describe('ProviderController', () => {
         'subscription',
         'Default',
         'Renamed',
+      );
+    });
+  });
+
+  describe('revealProviderKey', () => {
+    it('returns the decrypted key for the named label', async () => {
+      mockProviderService.revealKey.mockResolvedValue('sk-ant-api03-secret');
+
+      const result = await controller.revealProviderKey(
+        mockCtx,
+        { agentName: 'test-agent', provider: 'anthropic', label: 'Personal' } as never,
+        {} as never,
+      );
+
+      expect(mockProviderService.revealKey).toHaveBeenCalledWith(
+        'tenant-1',
+        'anthropic',
+        'api_key',
+        'Personal',
+      );
+      expect(result).toEqual({ apiKey: 'sk-ant-api03-secret' });
+    });
+
+    it('forwards an explicit subscription auth type', async () => {
+      mockProviderService.revealKey.mockResolvedValue('sk-ant-oat-token');
+
+      await controller.revealProviderKey(
+        mockCtx,
+        { agentName: 'test-agent', provider: 'anthropic', label: 'Default' } as never,
+        { authType: 'subscription' } as never,
+      );
+
+      expect(mockProviderService.revealKey).toHaveBeenCalledWith(
+        'tenant-1',
+        'anthropic',
+        'subscription',
+        'Default',
       );
     });
   });

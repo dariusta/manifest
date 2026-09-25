@@ -28,6 +28,7 @@ import {
   RemoveProviderQueryDto,
   RenameProviderKeyDto,
   ReorderProviderKeysDto,
+  RevealProviderKeyQueryDto,
 } from './dto/routing.dto';
 import { QWEN_REGION_VALIDATION_MESSAGE, isQwenRegion } from './qwen-region';
 import { getSubscriptionEndpointRegionConfig } from './subscription-region';
@@ -195,6 +196,22 @@ export class ProviderController {
       priority: result.priority,
       region: result.region ?? null,
     };
+  }
+
+  @Get(':agentName/providers/:provider/keys/:label/reveal')
+  async revealProviderKey(
+    @TenantCtx() ctx: TenantContext,
+    @Param() params: AgentProviderKeyParamDto,
+    @Query() query: RevealProviderKeyQueryDto,
+  ) {
+    const agent = await this.resolveAgentService.resolve(ctx.tenantId, params.agentName);
+    const apiKey = await this.providerService.revealKey(
+      agent.tenant_id,
+      params.provider,
+      query.authType ?? 'api_key',
+      params.label,
+    );
+    return { apiKey };
   }
 
   @Patch(':agentName/providers/:provider/keys/:label')

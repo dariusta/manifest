@@ -593,6 +593,33 @@ export class ProviderService {
     return target;
   }
 
+  /**
+   * Decrypt and return one provider key for the dashboard's click-to-reveal.
+   * Session-scoped: the caller has already resolved the agent to this tenant,
+   * and the lookup is pinned to that tenant_id, so a foreign label cannot
+   * reach another workspace's ciphertext.
+   */
+  async revealKey(
+    tenantId: string,
+    provider: string,
+    authType: AuthType,
+    label: string,
+  ): Promise<string> {
+    const rows = await this.providerRepo.find({
+      where: { tenant_id: tenantId, provider, auth_type: authType },
+    });
+    const target = rows.find((r) => r.label.toLowerCase() === label.toLowerCase());
+    if (!target) throw new NotFoundException('Provider key not found');
+    if (!target.api_key_encrypted) {
+      throw new NotFoundException('This provider has no stored key to reveal');
+    }
+    try {
+      return decrypt(target.api_key_encrypted, getEncryptionSecret());
+    } catch {
+      throw new BadRequestException('Stored key could not be decrypted');
+    }
+  }
+
   async reorderKeys(
     agentId: string,
     tenantId: string,
