@@ -455,7 +455,7 @@ describe('GoogleNativeController', () => {
       await controller.createInteraction(makeReq({ body: {} }), res);
 
       expect(JSON.parse(Buffer.concat(res._chunks).toString())).toEqual({
-        error: { code: 403, message: 'insufficient scopes', status: 'PERMISSION_DENIED' },
+        error: { code: '403', message: 'insufficient scopes', status: 'PERMISSION_DENIED' },
       });
     });
 
@@ -519,7 +519,7 @@ describe('unwrapInteractionsErrorEnvelope', () => {
     const out = unwrapInteractionsErrorEnvelope(
       raw('  [{ "error": { "code": 403, "message": "no" } }]  '),
     );
-    expect(JSON.parse(out.toString())).toEqual({ error: { code: 403, message: 'no' } });
+    expect(JSON.parse(out.toString())).toEqual({ error: { code: '403', message: 'no' } });
   });
 
   it.each([

@@ -340,5 +340,14 @@ export function unwrapInteractionsErrorEnvelope(body: Buffer): Buffer {
   if (!Array.isArray(parsed) || parsed.length !== 1) return body;
   const only: unknown = parsed[0];
   if (typeof only !== 'object' || only === null || !('error' in only)) return body;
+  // `google.rpc.Status` numbers its `code`, but the SDK's interactions error
+  // schema types `code` as a string and rejects the integer — so the SDK cannot
+  // parse the error Google actually sends. Stringify a numeric code; the
+  // message, which is what the caller reads, is untouched.
+  const error = (only as { error: unknown }).error;
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code: unknown }).code;
+    if (typeof code === 'number') (error as { code: unknown }).code = String(code);
+  }
   return Buffer.from(JSON.stringify(only));
 }
