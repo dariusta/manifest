@@ -59,6 +59,7 @@ function createProviderService(): ProviderService {
     upsertProvider: jest.fn().mockResolvedValue({ provider: { id: 'p1' } }),
     recalculateTiers: jest.fn().mockResolvedValue(undefined),
     nextOAuthLabel: jest.fn().mockResolvedValue(undefined),
+    findSubscriptionLabel: jest.fn().mockResolvedValue(null),
   } as unknown as ProviderService;
 }
 

@@ -23,6 +23,7 @@ describe('KiroOauthController', () => {
 
     providerService = {
       removeProvider: jest.fn(),
+      findSubscriptionLabel: jest.fn().mockResolvedValue('Work'),
     } as unknown as jest.Mocked<ProviderService>;
 
     controller = new KiroOauthController(oauthService, resolveAgent, providerService);
@@ -80,6 +81,39 @@ describe('KiroOauthController', () => {
           region: 'eu-west-1',
         },
       );
+    });
+
+    it('passes a known reconnect label onto the device-flow options', async () => {
+      resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+      oauthService.startAuthorization.mockResolvedValue({ flowId: 'flow-2' } as never);
+
+      await controller.start(
+        'my-agent',
+        { tenantId: 'tenant-1', userId: 'user-1' } as never,
+        undefined,
+        undefined,
+        ' work ',
+      );
+
+      expect(oauthService.startAuthorization).toHaveBeenCalledWith('agent-id-1', 'tenant-1', 'user-1', {
+        reconnectLabel: 'Work',
+      });
+    });
+
+    it('rejects an unknown reconnect label before starting', async () => {
+      resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+      providerService.findSubscriptionLabel.mockResolvedValue(null);
+
+      await expect(
+        controller.start(
+          'my-agent',
+          { tenantId: 'tenant-1', userId: 'user-1' } as never,
+          undefined,
+          undefined,
+          'ghost',
+        ),
+      ).rejects.toThrow(HttpException);
+      expect(oauthService.startAuthorization).not.toHaveBeenCalled();
     });
 
     it('throws 400 when agentName is missing', async () => {

@@ -5,6 +5,7 @@ vi.mock('../../src/services/api.js', () => ({
 }));
 
 import {
+  clearConnectionTestResult,
   connectionTestResult,
   isConnectionTestRunning,
   runConnectionTest,
@@ -104,5 +105,16 @@ describe('connection test store', () => {
       status: 'failed',
       message: 'Test failed',
     });
+  });
+
+  it('clears a stored result and leaves an untested connection untouched', async () => {
+    mockTest.mockResolvedValueOnce(result({ connection_id: 'tp-clear' }));
+    await runConnectionTest('tp-clear');
+
+    clearConnectionTestResult('tp-clear');
+    clearConnectionTestResult('tp-never');
+
+    expect(connectionTestResult('tp-clear')).toBeUndefined();
+    expect(connectionTestResult('tp-never')).toBeUndefined();
   });
 });

@@ -38,6 +38,7 @@ describe('OpenaiOauthService', () => {
       upsertProvider,
       recalculateTiers: jest.fn().mockResolvedValue(undefined),
       nextOAuthLabel: jest.fn().mockResolvedValue(undefined),
+      findSubscriptionLabel: jest.fn().mockResolvedValue(null),
       getFreshSubscriptionCredential,
       withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
         getFreshSubscriptionCredential,

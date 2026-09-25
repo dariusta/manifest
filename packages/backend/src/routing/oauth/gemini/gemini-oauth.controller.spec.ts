@@ -31,6 +31,7 @@ describe('GeminiOauthController', () => {
 
     providerService = {
       removeProvider: jest.fn().mockResolvedValue({ notifications: [] }),
+      findSubscriptionLabel: jest.fn().mockResolvedValue('Work'),
     } as unknown as jest.Mocked<ProviderService>;
 
     configService = {
@@ -71,6 +72,7 @@ describe('GeminiOauthController', () => {
         'tenant-1',
         'http://localhost:3001',
         'user-1',
+        undefined,
         undefined,
       );
       expect(result).toEqual({ url: 'https://accounts.google.com/o/oauth2/v2/auth?...' });
@@ -157,6 +159,7 @@ describe('GeminiOauthController', () => {
         'https://manifest.example.com',
         'user-1',
         undefined,
+        undefined,
       );
     });
 
@@ -181,7 +184,54 @@ describe('GeminiOauthController', () => {
         'http://localhost:3001',
         'user-1',
         { googleCloudProjectId: 'my-cloud-project' },
+        undefined,
       );
+    });
+
+    it('keeps the Cloud project when reconnecting a known account', async () => {
+      resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+      oauthService.generateAuthorizationUrl.mockResolvedValue('https://accounts.google.com/auth');
+      const req = {
+        protocol: 'http',
+        get: jest.fn().mockReturnValue('localhost:3001'),
+      } as unknown as Request;
+
+      await controller.authorize(
+        'my-agent',
+        { tenantId: 'tenant-1', userId: 'user-1' } as never,
+        req,
+        'my-cloud-project',
+        ' work ',
+      );
+
+      expect(oauthService.generateAuthorizationUrl).toHaveBeenCalledWith(
+        'agent-id-1',
+        'tenant-1',
+        'http://localhost:3001',
+        'user-1',
+        { googleCloudProjectId: 'my-cloud-project' },
+        'Work',
+      );
+    });
+
+    it('rejects an unknown reconnect label before starting the flow', async () => {
+      resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+      providerService.findSubscriptionLabel.mockResolvedValue(null);
+      const req = {
+        protocol: 'http',
+        get: jest.fn().mockReturnValue('localhost:3001'),
+      } as unknown as Request;
+
+      await expect(
+        controller.authorize(
+          'my-agent',
+          { tenantId: 'tenant-1', userId: 'user-1' } as never,
+          req,
+          undefined,
+          'ghost',
+        ),
+      ).rejects.toThrow(HttpException);
+      expect(oauthService.generateAuthorizationUrl).not.toHaveBeenCalled();
     });
 
     it('rejects a numeric Google Cloud project number', async () => {

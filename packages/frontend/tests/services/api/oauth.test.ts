@@ -33,6 +33,13 @@ describe('oauth API client', () => {
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toContain('/api/v1/oauth/openai/authorize');
     expect(url).toContain('agentName=demo');
+    expect(url).not.toContain('label=');
+  });
+
+  it('getOpenaiOAuthUrl forwards a reconnect label', async () => {
+    const fetchMock = setupFetch({ url: 'https://example.com' });
+    await oauth.getOpenaiOAuthUrl('demo', 'Work');
+    expect(fetchMock.mock.calls[0][0] as string).toContain('label=Work');
   });
 
   it('getXaiOAuthUrl forwards agentName as a query param', async () => {
@@ -42,6 +49,13 @@ describe('oauth API client', () => {
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toContain('/api/v1/oauth/xai/authorize');
     expect(url).toContain('agentName=demo');
+    expect(url).not.toContain('label=');
+  });
+
+  it('getXaiOAuthUrl forwards a reconnect label', async () => {
+    const fetchMock = setupFetch({ url: 'https://auth.x.ai/oauth2/authorize?state=s' });
+    await oauth.getXaiOAuthUrl('demo', 'X Account');
+    expect(fetchMock.mock.calls[0][0] as string).toContain('label=X+Account');
   });
 
   it('submitXaiOAuthCallback POSTs code + state as JSON', async () => {
@@ -106,6 +120,15 @@ describe('oauth API client', () => {
     await oauth.startMinimaxOAuth('demo', 'cn');
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toContain('region=cn');
+    expect(url).not.toContain('label=');
+  });
+
+  it('startMinimaxOAuth forwards a reconnect label', async () => {
+    const fetchMock = setupFetch({ flowId: 'f1' });
+    await oauth.startMinimaxOAuth('demo', 'cn', 'CN Account');
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('region=cn');
+    expect(url).toContain('label=CN+Account');
   });
 
   it('pollMinimaxOAuth GETs /poll with the flowId', async () => {
@@ -165,6 +188,16 @@ describe('oauth API client', () => {
     expect(url).toContain('agentName=demo');
     expect(url).toContain('startUrl=https%3A%2F%2Forg.awsapps.com%2Fstart');
     expect(url).toContain('region=eu-west-1');
+    expect(url).not.toContain('label=');
+  });
+
+  it('startKiroOAuth forwards a trimmed reconnect label and omits a blank one', async () => {
+    const fetchMock = setupFetch({ flowId: 'f1' });
+    await oauth.startKiroOAuth('demo', { label: '  Work  ' });
+    expect(fetchMock.mock.calls[0][0] as string).toContain('label=Work');
+
+    await oauth.startKiroOAuth('demo', { label: '   ' });
+    expect(fetchMock.mock.calls[1][0] as string).not.toContain('label=');
   });
 
   it('pollKiroOAuth GETs /poll with the flowId', async () => {
@@ -252,6 +285,24 @@ describe('oauth API client', () => {
       expect(url).toContain('region=eu-west-1');
     });
 
+    it('forwards a reconnect label for minimax and kiro', async () => {
+      const fetchMock = setupFetch({
+        flowId: 'f1',
+        userCode: 'C',
+        verificationUri: 'https://v',
+        expiresAt: 0,
+        pollIntervalMs: 1000,
+      });
+      await oauth.getDeviceCodeApi('minimax').start('demo', { region: 'cn', label: 'CN Account' });
+      expect(fetchMock.mock.calls[0][0] as string).toContain('label=CN+Account');
+      expect(fetchMock.mock.calls[0][0] as string).toContain('region=cn');
+
+      await oauth.getDeviceCodeApi('kiro').start('demo', { label: ' Work ' });
+      const kiroUrl = fetchMock.mock.calls[1][0] as string;
+      expect(kiroUrl).toContain('label=Work');
+      expect(kiroUrl).not.toContain('region=');
+    });
+
     it('throws for a provider without a device-code flow', () => {
       expect(() => oauth.getDeviceCodeApi('openai')).toThrow('does not support device-code OAuth');
     });
@@ -265,8 +316,15 @@ describe('oauth API client', () => {
       state: 's',
     });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toContain('/api/v1/oauth/anthropic/authorize?agentName=my%20agent');
+    expect(url).toContain('/api/v1/oauth/anthropic/authorize?agentName=my+agent');
+    expect(url).not.toContain('label=');
     expect((init as RequestInit).method).toBe('POST');
+  });
+
+  it('startAnthropicOAuth forwards a reconnect label', async () => {
+    const fetchMock = setupFetch({ url: 'https://claude.ai/oauth/authorize?state=s', state: 's' });
+    await oauth.startAnthropicOAuth('demo', 'Darius Extra');
+    expect(fetchMock.mock.calls[0][0] as string).toContain('label=Darius+Extra');
   });
 
   it('submitAnthropicOAuth POSTs the code/state pair as JSON', async () => {
@@ -320,6 +378,27 @@ describe('oauth API client', () => {
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toContain('agentName=my-agent');
     expect(url).toContain('projectId=workspace-project');
+    expect(url).not.toContain('label=');
+  });
+
+  it('getGeminiOAuthUrl forwards a reconnect label', async () => {
+    const fetchMock = setupFetch({ url: 'https://accounts.google.com/o/oauth2/v2/auth' });
+    await oauth.getGeminiOAuthUrl('my-agent', undefined, 'Work');
+    expect(fetchMock.mock.calls[0][0] as string).toContain('label=Work');
+  });
+
+  it('getPopupOauthApi forwards a reconnect label for openai and gemini', async () => {
+    const fetchMock = setupFetch({ url: 'https://auth.example/oauth' });
+    await oauth.getPopupOauthApi('openai').getUrl('agent-1', { label: 'Work' });
+    expect(fetchMock.mock.calls[0][0] as string).toContain('label=Work');
+
+    await oauth.getPopupOauthApi('gemini').getUrl('agent-1', {
+      projectId: 'workspace-project',
+      label: 'Work',
+    });
+    const geminiUrl = fetchMock.mock.calls[1][0] as string;
+    expect(geminiUrl).toContain('projectId=workspace-project');
+    expect(geminiUrl).toContain('label=Work');
   });
 
   it('submitGeminiOAuthCallback POSTs code and state to the callback endpoint', async () => {

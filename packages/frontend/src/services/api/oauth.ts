@@ -5,6 +5,8 @@ export type MinimaxOAuthRegion = 'global' | 'cn';
 export interface KiroOAuthStartOptions {
   startUrl?: string;
   region?: string;
+  /** Existing account to overwrite. Absent for a new sign-in. */
+  label?: string;
 }
 
 export interface MinimaxOAuthStartResponse {
@@ -21,15 +23,17 @@ export interface MinimaxOAuthPollResponse {
   pollIntervalMs?: number;
 }
 
-export function getOpenaiOAuthUrl(agentName: string) {
+export function getOpenaiOAuthUrl(agentName: string, label?: string) {
   return fetchJson<{ url: string }>(`/oauth/openai/authorize`, {
     agentName,
+    label,
   });
 }
 
-export function getXaiOAuthUrl(agentName: string) {
+export function getXaiOAuthUrl(agentName: string, label?: string) {
   return fetchJson<{ url: string }>(`/oauth/xai/authorize`, {
     agentName,
+    label,
   });
 }
 
@@ -67,11 +71,19 @@ export function revokeXaiOAuth(agentName: string, label?: string) {
   );
 }
 
-export function startMinimaxOAuth(agentName: string, region: MinimaxOAuthRegion = 'global') {
-  return fetchMutate<MinimaxOAuthStartResponse>(
-    `/oauth/minimax/start?agentName=${encodeURIComponent(agentName)}&region=${encodeURIComponent(region)}`,
-    { method: 'POST' },
-  );
+export function startMinimaxOAuth(
+  agentName: string,
+  region: MinimaxOAuthRegion = 'global',
+  label?: string,
+) {
+  const params = new URLSearchParams({
+    agentName,
+    region,
+  });
+  if (label) params.set('label', label);
+  return fetchMutate<MinimaxOAuthStartResponse>(`/oauth/minimax/start?${params.toString()}`, {
+    method: 'POST',
+  });
 }
 
 export function pollMinimaxOAuth(flowId: string) {
@@ -93,8 +105,10 @@ export function startKiroOAuth(agentName: string, options: KiroOAuthStartOptions
   const params = new URLSearchParams({ agentName });
   const startUrl = options.startUrl?.trim();
   const region = options.region?.trim();
+  const label = options.label?.trim();
   if (startUrl) params.set('startUrl', startUrl);
   if (region) params.set('region', region);
+  if (label) params.set('label', label);
   return fetchMutate<MinimaxOAuthStartResponse>(`/oauth/kiro/start?${params.toString()}`, {
     method: 'POST',
   });
@@ -118,9 +132,11 @@ export interface AnthropicOAuthAuthorizeResponse {
   state: string;
 }
 
-export function startAnthropicOAuth(agentName: string) {
+export function startAnthropicOAuth(agentName: string, label?: string) {
+  const params = new URLSearchParams({ agentName });
+  if (label) params.set('label', label);
   return fetchMutate<AnthropicOAuthAuthorizeResponse>(
-    `/oauth/anthropic/authorize?agentName=${encodeURIComponent(agentName)}`,
+    `/oauth/anthropic/authorize?${params.toString()}`,
     { method: 'POST' },
   );
 }
@@ -157,10 +173,11 @@ export function revokeAnthropicOAuth(agentName: string, label?: string) {
   );
 }
 
-export function getGeminiOAuthUrl(agentName: string, projectId?: string) {
+export function getGeminiOAuthUrl(agentName: string, projectId?: string, label?: string) {
   return fetchJson<{ url: string }>(`/oauth/gemini/authorize`, {
     agentName,
     projectId,
+    label,
   });
 }
 
@@ -186,24 +203,28 @@ export function revokeGeminiOAuth(agentName: string, label?: string) {
  * right getUrl/submitCallback/revoke triplet based on the provider id.
  */
 export interface PopupOauthApi {
-  getUrl: (agentName: string, options?: { projectId?: string }) => Promise<{ url: string }>;
+  getUrl: (
+    agentName: string,
+    options?: { projectId?: string; label?: string },
+  ) => Promise<{ url: string }>;
   submitCallback: (code: string, state: string) => Promise<{ ok: boolean }>;
   revoke: (agentName: string, label?: string) => Promise<{ ok: boolean; notifications?: string[] }>;
 }
 
 const POPUP_OAUTH_PROVIDERS: Record<string, PopupOauthApi> = {
   openai: {
-    getUrl: (agentName) => getOpenaiOAuthUrl(agentName),
+    getUrl: (agentName, options) => getOpenaiOAuthUrl(agentName, options?.label),
     submitCallback: submitOpenaiOAuthCallback,
     revoke: revokeOpenaiOAuth,
   },
   gemini: {
-    getUrl: (agentName, options) => getGeminiOAuthUrl(agentName, options?.projectId),
+    getUrl: (agentName, options) =>
+      getGeminiOAuthUrl(agentName, options?.projectId, options?.label),
     submitCallback: submitGeminiOAuthCallback,
     revoke: revokeGeminiOAuth,
   },
   xai: {
-    getUrl: (agentName) => getXaiOAuthUrl(agentName),
+    getUrl: (agentName, options) => getXaiOAuthUrl(agentName, options?.label),
     submitCallback: submitXaiOAuthCallback,
     revoke: revokeXaiOAuth,
   },
@@ -226,7 +247,7 @@ export function getPopupOauthApi(providerId: string): PopupOauthApi {
 export interface DeviceCodeApi {
   start: (
     agentName: string,
-    options?: { region?: MinimaxOAuthRegion | string; startUrl?: string },
+    options?: { region?: MinimaxOAuthRegion | string; startUrl?: string; label?: string },
   ) => Promise<MinimaxOAuthStartResponse>;
   poll: (flowId: string) => Promise<MinimaxOAuthPollResponse>;
   revoke: (agentName: string, label?: string) => Promise<{ ok: boolean; notifications?: string[] }>;
@@ -236,7 +257,11 @@ export interface DeviceCodeApi {
 const DEVICE_CODE_PROVIDERS: Record<string, DeviceCodeApi> = {
   minimax: {
     start: (agentName, options) =>
-      startMinimaxOAuth(agentName, (options?.region as MinimaxOAuthRegion | undefined) ?? 'global'),
+      startMinimaxOAuth(
+        agentName,
+        (options?.region as MinimaxOAuthRegion | undefined) ?? 'global',
+        options?.label,
+      ),
     poll: pollMinimaxOAuth,
     revoke: revokeMinimaxOAuth,
     hasRegion: true,
@@ -246,10 +271,11 @@ const DEVICE_CODE_PROVIDERS: Record<string, DeviceCodeApi> = {
       const kiroOptions = {
         startUrl: options?.startUrl,
         region: typeof options?.region === 'string' ? options.region : undefined,
+        label: options?.label,
       };
       return startKiroOAuth(
         agentName,
-        kiroOptions.startUrl || kiroOptions.region ? kiroOptions : undefined,
+        kiroOptions.startUrl || kiroOptions.region || kiroOptions.label ? kiroOptions : undefined,
       );
     },
     poll: pollKiroOAuth,

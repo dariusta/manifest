@@ -67,6 +67,8 @@ export function buildKiroTokenUrl(baseUrl: string): string {
 export interface KiroAuthorizationOptions {
   startUrl?: string;
   region?: string;
+  /** Account label to overwrite. Absent for a new sign-in. */
+  reconnectLabel?: string;
 }
 
 export class KiroAuthorizationOptionsError extends Error {

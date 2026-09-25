@@ -26,6 +26,7 @@ function build() {
   } as unknown as ProviderKeyService;
   const providerService = {
     removeProvider: jest.fn().mockResolvedValue({ notifications: [] }),
+    findSubscriptionLabel: jest.fn().mockResolvedValue('X Account'),
   } as unknown as ProviderService;
   const configService = {
     get: jest.fn().mockReturnValue(undefined),
@@ -91,6 +92,8 @@ describe('XaiOauthController', () => {
         'tenant-1',
         'https://xai.example.com',
         'user-1',
+        undefined,
+        undefined,
       );
     });
 
@@ -103,7 +106,30 @@ describe('XaiOauthController', () => {
         'tenant-1',
         'https://api.example.com',
         'user-1',
+        undefined,
+        undefined,
       );
+    });
+
+    it('passes a known reconnect label and rejects an unknown one', async () => {
+      const { ctrl, oauth, providerService } = build();
+      (oauth.generateAuthorizationUrl as jest.Mock).mockResolvedValue('https://auth.x.ai/oauth?z');
+      await ctrl.authorize('demo-agent', ctx, buildRequest(), ' x account ');
+      expect(oauth.generateAuthorizationUrl).toHaveBeenCalledWith(
+        'agent-1',
+        'tenant-1',
+        'https://api.example.com',
+        'user-1',
+        undefined,
+        'X Account',
+      );
+
+      (providerService.findSubscriptionLabel as jest.Mock).mockResolvedValue(null);
+      (oauth.generateAuthorizationUrl as jest.Mock).mockClear();
+      await expect(ctrl.authorize('demo-agent', ctx, buildRequest(), 'ghost')).rejects.toBeInstanceOf(
+        HttpException,
+      );
+      expect(oauth.generateAuthorizationUrl).not.toHaveBeenCalled();
     });
 
     it('wraps service errors in a 503', async () => {

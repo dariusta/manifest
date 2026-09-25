@@ -22,6 +22,7 @@ describe('MinimaxOauthController', () => {
 
     providerService = {
       removeProvider: jest.fn().mockResolvedValue({ notifications: [] }),
+      findSubscriptionLabel: jest.fn().mockResolvedValue('CN Account'),
     } as unknown as jest.Mocked<ProviderService>;
 
     controller = new MinimaxOauthController(oauthService, resolveAgent, providerService);
@@ -48,8 +49,34 @@ describe('MinimaxOauthController', () => {
       'tenant-1',
       'cn',
       'user-1',
+      undefined,
     );
     expect(result.flowId).toBe('flow-1');
+  });
+
+  it('reconnects a known MiniMax account in the requested region', async () => {
+    resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+    oauthService.startAuthorization.mockResolvedValue({ flowId: 'flow-2' } as never);
+
+    await controller.start('my-agent', 'cn', { tenantId: 'tenant-1', userId: 'user-1' } as never, ' cn account ');
+
+    expect(oauthService.startAuthorization).toHaveBeenCalledWith(
+      'agent-id-1',
+      'tenant-1',
+      'cn',
+      'user-1',
+      'CN Account',
+    );
+  });
+
+  it('rejects an unknown MiniMax reconnect label before starting', async () => {
+    resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+    providerService.findSubscriptionLabel.mockResolvedValue(null);
+
+    await expect(
+      controller.start('my-agent', 'global', { tenantId: 'tenant-1', userId: 'user-1' } as never, 'ghost'),
+    ).rejects.toThrow(HttpException);
+    expect(oauthService.startAuthorization).not.toHaveBeenCalled();
   });
 
   it('throws 400 when agentName is missing', async () => {

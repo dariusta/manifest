@@ -5,6 +5,7 @@ import { ProviderService } from '../../routing-core/provider.service';
 import { ModelDiscoveryService } from '../../../model-discovery/model-discovery.service';
 import { scrubSecrets } from '../../../common/utils/secret-scrub';
 import { coordinateOAuthRefresh, oauthRefreshKey, subscriptionCredentialLock } from '../core';
+import { resolveStoredOrNextLabel } from '../core/reconnect-exchange';
 import {
   KIRO_CLIENT_NAME,
   KIRO_CLIENT_TYPE,
@@ -38,6 +39,8 @@ interface PendingKiroOAuth {
   /** Acting user, audit only (tenant_providers.created_by_user_id). */
   createdByUserId: string | null;
   region: string;
+  /** Account label to overwrite on success. Absent for a new sign-in. */
+  reconnectLabel?: string;
   expiresAt: number;
   pollIntervalMs: number;
 }
@@ -134,6 +137,7 @@ export class KiroOauthService {
       tenantId,
       createdByUserId: createdByUserId ?? null,
       region,
+      ...(options.reconnectLabel ? { reconnectLabel: options.reconnectLabel } : {}),
       expiresAt,
       pollIntervalMs,
     });
@@ -212,7 +216,20 @@ export class KiroOauthService {
       cs: pending.clientSecret,
       region: pending.region,
     };
-    const label = await this.providerService.nextOAuthLabel(pending.tenantId, 'kiro');
+    let label: string | undefined;
+    try {
+      label = await resolveStoredOrNextLabel(
+        this.providerService,
+        pending.tenantId,
+        'kiro',
+        pending.reconnectLabel,
+      );
+    } catch (err) {
+      return {
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Kiro login failed.',
+      };
+    }
     const { provider: savedProvider } = await this.providerService.upsertProvider(
       pending.agentId,
       pending.tenantId,
@@ -328,7 +345,7 @@ export class KiroOauthService {
 
   private resolveAuthorizationOptions(
     options: KiroAuthorizationOptions,
-  ): Required<KiroAuthorizationOptions> {
+  ): { region: string; startUrl: string } {
     return {
       region: normalizeKiroRegion(options.region ?? this.region),
       startUrl: normalizeKiroStartUrl(options.startUrl ?? this.startUrl),

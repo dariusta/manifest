@@ -14,6 +14,7 @@ import { ResolveAgentService } from '../../routing-core/resolve-agent.service';
 import { ProviderService } from '../../routing-core/provider.service';
 import { AnthropicOauthExchangeError, AnthropicOauthService } from './anthropic-oauth.service';
 import { optionalTrimmedStringQuery } from '../core/query-params';
+import { resolveReconnectLabel } from '../core/reconnect-label';
 
 @Controller('api/v1/oauth/anthropic')
 export class AnthropicOauthController {
@@ -31,12 +32,22 @@ export class AnthropicOauthController {
    * the authorization code for the user to paste into the SPA.
    */
   @Post('authorize')
-  async authorize(@Query('agentName') agentName: string, @TenantCtx() ctx: TenantContext) {
+  async authorize(
+    @Query('agentName') agentName: string,
+    @TenantCtx() ctx: TenantContext,
+    @Query('label') label?: string | string[],
+  ) {
     if (!agentName) {
       throw new HttpException('agentName query parameter is required', HttpStatus.BAD_REQUEST);
     }
     const agent = await this.resolveAgent.resolve(ctx.tenantId, agentName);
-    return this.oauthService.generateAuthorizationUrl(agent.id, agent.tenant_id);
+    const reconnectLabel = await resolveReconnectLabel(
+      this.providerService,
+      agent.tenant_id,
+      'anthropic',
+      label,
+    );
+    return this.oauthService.generateAuthorizationUrl(agent.id, agent.tenant_id, reconnectLabel);
   }
 
   /**

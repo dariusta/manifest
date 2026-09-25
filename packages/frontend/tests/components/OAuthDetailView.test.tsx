@@ -48,6 +48,16 @@ vi.mock('../../src/services/oauth-popup.js', () => ({
   monitorOAuthPopup: vi.fn(() => mockDisposeMonitor),
 }));
 
+vi.mock('../../src/services/connection-test-store.js', () => ({
+  connectionTestResult: (id: string) =>
+    id === 'k1' ? { status: 'needs_reconnect', message: 'Sign in again' } : undefined,
+  clearConnectionTestResult: (...args: unknown[]) => mockClearConnectionTest(args[0]),
+  isConnectionTestRunning: () => false,
+  runConnectionTest: () => Promise.resolve(),
+}));
+
+const mockClearConnectionTest = vi.fn();
+
 import OAuthDetailView from '../../src/components/OAuthDetailView';
 import type { ProviderDef } from '../../src/services/providers.js';
 import type { RoutingProvider } from '../../src/services/api.js';
@@ -187,6 +197,60 @@ describe('OAuthDetailView', () => {
     expect(screen.getByText('Accounts')).toBeDefined();
     expect(screen.getByText('Work account')).toBeDefined();
     expect(screen.getByText('Personal account')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Reconnect account Work account' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Reconnect account Personal account' })).toBeNull();
+  });
+
+  it('reconnects the named account instead of adding another', async () => {
+    mockGetOpenaiOAuthUrl.mockResolvedValue({
+      url: 'https://auth.openai.com/authorize?state=s1',
+    });
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue({ closed: false } as Window);
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    const { onUpdate } = renderView({ connected: true, activeKeys: keys });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+
+    await waitFor(() =>
+      expect(mockGetOpenaiOAuthUrl).toHaveBeenCalledWith('test-agent', { label: 'Work' }),
+    );
+    expect(openSpy).toHaveBeenCalled();
+    const started = (monitorOAuthPopup as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const handlers = started?.[1] as { onSuccess: () => void };
+    handlers.onSuccess();
+
+    expect(mockToastSuccess).toHaveBeenCalledWith('OpenAI account reconnected');
+    expect(mockClearConnectionTest).toHaveBeenCalledWith('k1');
+    expect(onUpdate).toHaveBeenCalled();
+    expect(screen.getByText('Accounts')).toBeDefined();
+    openSpy.mockRestore();
+  });
+
+  it('keeps the account list when a reconnect popup is blocked', async () => {
+    mockGetOpenaiOAuthUrl.mockResolvedValue({ url: 'https://auth.openai.com/authorize?state=s1' });
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderView({ connected: true, activeKeys: keys });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/Popup was blocked/));
+    });
+    expect(screen.getByText('Accounts')).toBeDefined();
+    expect(screen.queryByPlaceholderText(/localhost:1455/)).toBeNull();
+  });
+
+  it('keeps the account list when a reconnect start fails', async () => {
+    mockGetOpenaiOAuthUrl.mockRejectedValue(new Error('network'));
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderView({ connected: true, activeKeys: keys });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+
+    await waitFor(() => expect(mockGetOpenaiOAuthUrl).toHaveBeenCalled());
+    expect(screen.getByText('Accounts')).toBeDefined();
+    expect(screen.queryByPlaceholderText(/localhost:1455/)).toBeNull();
   });
 
   it('shows "Disconnect all" button in multi-key mode', () => {
@@ -244,7 +308,7 @@ describe('OAuthDetailView', () => {
     renderView({ connected: true, activeKeys: [makeKey()], addKeyOpen: true });
 
     await waitFor(() => {
-      expect(mockGetOpenaiOAuthUrl).toHaveBeenCalledWith('test-agent');
+      expect(mockGetOpenaiOAuthUrl).toHaveBeenCalledWith('test-agent', {});
     });
     expect(screen.getByPlaceholderText(/localhost:1455/)).toBeDefined();
   });
@@ -289,7 +353,7 @@ describe('OAuthDetailView', () => {
     fireEvent.click(screen.getByText('Log in with xAI'));
 
     await waitFor(() => {
-      expect(mockGetXaiOAuthUrl).toHaveBeenCalledWith('test-agent');
+      expect(mockGetXaiOAuthUrl).toHaveBeenCalledWith('test-agent', {});
     });
     expect(
       screen.getByPlaceholderText('Paste the xAI authorization code or callback URL'),

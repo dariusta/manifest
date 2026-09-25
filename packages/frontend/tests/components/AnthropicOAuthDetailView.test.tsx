@@ -29,6 +29,16 @@ vi.mock('../../src/services/toast-store.js', () => ({
   },
 }));
 
+vi.mock('../../src/services/connection-test-store.js', () => ({
+  connectionTestResult: (id: string) =>
+    id === 'k1' ? { status: 'needs_reconnect', message: 'Sign in again' } : undefined,
+  clearConnectionTestResult: (...args: unknown[]) => mockClearConnectionTest(args[0]),
+  isConnectionTestRunning: () => false,
+  runConnectionTest: () => Promise.resolve(),
+}));
+
+const mockClearConnectionTest = vi.fn();
+
 import AnthropicOAuthDetailView from '../../src/components/AnthropicOAuthDetailView';
 import type { ProviderDef } from '../../src/services/providers.js';
 import type { RoutingProvider } from '../../src/services/api.js';
@@ -75,14 +85,15 @@ const OAUTH_PAYLOAD = 'auth-code-123#state-xyz';
 function mockOpenPopup() {
   const replace = vi.fn();
   const close = vi.fn();
+  const location = { replace };
   const popup = {
     closed: false,
     opener: window,
     close,
-    location: { replace },
+    location,
   } as unknown as Window;
   const openSpy = vi.spyOn(window, 'open').mockReturnValue(popup);
-  return { popup, openSpy, replace, close };
+  return { popup, openSpy, replace, close, location };
 }
 
 describe('AnthropicOAuthDetailView', () => {
@@ -118,7 +129,7 @@ describe('AnthropicOAuthDetailView', () => {
     fireEvent.click(screen.getByText('Sign in with Claude'));
 
     await waitFor(() => {
-      expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent');
+      expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent', undefined);
     });
     expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
     expect(popup.opener).toBeNull();
@@ -451,6 +462,46 @@ describe('AnthropicOAuthDetailView — multi-key', () => {
     expect(screen.getByText('Accounts')).toBeDefined();
     expect(screen.getByText('Work')).toBeDefined();
     expect(screen.getByText('Personal')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Reconnect account Work' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Reconnect account Personal' })).toBeNull();
+  });
+
+  it('reconnects the named account instead of starting a new sign-in', async () => {
+    mockStartAnthropicOAuth.mockResolvedValue({
+      url: 'https://claude.ai/oauth/authorize?state=s',
+      state: 's',
+    });
+    mockSubmitAnthropicOAuth.mockResolvedValue({ ok: true });
+    const { location } = mockOpenPopup();
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    const { onUpdate } = renderMultiKeyView(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+
+    await waitFor(() =>
+      expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent', 'Work'),
+    );
+    expect(location.replace).toHaveBeenCalled();
+
+    const input = screen.getByPlaceholderText(/authorization code/i);
+    fireEvent.input(input, { target: { value: 'code#state' } });
+    fireEvent.click(screen.getByText('Add connection'));
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Anthropic account reconnected'));
+    expect(mockClearConnectionTest).toHaveBeenCalledWith('k1');
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it('keeps the account list when a reconnect start fails', async () => {
+    mockStartAnthropicOAuth.mockRejectedValue(new Error('network'));
+    const { close } = mockOpenPopup();
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderMultiKeyView(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(screen.getByText('Accounts')).toBeDefined();
+    expect(screen.getByText('Add another connection')).toBeDefined();
   });
 
   it('reveals the current authorization code when an account row is clicked', async () => {
@@ -669,7 +720,7 @@ describe('AnthropicOAuthDetailView — addKeyOpen effect', () => {
     renderViewWithAddKeyOpen();
 
     await waitFor(() => {
-      expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent');
+      expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent', undefined);
     });
     expect(screen.getByLabelText('Anthropic authorization code')).toBeDefined();
   });
@@ -688,7 +739,7 @@ describe('AnthropicOAuthDetailView — addKeyOpen effect', () => {
     await waitFor(() => {
       expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
     });
-    expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent');
+    expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent', undefined);
     expect(popup.opener).toBeNull();
     expect(replace).not.toHaveBeenCalled();
 
@@ -710,7 +761,7 @@ describe('AnthropicOAuthDetailView — addKeyOpen effect', () => {
 
     renderViewWithAddKeyOpen();
     await waitFor(() => {
-      expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent');
+      expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent', undefined);
     });
 
     Object.defineProperty(popup, 'closed', { value: true });

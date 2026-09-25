@@ -31,6 +31,7 @@ function createProviderService() {
   const recalculateTiers = jest.fn().mockResolvedValue(undefined);
   const recalculateTiersForUser = jest.fn().mockResolvedValue(undefined);
   const nextOAuthLabel = jest.fn().mockResolvedValue(undefined);
+  const findSubscriptionLabel = jest.fn().mockResolvedValue(null);
   const getFreshSubscriptionCredential = jest.fn().mockResolvedValue(null);
   return {
     svc: {
@@ -38,6 +39,7 @@ function createProviderService() {
       recalculateTiers,
       recalculateTiersForUser,
       nextOAuthLabel,
+      findSubscriptionLabel,
       getFreshSubscriptionCredential,
       withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
         getFreshSubscriptionCredential,
@@ -48,6 +50,7 @@ function createProviderService() {
     recalculateTiers,
     recalculateTiersForUser,
     nextOAuthLabel,
+    findSubscriptionLabel,
     getFreshSubscriptionCredential,
     withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
       getFreshSubscriptionCredential,
@@ -170,6 +173,55 @@ describe('OpenaiOauthService', () => {
       expect(providerService.recalculateTiersForUser).not.toHaveBeenCalled();
       // State is one-time-use.
       expect(svc.getPendingCount()).toBe(0);
+    });
+
+    it('overwrites the named account on reconnect instead of allocating a label', async () => {
+      providerService.findSubscriptionLabel.mockResolvedValue('Work');
+      fetchMock.mockResolvedValue(
+        mockResponse(200, { access_token: 'access-r', refresh_token: 'refresh-r', expires_in: 60 }),
+      );
+      const url = await svc.generateAuthorizationUrl(
+        'agent-1',
+        'tenant-1',
+        undefined,
+        'user-1',
+        undefined,
+        'Work',
+      );
+      const state = new URL(url).searchParams.get('state')!;
+
+      await svc.exchangeCode(state, 'auth-code');
+
+      expect(providerService.nextOAuthLabel).not.toHaveBeenCalled();
+      expect(providerService.upsertProvider).toHaveBeenCalledWith(
+        'agent-1',
+        'tenant-1',
+        'openai',
+        expect.stringContaining('"t":"access-r"'),
+        'subscription',
+        undefined,
+        'Work',
+        'user-1',
+      );
+    });
+
+    it('does not create a new account when the reconnect target was removed', async () => {
+      providerService.findSubscriptionLabel.mockResolvedValue(null);
+      fetchMock.mockResolvedValue(
+        mockResponse(200, { access_token: 'a', refresh_token: 'r', expires_in: 60 }),
+      );
+      const url = await svc.generateAuthorizationUrl(
+        'agent-1',
+        'tenant-1',
+        undefined,
+        null,
+        undefined,
+        'Work',
+      );
+      const state = new URL(url).searchParams.get('state')!;
+
+      await expect(svc.exchangeCode(state, 'auth-code')).rejects.toThrow('That account was removed');
+      expect(providerService.upsertProvider).not.toHaveBeenCalled();
     });
 
     it('does not route agents after discovery when the provider row is new', async () => {

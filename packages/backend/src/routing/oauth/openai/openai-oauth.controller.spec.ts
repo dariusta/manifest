@@ -31,6 +31,7 @@ describe('OpenaiOauthController', () => {
 
     providerService = {
       removeProvider: jest.fn().mockResolvedValue({ notifications: [] }),
+      findSubscriptionLabel: jest.fn().mockResolvedValue('Work'),
     } as unknown as jest.Mocked<ProviderService>;
 
     configService = {
@@ -68,6 +69,8 @@ describe('OpenaiOauthController', () => {
         'tenant-1',
         'http://localhost:3001',
         'user-1',
+        undefined,
+        undefined,
       );
       expect(result).toEqual({ url: 'https://auth.openai.com/oauth/...' });
     });
@@ -149,7 +152,54 @@ describe('OpenaiOauthController', () => {
         'tenant-1',
         'https://manifest.example.com',
         'user-1',
+        undefined,
+        undefined,
       );
+    });
+
+    it('passes a known reconnect label without clobbering flow context', async () => {
+      resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+      oauthService.generateAuthorizationUrl.mockResolvedValue('https://auth.openai.com/oauth/...');
+      const req = {
+        protocol: 'http',
+        get: jest.fn().mockReturnValue('localhost:3001'),
+      } as unknown as Request;
+
+      await controller.authorize(
+        'my-agent',
+        { tenantId: 'tenant-1', userId: 'user-1' } as never,
+        req,
+        ' work ',
+      );
+
+      expect(providerService.findSubscriptionLabel).toHaveBeenCalledWith('tenant-1', 'openai', 'work');
+      expect(oauthService.generateAuthorizationUrl).toHaveBeenCalledWith(
+        'agent-id-1',
+        'tenant-1',
+        'http://localhost:3001',
+        'user-1',
+        undefined,
+        'Work',
+      );
+    });
+
+    it('rejects an unknown reconnect label before starting the flow', async () => {
+      resolveAgent.resolve.mockResolvedValue({ id: 'agent-id-1', tenant_id: 'tenant-1' } as never);
+      providerService.findSubscriptionLabel.mockResolvedValue(null);
+      const req = {
+        protocol: 'http',
+        get: jest.fn().mockReturnValue('localhost:3001'),
+      } as unknown as Request;
+
+      await expect(
+        controller.authorize(
+          'my-agent',
+          { tenantId: 'tenant-1', userId: 'user-1' } as never,
+          req,
+          'ghost',
+        ),
+      ).rejects.toThrow(HttpException);
+      expect(oauthService.generateAuthorizationUrl).not.toHaveBeenCalled();
     });
   });
 

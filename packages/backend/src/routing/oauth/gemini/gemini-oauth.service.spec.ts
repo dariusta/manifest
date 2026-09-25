@@ -32,12 +32,14 @@ function createProviderService(): {
   upsertProvider: jest.Mock;
   recalculateTiers: jest.Mock;
   nextOAuthLabel: jest.Mock;
+  findSubscriptionLabel: jest.Mock;
   getFreshSubscriptionCredential: jest.Mock;
   withSubscriptionCredentialLock: jest.Mock;
 } {
   const upsertProvider = jest.fn().mockResolvedValue({ provider: { id: 'p1' } });
   const recalculateTiers = jest.fn().mockResolvedValue(undefined);
   const nextOAuthLabel = jest.fn().mockResolvedValue(undefined);
+  const findSubscriptionLabel = jest.fn().mockResolvedValue(null);
   const getFreshSubscriptionCredential = jest.fn().mockResolvedValue(null);
   const withSubscriptionCredentialLock = mockSubscriptionCredentialLock({
     getFreshSubscriptionCredential,
@@ -48,12 +50,14 @@ function createProviderService(): {
       upsertProvider,
       recalculateTiers,
       nextOAuthLabel,
+      findSubscriptionLabel,
       getFreshSubscriptionCredential,
       withSubscriptionCredentialLock,
     } as unknown as ProviderService,
     upsertProvider,
     recalculateTiers,
     nextOAuthLabel,
+    findSubscriptionLabel,
     getFreshSubscriptionCredential,
     withSubscriptionCredentialLock,
   };
@@ -228,6 +232,57 @@ describe('GeminiOauthService', () => {
       await svc.exchangeCode(state, 'auth-code');
 
       expect(codeAssist.onboard).toHaveBeenCalledWith('access-1', 'workspace-project');
+    });
+
+    it('reconnects a known account without dropping the stored Cloud project', async () => {
+      providerService.findSubscriptionLabel.mockResolvedValue('Work');
+      fetchMock.mockResolvedValue(
+        mockResponse(200, { access_token: 'access-r', refresh_token: 'refresh-r', expires_in: 60 }),
+      );
+      codeAssist.onboard.mockResolvedValue({ projectId: 'proj-456', tierId: 'free-tier' });
+
+      const url = await svc.generateAuthorizationUrl(
+        'agent-1',
+        'user-1',
+        undefined,
+        'user-1',
+        { googleCloudProjectId: 'workspace-project' },
+        'Work',
+      );
+      const state = new URL(url).searchParams.get('state')!;
+      await svc.exchangeCode(state, 'auth-code');
+
+      expect(codeAssist.onboard).toHaveBeenCalledWith('access-r', 'workspace-project');
+      expect(providerService.nextOAuthLabel).not.toHaveBeenCalled();
+      expect(providerService.upsertProvider).toHaveBeenCalledWith(
+        'agent-1',
+        'user-1',
+        'gemini',
+        expect.stringContaining('"u":"proj-456"'),
+        'subscription',
+        undefined,
+        'Work',
+        'user-1',
+      );
+    });
+
+    it('does not create a new Gemini account when the reconnect target was removed', async () => {
+      providerService.findSubscriptionLabel.mockResolvedValue(null);
+      fetchMock.mockResolvedValue(
+        mockResponse(200, { access_token: 'a', refresh_token: 'r', expires_in: 60 }),
+      );
+      const url = await svc.generateAuthorizationUrl(
+        'agent-1',
+        'user-1',
+        undefined,
+        null,
+        undefined,
+        'Work',
+      );
+      const state = new URL(url).searchParams.get('state')!;
+
+      await expect(svc.exchangeCode(state, 'auth-code')).rejects.toThrow('That account was removed');
+      expect(providerService.upsertProvider).not.toHaveBeenCalled();
     });
 
     it('stores providerId as gemini and authType as subscription', async () => {

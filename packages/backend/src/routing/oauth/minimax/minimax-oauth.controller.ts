@@ -12,6 +12,7 @@ import { isMinimaxRegion, MinimaxOauthService } from './minimax-oauth.service';
 import { ResolveAgentService } from '../../routing-core/resolve-agent.service';
 import { ProviderService } from '../../routing-core/provider.service';
 import { optionalTrimmedStringQuery } from '../core/query-params';
+import { resolveReconnectLabel } from '../core/reconnect-label';
 
 @Controller('api/v1/oauth/minimax')
 export class MinimaxOauthController {
@@ -26,6 +27,7 @@ export class MinimaxOauthController {
     @Query('agentName') agentName: string,
     @Query('region') region: string | undefined,
     @TenantCtx() ctx: TenantContext,
+    @Query('label') label?: string | string[],
   ) {
     if (!agentName) {
       throw new HttpException('agentName query parameter is required', HttpStatus.BAD_REQUEST);
@@ -39,12 +41,19 @@ export class MinimaxOauthController {
 
     const agent = await this.resolveAgent.resolve(ctx.tenantId, agentName);
     const selectedRegion = region && isMinimaxRegion(region) ? region : 'global';
+    const reconnectLabel = await resolveReconnectLabel(
+      this.providerService,
+      agent.tenant_id,
+      'minimax',
+      label,
+    );
     try {
       return await this.oauthService.startAuthorization(
         agent.id,
         agent.tenant_id,
         selectedRegion,
         ctx.userId,
+        reconnectLabel,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start MiniMax OAuth';

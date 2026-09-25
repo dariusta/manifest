@@ -21,6 +21,7 @@ import { ResolveAgentService } from '../../routing-core/resolve-agent.service';
 import { ProviderService } from '../../routing-core/provider.service';
 import { ProviderKeyService } from '../../routing-core/provider-key.service';
 import { optionalTrimmedStringQuery } from '../core/query-params';
+import { resolveReconnectLabel } from '../core/reconnect-label';
 
 @Controller('api/v1/oauth/gemini')
 export class GeminiOauthController {
@@ -46,6 +47,7 @@ export class GeminiOauthController {
     @TenantCtx() ctx: TenantContext,
     @Req() req: Request,
     @Query('projectId') projectId?: string | string[],
+    @Query('label') label?: string | string[],
   ) {
     if (!agentName) {
       throw new HttpException('agentName query parameter is required', HttpStatus.BAD_REQUEST);
@@ -62,6 +64,12 @@ export class GeminiOauthController {
         HttpStatus.BAD_REQUEST,
       );
     }
+    const reconnectLabel = await resolveReconnectLabel(
+      this.providerService,
+      agent.tenant_id,
+      'gemini',
+      label,
+    );
     try {
       const url = await this.oauthService.generateAuthorizationUrl(
         agent.id,
@@ -69,6 +77,7 @@ export class GeminiOauthController {
         backendUrl,
         ctx.userId,
         googleCloudProjectId ? { googleCloudProjectId } : undefined,
+        reconnectLabel,
       );
       return { url };
     } catch (err) {

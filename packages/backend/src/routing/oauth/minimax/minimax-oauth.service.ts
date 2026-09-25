@@ -10,6 +10,7 @@ import {
   subscriptionCredentialLock,
   type OAuthTokenBlob,
 } from '../core';
+import { resolveStoredOrNextLabel } from '../core/reconnect-exchange';
 import {
   MinimaxRegion,
   DEFAULT_REGION,
@@ -51,6 +52,8 @@ interface PendingMinimaxOAuth {
   createdByUserId: string | null;
   baseUrl: string;
   resourceUrl: string;
+  /** Account label to overwrite on success. Absent for a new sign-in. */
+  reconnectLabel?: string;
   expiresAt: number;
   pollIntervalMs: number;
 }
@@ -107,6 +110,7 @@ export class MinimaxOauthService {
     tenantId: string,
     region: MinimaxRegion = DEFAULT_REGION,
     createdByUserId?: string | null,
+    reconnectLabel?: string,
   ): Promise<MinimaxOAuthStartResult> {
     this.cleanupExpired();
     const verifier = randomBytes(32).toString('base64url');
@@ -153,6 +157,7 @@ export class MinimaxOauthService {
       createdByUserId: createdByUserId ?? null,
       baseUrl,
       resourceUrl,
+      ...(reconnectLabel ? { reconnectLabel } : {}),
       expiresAt,
       pollIntervalMs,
     });
@@ -228,7 +233,20 @@ export class MinimaxOauthService {
       e: toAbsoluteExpiryTimestamp(payload.expired_in),
       u: resourceUrl,
     };
-    const label = await this.providerService.nextOAuthLabel(pending.tenantId, 'minimax');
+    let label: string | undefined;
+    try {
+      label = await resolveStoredOrNextLabel(
+        this.providerService,
+        pending.tenantId,
+        'minimax',
+        pending.reconnectLabel,
+      );
+    } catch (err) {
+      return {
+        status: 'error',
+        message: err instanceof Error ? err.message : 'MiniMax OAuth failed. Please try again later.',
+      };
+    }
     const { provider: savedProvider } = await this.providerService.upsertProvider(
       pending.agentId,
       pending.tenantId,

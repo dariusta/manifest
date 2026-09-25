@@ -41,6 +41,15 @@ vi.mock('../../src/services/toast-store.js', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+const mockClearConnectionTest = vi.fn();
+vi.mock('../../src/services/connection-test-store.js', () => ({
+  connectionTestResult: (id: string) =>
+    id === 'k1' ? { status: 'needs_reconnect', message: 'Sign in again' } : undefined,
+  clearConnectionTestResult: (...args: unknown[]) => mockClearConnectionTest(args[0]),
+  isConnectionTestRunning: () => false,
+  runConnectionTest: () => Promise.resolve(),
+}));
+
 import DeviceCodeDetailView from '../../src/components/DeviceCodeDetailView';
 import {
   connectProvider,
@@ -241,6 +250,122 @@ describe('DeviceCodeDetailView — multi-key', () => {
     expect(screen.getByText('Accounts')).toBeDefined();
     expect(screen.getByText('Work')).toBeDefined();
     expect(screen.getByText('Personal')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Reconnect account Work' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Reconnect account Personal' })).toBeNull();
+  });
+
+  it('reconnects the named MiniMax account in its stored region', async () => {
+    vi.useFakeTimers();
+    try {
+      const api = await import('../../src/services/api.js');
+      const startMinimaxOAuth = api.startMinimaxOAuth as ReturnType<typeof vi.fn>;
+      const pollMinimaxOAuth = api.pollMinimaxOAuth as ReturnType<typeof vi.fn>;
+      const { toast } = await import('../../src/services/toast-store.js');
+      startMinimaxOAuth.mockResolvedValue({
+        flowId: 'f-reconnect',
+        userCode: 'ABCD-1234',
+        verificationUri: 'https://minimax.io/verify',
+        expiresAt: Date.now() + 60_000,
+        pollIntervalMs: 1000,
+      });
+      pollMinimaxOAuth.mockResolvedValue({ status: 'success' });
+      const openSpy = vi.spyOn(window, 'open').mockReturnValue({
+        closed: false,
+        opener: null,
+        location: { replace: vi.fn() },
+        close: vi.fn(),
+      } as unknown as Window);
+      const keys = [
+        makeKey({ id: 'k1', label: 'Work', region: 'cn' }),
+        makeKey({ id: 'k2', label: 'Personal' }),
+      ];
+      const { onUpdate } = renderMultiKeyMinimax(keys);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+
+      await vi.waitFor(() => {
+        expect(startMinimaxOAuth).toHaveBeenCalledWith('test-agent', {
+          label: 'Work',
+          region: 'cn',
+        });
+      });
+      expect(screen.getByText('Accounts')).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => {
+        expect(toast.success).toHaveBeenCalledWith('MiniMax account reconnected');
+      });
+      expect(mockClearConnectionTest).toHaveBeenCalledWith('k1');
+      expect(onUpdate).toHaveBeenCalled();
+      openSpy.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the account list when a reconnect popup is blocked', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    const keys = [
+      makeKey({ id: 'k1', label: 'Work', region: null }),
+      makeKey({ id: 'k2', label: 'Personal' }),
+    ];
+    renderMultiKeyMinimax(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+
+    const { toast } = await import('../../src/services/toast-store.js');
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/Popup was blocked/));
+    });
+    expect(screen.getByText('Accounts')).toBeDefined();
+  });
+
+  it('closes a reconnect popup that resolves after the view unmounts', async () => {
+    let resolveStart: (value: unknown) => void = () => {};
+    const api = await import('../../src/services/api.js');
+    const startMinimaxOAuth = api.startMinimaxOAuth as ReturnType<typeof vi.fn>;
+    startMinimaxOAuth.mockReturnValue(new Promise((resolve) => { resolveStart = resolve; }));
+    const close = vi.fn();
+    vi.spyOn(window, 'open').mockReturnValue({
+      closed: false,
+      opener: null,
+      close,
+      location: { replace: vi.fn() },
+    } as unknown as Window);
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    const view = renderMultiKeyMinimax(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+    await waitFor(() => expect(startMinimaxOAuth).toHaveBeenCalled());
+    view.unmount();
+    resolveStart({
+      flowId: 'late',
+      userCode: 'C',
+      verificationUri: 'https://minimax.io/verify',
+      expiresAt: Date.now() + 60_000,
+      pollIntervalMs: 1000,
+    });
+    await waitFor(() => expect(close).toHaveBeenCalled());
+  });
+
+  it('closes the popup and keeps the account list when a reconnect start fails', async () => {
+    const api = await import('../../src/services/api.js');
+    const startMinimaxOAuth = api.startMinimaxOAuth as ReturnType<typeof vi.fn>;
+    startMinimaxOAuth.mockRejectedValue(new Error('network'));
+    const close = vi.fn();
+    vi.spyOn(window, 'open').mockReturnValue({
+      closed: false,
+      opener: null,
+      close,
+      location: { replace: vi.fn() },
+    } as unknown as Window);
+    const keys = [makeKey({ id: 'k1', label: 'Work' }), makeKey({ id: 'k2', label: 'Personal' })];
+    renderMultiKeyMinimax(keys);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect account Work' }));
+
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(screen.getByText('Accounts')).toBeDefined();
+    expect(screen.queryByText(/authorization page/)).toBeNull();
   });
 
   it('rename flow: clicking Rename shows input and saving calls renameProviderKey', async () => {

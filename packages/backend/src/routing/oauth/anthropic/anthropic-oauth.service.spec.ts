@@ -29,6 +29,7 @@ function createProviderService() {
   const recalculateTiers = jest.fn().mockResolvedValue(undefined);
   const recalculateTiersForTenant = jest.fn().mockResolvedValue(undefined);
   const nextOAuthLabel = jest.fn().mockResolvedValue(undefined);
+  const findSubscriptionLabel = jest.fn().mockResolvedValue(null);
   const getFreshSubscriptionCredential = jest.fn().mockResolvedValue(null);
   return {
     svc: {
@@ -36,6 +37,7 @@ function createProviderService() {
       recalculateTiers,
       recalculateTiersForTenant,
       nextOAuthLabel,
+      findSubscriptionLabel,
       getFreshSubscriptionCredential,
       withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
         getFreshSubscriptionCredential,
@@ -46,6 +48,7 @@ function createProviderService() {
     recalculateTiers,
     recalculateTiersForTenant,
     nextOAuthLabel,
+    findSubscriptionLabel,
     getFreshSubscriptionCredential,
     withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
       getFreshSubscriptionCredential,
@@ -292,6 +295,42 @@ describe('AnthropicOauthService', () => {
         'Key 2',
         undefined,
       );
+    });
+
+    it('overwrites the named account on reconnect and does not allocate a new label', async () => {
+      providerService.findSubscriptionLabel.mockResolvedValue('Darius Extra');
+      fetchMock.mockResolvedValue(
+        mockResponse(200, { access_token: 'a3', refresh_token: 'r3', expires_in: 60 }),
+      );
+      const { state } = await svc.generateAuthorizationUrl('agent-1', 'tenant-1', 'Darius Extra');
+
+      await svc.exchangeCode(`reconnect#${state}`, undefined, 'agent-1', 'tenant-1', 'user-1');
+
+      expect(providerService.nextOAuthLabel).not.toHaveBeenCalled();
+      expect(providerService.upsertProvider).toHaveBeenCalledWith(
+        'agent-1',
+        'tenant-1',
+        'anthropic',
+        expect.stringContaining('"t":"a3"'),
+        'subscription',
+        undefined,
+        'Darius Extra',
+        'user-1',
+      );
+    });
+
+    it('does not create a new account when the reconnect target was removed', async () => {
+      providerService.findSubscriptionLabel.mockResolvedValue(null);
+      fetchMock.mockResolvedValue(
+        mockResponse(200, { access_token: 'a3', refresh_token: 'r3', expires_in: 60 }),
+      );
+      const { state } = await svc.generateAuthorizationUrl('agent-1', 'tenant-1', 'Darius Extra');
+
+      await expect(
+        svc.exchangeCode(`reconnect#${state}`, undefined, 'agent-1', 'tenant-1'),
+      ).rejects.toThrow('That account was removed');
+      expect(providerService.upsertProvider).not.toHaveBeenCalled();
+      expect(providerService.nextOAuthLabel).not.toHaveBeenCalled();
     });
 
     it('falls back to the latest pending state when the client posts a bare code', async () => {

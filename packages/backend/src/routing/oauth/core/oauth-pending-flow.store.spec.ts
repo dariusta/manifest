@@ -39,8 +39,75 @@ describe('OAuthPendingFlowStore', () => {
       'v1',
       'agent-1',
       'tenant-1',
+      null,
       new Date('2026-05-01T12:10:00Z'),
     ]);
+  });
+
+  it('round-trips a reconnect label onto the pending flow', async () => {
+    const { store, query } = buildStore();
+    query.mockResolvedValue([]);
+
+    await store.create(
+      'anthropic',
+      {
+        state: 's1',
+        verifier: 'v1',
+        agentId: 'agent-1',
+        tenantId: 'tenant-1',
+        reconnectLabel: 'Darius Extra',
+      },
+      600_000,
+    );
+
+    expect(query.mock.calls[2][1]).toEqual([
+      'anthropic',
+      's1',
+      'v1',
+      'agent-1',
+      'tenant-1',
+      'Darius Extra',
+      new Date('2026-05-01T12:10:00Z'),
+    ]);
+
+    query.mockResolvedValue([
+      {
+        provider: 'anthropic',
+        state: 's1',
+        code_verifier: 'v1',
+        agent_id: 'agent-1',
+        tenant_id: 'tenant-1',
+        reconnect_label: 'Darius Extra',
+        expires_at: new Date('2026-05-01T12:10:00Z'),
+      },
+    ]);
+    await expect(store.consume('anthropic', 's1', 'agent-1', 'tenant-1')).resolves.toEqual({
+      provider: 'anthropic',
+      state: 's1',
+      verifier: 'v1',
+      agentId: 'agent-1',
+      tenantId: 'tenant-1',
+      reconnectLabel: 'Darius Extra',
+      expiresAt: new Date('2026-05-01T12:10:00Z').getTime(),
+    });
+  });
+
+  it('omits a blank reconnect label when mapping a stored flow', async () => {
+    const { store, query } = buildStore();
+    query.mockResolvedValue([
+      {
+        provider: 'anthropic',
+        state: 's1',
+        code_verifier: 'v1',
+        agent_id: 'agent-1',
+        tenant_id: 'tenant-1',
+        reconnect_label: '',
+        expires_at: new Date('2026-05-01T12:10:00Z'),
+      },
+    ]);
+
+    const flow = await store.consume('anthropic', 's1', 'agent-1', 'tenant-1');
+    expect(flow).not.toHaveProperty('reconnectLabel');
   });
 
   it('consumes a pending flow scoped to the provider, state, agent, and tenant', async () => {

@@ -23,12 +23,14 @@ function createProviderService() {
   const upsertProvider = jest.fn().mockResolvedValue({ provider: { id: 'p1' } });
   const recalculateTiers = jest.fn().mockResolvedValue(undefined);
   const nextOAuthLabel = jest.fn().mockResolvedValue(undefined);
+  const findSubscriptionLabel = jest.fn().mockResolvedValue(null);
   const getFreshSubscriptionCredential = jest.fn().mockResolvedValue(null);
   return {
     svc: {
       upsertProvider,
       recalculateTiers,
       nextOAuthLabel,
+      findSubscriptionLabel,
       getFreshSubscriptionCredential,
       withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
         getFreshSubscriptionCredential,

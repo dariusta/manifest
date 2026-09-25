@@ -20,7 +20,9 @@ import {
 import { suggestNextProviderKeyLabel } from '../services/provider-key-labels.js';
 import { validateSubscriptionKey } from '../services/provider-utils.js';
 import { toast } from '../services/toast-store.js';
+import { clearConnectionTestResult } from '../services/connection-test-store.js';
 import { ConnectionTestButton, ConnectionTestResultLine } from './ConnectionTest.js';
+import { ReconnectAccountButton } from './ReconnectAccountButton.js';
 import Select from './Select.jsx';
 
 interface Props {
@@ -86,6 +88,8 @@ interface DeviceCodeFlow {
   verificationUri: string;
   expiresAt: number;
   pollIntervalMs: number;
+  /** Account whose row a successful poll should overwrite. Absent for a new sign-in. */
+  reconnectLabel?: string;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 2000;
@@ -107,8 +111,9 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
   const isKiro = () => props.provId === 'kiro';
   const isMultiKey = () => (props.activeKeys?.() ?? []).length > 1;
   const activeKeyLabels = () => (props.activeKeys?.() ?? []).map((k) => k.label);
-  const showConnectFlow = () => !props.connected() || addingAccount();
-  const showConnectedFlow = () => props.connected() && !addingAccount();
+  const showConnectFlow = () => !flow()?.reconnectLabel && (!props.connected() || addingAccount());
+  const showConnectedFlow = () =>
+    !!flow()?.reconnectLabel || (props.connected() && !addingAccount());
 
   // When "Add another key" is clicked in the header, launch a new device code flow.
   createEffect(() => {
@@ -154,7 +159,13 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
   let isDisposed = false;
   let activeFlowGeneration = 0;
 
-  const buildStartOptions = () => {
+  const buildStartOptions = (reconnect?: { label: string; region?: string | null }) => {
+    if (reconnect) {
+      return {
+        label: reconnect.label,
+        ...(reconnect.region ? { region: reconnect.region } : {}),
+      };
+    }
     if (api().hasRegion) {
       return { region: selectedRegion() };
     }
@@ -298,7 +309,15 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
 
       if (result.status === 'success') {
         clearPollTimer();
-        toast.success(`${props.provDef.name} subscription connected`);
+        if (latest.reconnectLabel) {
+          const connectionId = props
+            .activeKeys?.()
+            .find((key) => key.label === latest.reconnectLabel)?.id;
+          if (connectionId) clearConnectionTestResult(connectionId);
+          toast.success(`${props.provDef.name} account reconnected`);
+        } else {
+          toast.success(`${props.provDef.name} subscription connected`);
+        }
         setAddingAccount(false);
         setFlow(null);
         props.onUpdate();
@@ -327,8 +346,8 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
     }
   };
 
-  const handleStart = async () => {
-    const startOptions = buildStartOptions();
+  const handleStart = async (reconnect?: { label: string; region?: string | null }) => {
+    const startOptions = buildStartOptions(reconnect);
     if (startOptions === null) return;
     // Open the popup synchronously inside the click handler to keep the
     // user-gesture flag alive; without this, browsers block the post-await
@@ -356,7 +375,8 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
         return;
       }
       popup.location.replace(nextFlow.verificationUri);
-      setFlow(nextFlow);
+      setFlow({ ...nextFlow, ...(reconnect ? { reconnectLabel: reconnect.label } : {}) });
+      if (reconnect) setAddingAccount(false);
       schedulePoll(nextFlow.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS, flowGeneration);
     } catch {
       popup.close();
@@ -460,7 +480,7 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
                 <button
                   class="btn btn--primary subscription-detail__btn"
                   disabled={props.busy()}
-                  onClick={handleStart}
+                  onClick={() => void handleStart()}
                 >
                   <Show when={!props.busy()} fallback={<span class="spinner" />}>
                     Connect with {props.provDef.name}
@@ -561,6 +581,14 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
                             connectionId={k.id}
                             label={k.label}
                             busy={props.busy()}
+                          />
+                          <ReconnectAccountButton
+                            connectionId={k.id}
+                            label={k.label}
+                            busy={props.busy()}
+                            onReconnect={(label) =>
+                              void handleStart({ label, region: k.region })
+                            }
                           />
                           <button
                             class="btn btn--outline btn--sm"

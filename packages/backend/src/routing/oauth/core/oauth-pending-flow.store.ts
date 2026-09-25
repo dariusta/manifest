@@ -8,6 +8,11 @@ export interface OAuthPendingFlowInput {
   agentId: string;
   /** Tenant that owns the flow — the scope every lookup filters by. */
   tenantId: string;
+  /**
+   * Account label to overwrite on exchange. Absent for a new sign-in, which
+   * still allocates the next label. A reconnect must not fall through to that.
+   */
+  reconnectLabel?: string;
 }
 
 export interface OAuthPendingFlowRecord extends OAuthPendingFlowInput {
@@ -21,6 +26,7 @@ interface RawOAuthPendingFlow {
   code_verifier: string;
   agent_id: string;
   tenant_id: string;
+  reconnect_label: string | null;
   expires_at: Date | string;
 }
 
@@ -50,10 +56,18 @@ export class OAuthPendingFlowStore {
     await this.dataSource.query(
       `
         INSERT INTO "oauth_pending_flows"
-          ("provider", "state", "code_verifier", "agent_id", "tenant_id", "expires_at")
-        VALUES ($1, $2, $3, $4, $5, $6)
+          ("provider", "state", "code_verifier", "agent_id", "tenant_id", "reconnect_label", "expires_at")
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
       `,
-      [provider, input.state, input.verifier, input.agentId, input.tenantId, expiresAt],
+      [
+        provider,
+        input.state,
+        input.verifier,
+        input.agentId,
+        input.tenantId,
+        input.reconnectLabel ?? null,
+        expiresAt,
+      ],
     );
 
     return { provider, ...input, expiresAt: expiresAt.getTime() };
@@ -73,7 +87,7 @@ export class OAuthPendingFlowStore {
           AND "agent_id" = $3
           AND "tenant_id" = $4
           AND "expires_at" > NOW()
-        RETURNING "provider", "state", "code_verifier", "agent_id", "tenant_id", "expires_at"
+        RETURNING "provider", "state", "code_verifier", "agent_id", "tenant_id", "reconnect_label", "expires_at"
       `,
       [provider, state, agentId, tenantId],
     );
@@ -90,7 +104,7 @@ export class OAuthPendingFlowStore {
     await this.cleanupExpired(provider);
     const rows = (await this.dataSource.query(
       `
-        SELECT "provider", "state", "code_verifier", "agent_id", "tenant_id", "expires_at"
+        SELECT "provider", "state", "code_verifier", "agent_id", "tenant_id", "reconnect_label", "expires_at"
         FROM "oauth_pending_flows"
         WHERE "provider" = $1
           AND "agent_id" = $2
@@ -169,6 +183,7 @@ function mapRow(row: RawOAuthPendingFlow): OAuthPendingFlowRecord {
     verifier: row.code_verifier,
     agentId: row.agent_id,
     tenantId: row.tenant_id,
+    ...(row.reconnect_label ? { reconnectLabel: row.reconnect_label } : {}),
     expiresAt,
   };
 }

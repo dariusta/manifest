@@ -1468,6 +1468,31 @@ describe('ProviderService — route-only cleanup paths', () => {
       expect(label).toBe('Key 3');
     });
   });
+
+  describe('findSubscriptionLabel', () => {
+    it('returns null for a blank label without querying', async () => {
+      expect(await svc.findSubscriptionLabel('tenant-1', 'anthropic', '   ')).toBeNull();
+      expect(providerRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('returns the stored casing, including an inactive row', async () => {
+      providerRepo.find.mockResolvedValue([
+        { label: 'Darius Extra', is_active: false },
+        { label: 'Other', is_active: true },
+      ]);
+      expect(await svc.findSubscriptionLabel('tenant-1', 'anthropic', ' darius extra ')).toBe(
+        'Darius Extra',
+      );
+      expect(providerRepo.find).toHaveBeenCalledWith({
+        where: { tenant_id: 'tenant-1', provider: 'anthropic', auth_type: 'subscription' },
+      });
+    });
+
+    it('returns null when no subscription row matches', async () => {
+      providerRepo.find.mockResolvedValue([{ label: 'Other', is_active: true }]);
+      expect(await svc.findSubscriptionLabel('tenant-1', 'anthropic', 'missing')).toBeNull();
+    });
+  });
 });
 
 describe('ProviderService — symmetric provider↔agent auto-connect', () => {

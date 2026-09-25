@@ -21,6 +21,16 @@ export function isConnectionTestRunning(connectionId: string): boolean {
   return running()[connectionId] === true;
 }
 
+/** Drop a stale result. A reconnect replaces the credential the last test judged. */
+export function clearConnectionTestResult(connectionId: string): void {
+  setResults((prev) => {
+    if (!(connectionId in prev)) return prev;
+    const next = { ...prev };
+    delete next[connectionId];
+    return next;
+  });
+}
+
 export async function runConnectionTest(connectionId: string): Promise<void> {
   if (isConnectionTestRunning(connectionId)) return;
   setRunning((prev) => ({ ...prev, [connectionId]: true }));

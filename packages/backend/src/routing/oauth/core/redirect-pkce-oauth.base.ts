@@ -25,6 +25,7 @@ import {
   oauthRefreshKey,
   subscriptionCredentialLock,
 } from './oauth-refresh-coordinator';
+import { resolveStoredOrNextLabel } from './reconnect-exchange';
 
 export interface RedirectPkceOauthConfig {
   /** Provider id stored on `tenant_providers.provider_id`. */
@@ -92,6 +93,11 @@ interface RedirectPkcePendingOAuth {
   backendUrl: string;
   /** Provider-specific, short-lived data needed to finish this OAuth flow. */
   flowContext?: unknown;
+  /**
+   * Account label to overwrite on exchange. Absent for a new sign-in.
+   * A reconnect must not fall through to nextOAuthLabel if the row is gone.
+   */
+  reconnectLabel?: string;
   expiresAt: number;
 }
 
@@ -145,6 +151,7 @@ export abstract class RedirectPkceOauthBaseService {
     backendUrl?: string,
     createdByUserId?: string | null,
     flowContext?: unknown,
+    reconnectLabel?: string,
   ): Promise<string> {
     const state = generateState();
     const { verifier, challenge } = generatePkce();
@@ -159,6 +166,7 @@ export abstract class RedirectPkceOauthBaseService {
       createdByUserId: createdByUserId ?? null,
       backendUrl: safeBackendUrl,
       flowContext,
+      ...(reconnectLabel ? { reconnectLabel } : {}),
     });
     if (this.useCallbackServer) {
       await this.ensureCallbackServer();
@@ -216,10 +224,7 @@ export abstract class RedirectPkceOauthBaseService {
     // exchange to discover their assigned project id. The result lives in
     // `blob.u` and is preserved across refreshes by `unwrapToken`.
     const blob = await this.enrichBlob(baseBlob, pending.flowContext);
-    const label = await this.providerService.nextOAuthLabel(
-      pending.tenantId,
-      this.oauthConfig.providerId,
-    );
+    const label = await this.resolveExchangeLabel(pending);
     const { provider: savedProvider } = await this.providerService.upsertProvider(
       pending.agentId,
       pending.tenantId,
@@ -239,6 +244,15 @@ export abstract class RedirectPkceOauthBaseService {
       `${this.oauthConfig.providerId} OAuth token stored for agent=${pending.agentId}`,
     );
     this.shutdownCallbackServerIfIdle();
+  }
+
+  private resolveExchangeLabel(pending: RedirectPkcePendingOAuth): Promise<string | undefined> {
+    return resolveStoredOrNextLabel(
+      this.providerService,
+      pending.tenantId,
+      this.oauthConfig.providerId,
+      pending.reconnectLabel,
+    );
   }
 
   async refreshAccessToken(refreshToken: string, resourceField?: string): Promise<OAuthTokenBlob> {

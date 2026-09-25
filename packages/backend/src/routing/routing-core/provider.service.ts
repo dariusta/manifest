@@ -1435,6 +1435,33 @@ export class ProviderService {
   }
 
   /**
+   * The stored label of this tenant's subscription account, or null when no
+   * such account exists. Reconnect uses this so a sign-in overwrites that row
+   * instead of allocating a new one — and so a label that is not this tenant's
+   * account is rejected before any provider flow starts.
+   *
+   * Inactive rows count: a disconnected account is still the row a reconnect
+   * should revive, and matching it also keeps the exchange from falling
+   * through to a new insert (which can hit the key cap).
+   */
+  async findSubscriptionLabel(
+    tenantId: string,
+    provider: string,
+    label: string,
+  ): Promise<string | null> {
+    const wanted = label.trim().toLowerCase();
+    if (!wanted) return null;
+    const rows = await this.providerRepo.find({
+      where: {
+        tenant_id: tenantId,
+        provider,
+        auth_type: 'subscription' as AuthType,
+      },
+    });
+    return rows.find((row) => row.label.toLowerCase() === wanted)?.label ?? null;
+  }
+
+  /**
    * Returns a unique label for a new OAuth key. If no row exists yet for this
    * (user, provider, subscription) tuple, returns undefined so the caller
    * falls through to the legacy single-key upsert (creating "Default"). When

@@ -33,6 +33,7 @@ function createProviderService() {
   const recalculateTiers = jest.fn().mockResolvedValue(undefined);
   const recalculateTiersForUser = jest.fn().mockResolvedValue(undefined);
   const nextOAuthLabel = jest.fn().mockResolvedValue(undefined);
+  const findSubscriptionLabel = jest.fn().mockResolvedValue(null);
   const getFreshSubscriptionCredential = jest.fn().mockResolvedValue(null);
   return {
     svc: {
@@ -40,6 +41,7 @@ function createProviderService() {
       recalculateTiers,
       recalculateTiersForUser,
       nextOAuthLabel,
+      findSubscriptionLabel,
       getFreshSubscriptionCredential,
       withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
         getFreshSubscriptionCredential,
@@ -50,6 +52,7 @@ function createProviderService() {
     recalculateTiers,
     recalculateTiersForUser,
     nextOAuthLabel,
+    findSubscriptionLabel,
     getFreshSubscriptionCredential,
     withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
       getFreshSubscriptionCredential,
@@ -286,6 +289,42 @@ describe('MinimaxOauthService', () => {
       expect(provider.recalculateTiers).not.toHaveBeenCalled();
       expect(provider.recalculateTiersForUser).not.toHaveBeenCalled();
       expect(svc.getPendingCount()).toBe(0);
+    });
+
+    it('overwrites the named MiniMax account on reconnect', async () => {
+      provider.findSubscriptionLabel.mockResolvedValue('CN Account');
+      fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
+        const body = new URLSearchParams(String(init.body));
+        return mockResponse(200, {
+          user_code: 'USER-CODE',
+          verification_uri: 'https://minimax.example/verify',
+          expired_in: 600,
+          interval: 2,
+          state: body.get('state'),
+        });
+      });
+      const start = await svc.startAuthorization('agent-1', 'user-1', 'cn', 'user-1', 'CN Account');
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(200, {
+          status: 'success',
+          access_token: 'at',
+          refresh_token: 'rt',
+          expired_in: 3600,
+        }),
+      );
+
+      expect(await svc.pollAuthorization(start.flowId, 'user-1')).toEqual({ status: 'success' });
+      expect(provider.nextOAuthLabel).not.toHaveBeenCalled();
+      expect(provider.upsertProvider).toHaveBeenCalledWith(
+        'agent-1',
+        'user-1',
+        'minimax',
+        expect.any(String),
+        'subscription',
+        undefined,
+        'CN Account',
+        'user-1',
+      );
     });
 
     it('does not route agents after discovery when the provider row is new', async () => {

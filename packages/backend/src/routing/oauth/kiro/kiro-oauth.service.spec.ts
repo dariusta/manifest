@@ -38,6 +38,7 @@ function createProviderService() {
   const recalculateTiers = jest.fn().mockResolvedValue(undefined);
   const recalculateTiersForUser = jest.fn().mockResolvedValue(undefined);
   const nextOAuthLabel = jest.fn().mockResolvedValue('Kiro 1');
+  const findSubscriptionLabel = jest.fn().mockResolvedValue(null);
   const getFreshSubscriptionCredential = jest.fn().mockResolvedValue(null);
   const withSubscriptionCredentialLock = mockSubscriptionCredentialLock({
     getFreshSubscriptionCredential,
@@ -49,6 +50,7 @@ function createProviderService() {
       recalculateTiers,
       recalculateTiersForUser,
       nextOAuthLabel,
+      findSubscriptionLabel,
       getFreshSubscriptionCredential,
       withSubscriptionCredentialLock,
     } as unknown as ProviderService,
@@ -56,6 +58,7 @@ function createProviderService() {
     recalculateTiers,
     recalculateTiersForUser,
     nextOAuthLabel,
+    findSubscriptionLabel,
     getFreshSubscriptionCredential,
     withSubscriptionCredentialLock,
   };
@@ -384,6 +387,56 @@ describe('KiroOauthService', () => {
       expect(discovery.discoverModels).toHaveBeenCalledWith({ id: 'p1' });
       expect(provider.recalculateTiers).not.toHaveBeenCalled();
       expect(provider.recalculateTiersForUser).not.toHaveBeenCalled();
+    });
+
+    it('overwrites the named Kiro account on reconnect', async () => {
+      provider.findSubscriptionLabel.mockResolvedValue('Work');
+      const service = makeService();
+      fetchMock.mockResolvedValueOnce(REGISTER_OK).mockResolvedValueOnce(DEVICE_OK);
+      const { flowId } = await service.startAuthorization('agent-1', 'user-1', 'user-1', {
+        reconnectLabel: 'Work',
+      });
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(200, { accessToken: 'aoa-token', refreshToken: 'aor-token', expiresIn: 3600 }),
+      );
+
+      expect(await service.pollAuthorization(flowId, 'user-1')).toEqual({ status: 'success' });
+      expect(provider.nextOAuthLabel).not.toHaveBeenCalled();
+      expect(provider.upsertProvider.mock.calls[0][6]).toBe('Work');
+    });
+
+    it('does not create a new Kiro account when the reconnect target was removed', async () => {
+      provider.findSubscriptionLabel.mockResolvedValue(null);
+      const service = makeService();
+      fetchMock.mockResolvedValueOnce(REGISTER_OK).mockResolvedValueOnce(DEVICE_OK);
+      const { flowId } = await service.startAuthorization('agent-1', 'user-1', null, {
+        reconnectLabel: 'Work',
+      });
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(200, { accessToken: 'a', refreshToken: 'r', expiresIn: 3600 }),
+      );
+
+      const result = await service.pollAuthorization(flowId, 'user-1');
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('That account was removed');
+      expect(provider.upsertProvider).not.toHaveBeenCalled();
+      expect(provider.nextOAuthLabel).not.toHaveBeenCalled();
+    });
+
+    it('reports a generic failure when reconnect lookup throws a non-Error', async () => {
+      provider.findSubscriptionLabel.mockRejectedValue('boom');
+      const service = makeService();
+      fetchMock.mockResolvedValueOnce(REGISTER_OK).mockResolvedValueOnce(DEVICE_OK);
+      const { flowId } = await service.startAuthorization('agent-1', 'user-1', null, {
+        reconnectLabel: 'Work',
+      });
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(200, { accessToken: 'a', refreshToken: 'r', expiresIn: 3600 }),
+      );
+
+      const result = await service.pollAuthorization(flowId, 'user-1');
+      expect(result).toEqual({ status: 'error', message: 'Kiro login failed.' });
+      expect(provider.upsertProvider).not.toHaveBeenCalled();
     });
 
     it('does not route agents after discovery when the provider row is new', async () => {

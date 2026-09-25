@@ -20,6 +20,7 @@ import { ProviderKeyService } from '../../routing-core/provider-key.service';
 import { ProviderService } from '../../routing-core/provider.service';
 import { oauthDoneHtml, type OAuthTokenBlob } from '../core';
 import { optionalTrimmedStringQuery } from '../core/query-params';
+import { resolveReconnectLabel } from '../core/reconnect-label';
 import { XaiOauthService } from './xai-oauth.service';
 
 @Controller('api/v1/oauth/xai')
@@ -39,11 +40,18 @@ export class XaiOauthController {
     @Query('agentName') agentName: string,
     @TenantCtx() ctx: TenantContext,
     @Req() req: Request,
+    @Query('label') label?: string | string[],
   ) {
     if (!agentName) {
       throw new HttpException('agentName query parameter is required', HttpStatus.BAD_REQUEST);
     }
     const agent = await this.resolveAgent.resolve(ctx.tenantId, agentName);
+    const reconnectLabel = await resolveReconnectLabel(
+      this.providerService,
+      agent.tenant_id,
+      'xai',
+      label,
+    );
     const trustedBackendUrl = this.configService.get<string>('BETTER_AUTH_URL');
     const backendUrl = trustedBackendUrl || `${req.protocol}://${req.get('host')}`;
     try {
@@ -52,6 +60,8 @@ export class XaiOauthController {
         agent.tenant_id,
         backendUrl,
         ctx.userId,
+        undefined,
+        reconnectLabel,
       );
       return { url };
     } catch (err) {

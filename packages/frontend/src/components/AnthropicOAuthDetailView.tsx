@@ -20,7 +20,9 @@ import {
   type RoutingProvider,
 } from '../services/api.js';
 import { toast } from '../services/toast-store.js';
+import { clearConnectionTestResult } from '../services/connection-test-store.js';
 import { ConnectionTestButton, ConnectionTestResultLine } from './ConnectionTest.js';
+import { ReconnectAccountButton } from './ReconnectAccountButton.js';
 import CopyButton from './CopyButton.js';
 
 interface Props {
@@ -56,6 +58,8 @@ const MAX_CONNECTIONS_PER_PROVIDER = 5;
  */
 const AnthropicOAuthDetailView: Component<Props> = (props) => {
   const [state, setState] = createSignal<string | null>(null);
+  /** Account whose row the in-flight paste should overwrite. Absent for a new sign-in. */
+  const [reconnectLabel, setReconnectLabel] = createSignal<string | null>(null);
   const [input, setInput] = createSignal('');
   const [error, setError] = createSignal<string | null>(null);
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
@@ -94,7 +98,7 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
     }
   });
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (label?: string) => {
     setError(null);
     // Open synchronously while the click still has user activation. Browsers
     // can block a window opened after the OAuth start request completes.
@@ -109,11 +113,13 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
 
     props.setBusy(true);
     try {
-      const { url, state: authState } = await startAnthropicOAuth(props.agentName);
+      const { url, state: authState } = await startAnthropicOAuth(props.agentName, label);
       setState(authState);
+      setReconnectLabel(label ?? null);
       if (!popup.closed) popup.location.replace(url);
     } catch {
       popup.close();
+      setReconnectLabel(null);
       // error toast from fetchMutate
     } finally {
       props.setBusy(false);
@@ -140,18 +146,23 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
 
     // Read before the exchange: `connected` flips once onUpdate refreshes.
     const wasConnected = props.connected();
+    const reconnecting = reconnectLabel();
     props.setBusy(true);
     setError(null);
     try {
       const authState = state() ?? pastedState;
       await submitAnthropicOAuth(props.agentName, raw, authState);
       toast.success(
-        wasConnected
-          ? `${props.provDef.name} connection added`
-          : `${props.provDef.name} subscription connected`,
+        reconnecting
+          ? `${props.provDef.name} account reconnected`
+          : wasConnected
+            ? `${props.provDef.name} connection added`
+            : `${props.provDef.name} subscription connected`,
       );
+      if (reconnecting) clearConnectionTestResult(connectionIdForLabel(reconnecting));
       setInput('');
       setState(null);
+      setReconnectLabel(null);
       props.onUpdate();
     } catch (err) {
       setError(
@@ -163,6 +174,9 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
       props.setBusy(false);
     }
   };
+
+  const connectionIdForLabel = (label: string) =>
+    props.activeKeys?.().find((key) => key.label === label)?.id ?? '';
 
   const handleDisconnect = async () => {
     props.setBusy(true);
@@ -319,6 +333,12 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
                               label={k.label}
                               busy={props.busy()}
                             />
+                            <ReconnectAccountButton
+                              connectionId={k.id}
+                              label={k.label}
+                              busy={props.busy()}
+                              onReconnect={(label) => void handleSignIn(label)}
+                            />
                             <button
                               class="btn btn--outline btn--sm"
                               disabled={props.busy()}
@@ -461,7 +481,7 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
           <button
             class="btn btn--primary anthropic-detail__btn"
             disabled={props.busy()}
-            onClick={handleSignIn}
+            onClick={() => void handleSignIn()}
           >
             <Show when={!props.busy()} fallback={<span class="spinner" />}>
               Sign in with Claude

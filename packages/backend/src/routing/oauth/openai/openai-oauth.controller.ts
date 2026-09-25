@@ -20,6 +20,7 @@ import { ResolveAgentService } from '../../routing-core/resolve-agent.service';
 import { ProviderService } from '../../routing-core/provider.service';
 import { ProviderKeyService } from '../../routing-core/provider-key.service';
 import { optionalTrimmedStringQuery } from '../core/query-params';
+import { resolveReconnectLabel } from '../core/reconnect-label';
 
 @Controller('api/v1/oauth/openai')
 export class OpenaiOauthController {
@@ -43,11 +44,18 @@ export class OpenaiOauthController {
     @Query('agentName') agentName: string,
     @TenantCtx() ctx: TenantContext,
     @Req() req: Request,
+    @Query('label') label?: string | string[],
   ) {
     if (!agentName) {
       throw new HttpException('agentName query parameter is required', HttpStatus.BAD_REQUEST);
     }
     const agent = await this.resolveAgent.resolve(ctx.tenantId, agentName);
+    const reconnectLabel = await resolveReconnectLabel(
+      this.providerService,
+      agent.tenant_id,
+      'openai',
+      label,
+    );
     // Prefer the operator-configured BETTER_AUTH_URL so a forged Host header
     // can't redirect the OAuth flow. Fall back to the request's host:port for
     // the dev case where BETTER_AUTH_URL isn't set.
@@ -59,6 +67,8 @@ export class OpenaiOauthController {
         agent.tenant_id,
         backendUrl,
         ctx.userId,
+        undefined,
+        reconnectLabel,
       );
       return { url };
     } catch (err) {

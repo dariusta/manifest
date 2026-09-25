@@ -16,8 +16,10 @@ import {
   type RoutingProvider,
 } from '../services/api.js';
 import { toast } from '../services/toast-store.js';
+import { clearConnectionTestResult } from '../services/connection-test-store.js';
 import { monitorOAuthPopup } from '../services/oauth-popup.js';
 import { ConnectionTestButton, ConnectionTestResultLine } from './ConnectionTest.js';
+import { ReconnectAccountButton } from './ReconnectAccountButton.js';
 
 const MAX_LABEL_LENGTH = 50;
 
@@ -69,6 +71,8 @@ const OAuthDetailView: Component<Props> = (props) => {
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
   const [addingAccount, setAddingAccount] = createSignal(false);
+  /** Account whose row the in-flight popup should overwrite. Absent for a new sign-in. */
+  const [reconnectLabel, setReconnectLabel] = createSignal<string | null>(null);
 
   // Dispose the OAuth popup monitor if the view unmounts mid-flow, otherwise its
   // 300ms URL poll keeps running after the component is gone.
@@ -83,8 +87,10 @@ const OAuthDetailView: Component<Props> = (props) => {
     isXaiProvider()
       ? 'Paste the xAI authorization code or callback URL'
       : 'http://localhost:1455/auth/callback?code=...';
-  const showConnectFlow = () => !props.connected() || addingAccount() || pasteFlowActive();
-  const showConnectedFlow = () => props.connected() && !addingAccount() && !pasteFlowActive();
+  const showConnectFlow = () =>
+    !reconnectLabel() && (!props.connected() || addingAccount() || pasteFlowActive());
+  const showConnectedFlow = () =>
+    !!reconnectLabel() || (props.connected() && !addingAccount() && !pasteFlowActive());
   const activeKeyCount = () => (props.activeKeys?.() ?? []).length;
   const flowHasConnected = () => {
     const baseline = flowKeyCount();
@@ -95,13 +101,21 @@ const OAuthDetailView: Component<Props> = (props) => {
   const finishOAuthSuccess = () => {
     if (successHandled()) return;
     setSuccessHandled(true);
+    const reconnecting = reconnectLabel();
     setPasteFlowActive(false);
     setFlowKeyCount(null);
     setPasteUrl('');
     setPasteError(null);
     setOauthState(null);
     setAddingAccount(false);
-    toast.success(`${props.provDef.name} subscription connected`);
+    setReconnectLabel(null);
+    if (reconnecting) {
+      const connectionId = props.activeKeys?.().find((key) => key.label === reconnecting)?.id;
+      if (connectionId) clearConnectionTestResult(connectionId);
+      toast.success(`${props.provDef.name} account reconnected`);
+    } else {
+      toast.success(`${props.provDef.name} subscription connected`);
+    }
     props.onUpdate();
   };
 
@@ -129,16 +143,16 @@ const OAuthDetailView: Component<Props> = (props) => {
     if (pasteFlowActive() && flowHasConnected()) finishOAuthSuccess();
   });
 
-  const handleOAuthLogin = async () => {
+  const handleOAuthLogin = async (label?: string) => {
     props.setBusy(true);
     setPasteUrl('');
     setPasteError(null);
     try {
-      const { url } = isGeminiProvider()
-        ? await oauthApi().getUrl(props.agentName, {
-            projectId: geminiProjectId().trim() || undefined,
-          })
-        : await oauthApi().getUrl(props.agentName);
+      const projectId = isGeminiProvider() ? geminiProjectId().trim() || undefined : undefined;
+      const { url } = await oauthApi().getUrl(props.agentName, {
+        ...(projectId ? { projectId } : {}),
+        ...(label ? { label } : {}),
+      });
       try {
         setOauthState(new URL(url).searchParams.get('state'));
       } catch {
@@ -151,11 +165,13 @@ const OAuthDetailView: Component<Props> = (props) => {
         );
         if (props.connected()) setAddingAccount(false);
         setOauthState(null);
+        setReconnectLabel(null);
         props.setBusy(false);
         return;
       }
 
-      setPasteFlowActive(true);
+      setReconnectLabel(label ?? null);
+      setPasteFlowActive(!label);
       setFlowKeyCount(activeKeyCount());
       setSuccessHandled(false);
       props.setBusy(false);
@@ -175,6 +191,7 @@ const OAuthDetailView: Component<Props> = (props) => {
       );
     } catch {
       if (props.connected()) setAddingAccount(false);
+      setReconnectLabel(null);
       props.setBusy(false);
     }
   };
@@ -318,7 +335,7 @@ const OAuthDetailView: Component<Props> = (props) => {
               <button
                 class="btn btn--primary provider-detail__action"
                 disabled={props.busy()}
-                onClick={handleOAuthLogin}
+                onClick={() => void handleOAuthLogin()}
               >
                 <Show when={!props.busy()} fallback={<span class="spinner" />}>
                   Log in with {props.provDef.name}
@@ -433,6 +450,12 @@ const OAuthDetailView: Component<Props> = (props) => {
                             connectionId={k.id}
                             label={k.label}
                             busy={props.busy()}
+                          />
+                          <ReconnectAccountButton
+                            connectionId={k.id}
+                            label={k.label}
+                            busy={props.busy()}
+                            onReconnect={(label) => void handleOAuthLogin(label)}
                           />
                           <button
                             class="btn btn--outline btn--sm"

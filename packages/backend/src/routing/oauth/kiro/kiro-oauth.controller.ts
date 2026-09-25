@@ -13,6 +13,7 @@ import { KiroAuthorizationOptionsError, type KiroAuthorizationOptions } from './
 import { ResolveAgentService } from '../../routing-core/resolve-agent.service';
 import { ProviderService } from '../../routing-core/provider.service';
 import { optionalTrimmedStringQuery } from '../core/query-params';
+import { resolveReconnectLabel } from '../core/reconnect-label';
 
 @Controller('api/v1/oauth/kiro')
 export class KiroOauthController {
@@ -28,6 +29,7 @@ export class KiroOauthController {
     @TenantCtx() ctx: TenantContext,
     @Query('startUrl') startUrl?: string | string[],
     @Query('region') region?: string | string[],
+    @Query('label') label?: string | string[],
   ) {
     if (!agentName) {
       throw new HttpException('agentName query parameter is required', HttpStatus.BAD_REQUEST);
@@ -42,6 +44,13 @@ export class KiroOauthController {
       options.region = trimmedRegion;
     }
     const agent = await this.resolveAgent.resolve(ctx.tenantId, agentName);
+    const reconnectLabel = await resolveReconnectLabel(
+      this.providerService,
+      agent.tenant_id,
+      'kiro',
+      label,
+    );
+    if (reconnectLabel) options.reconnectLabel = reconnectLabel;
     try {
       return await this.oauthService.startAuthorization(
         agent.id,

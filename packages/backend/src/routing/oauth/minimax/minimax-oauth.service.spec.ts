@@ -23,6 +23,7 @@ describe('MinimaxOauthService', () => {
       upsertProvider,
       recalculateTiers: jest.fn().mockResolvedValue(undefined),
       nextOAuthLabel: jest.fn().mockResolvedValue(undefined),
+      findSubscriptionLabel: jest.fn().mockResolvedValue(null),
       getFreshSubscriptionCredential,
       withSubscriptionCredentialLock: mockSubscriptionCredentialLock({
         getFreshSubscriptionCredential,
@@ -137,6 +138,135 @@ describe('MinimaxOauthService', () => {
         null,
       );
       expect(discoveryService.discoverModels).toHaveBeenCalled();
+    });
+
+    it('overwrites the named MiniMax account on reconnect', async () => {
+      providerService.findSubscriptionLabel.mockResolvedValue('CN Account');
+      fetchMock
+        .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+          const params = new URLSearchParams(init?.body as string);
+          return {
+            ok: true,
+            json: async () => ({
+              user_code: 'ABCD-1234',
+              verification_uri: 'https://www.minimax.io/verify',
+              expired_in: 60,
+              interval: 2,
+              state: params.get('state'),
+            }),
+          };
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              status: 'success',
+              access_token: 'access-r',
+              refresh_token: 'refresh-r',
+              expired_in: 3600,
+            }),
+        });
+
+      const start = await service.startAuthorization(
+        'agent-1',
+        'user-1',
+        'cn',
+        'user-1',
+        'CN Account',
+      );
+      expect(await service.pollAuthorization(start.flowId, 'user-1')).toEqual({ status: 'success' });
+      expect(providerService.nextOAuthLabel).not.toHaveBeenCalled();
+      expect(providerService.upsertProvider).toHaveBeenCalledWith(
+        'agent-1',
+        'user-1',
+        'minimax',
+        expect.any(String),
+        'subscription',
+        undefined,
+        'CN Account',
+        'user-1',
+      );
+    });
+
+    it('does not create a new MiniMax account when the reconnect target was removed', async () => {
+      providerService.findSubscriptionLabel.mockResolvedValue(null);
+      fetchMock
+        .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+          const params = new URLSearchParams(init?.body as string);
+          return {
+            ok: true,
+            json: async () => ({
+              user_code: 'ABCD-1234',
+              verification_uri: 'https://www.minimax.io/verify',
+              expired_in: 60,
+              interval: 2,
+              state: params.get('state'),
+            }),
+          };
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              status: 'success',
+              access_token: 'a',
+              refresh_token: 'r',
+              expired_in: 3600,
+            }),
+        });
+
+      const start = await service.startAuthorization(
+        'agent-1',
+        'user-1',
+        'global',
+        null,
+        'CN Account',
+      );
+      const result = await service.pollAuthorization(start.flowId, 'user-1');
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('That account was removed');
+      expect(providerService.upsertProvider).not.toHaveBeenCalled();
+    });
+
+    it('reports a generic failure when reconnect lookup throws a non-Error', async () => {
+      providerService.findSubscriptionLabel.mockRejectedValue('boom');
+      fetchMock
+        .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+          const params = new URLSearchParams(init?.body as string);
+          return {
+            ok: true,
+            json: async () => ({
+              user_code: 'ABCD-1234',
+              verification_uri: 'https://www.minimax.io/verify',
+              expired_in: 60,
+              interval: 2,
+              state: params.get('state'),
+            }),
+          };
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              status: 'success',
+              access_token: 'access-r',
+              refresh_token: 'refresh-r',
+              expired_in: 3600,
+            }),
+        });
+
+      const start = await service.startAuthorization(
+        'agent-1',
+        'user-1',
+        'global',
+        null,
+        'CN Account',
+      );
+      expect(await service.pollAuthorization(start.flowId, 'user-1')).toEqual({
+        status: 'error',
+        message: 'MiniMax OAuth failed. Please try again later.',
+      });
+      expect(providerService.upsertProvider).not.toHaveBeenCalled();
     });
 
     it('returns pending while approval has not completed', async () => {

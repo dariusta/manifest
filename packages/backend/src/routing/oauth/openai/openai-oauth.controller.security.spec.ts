@@ -26,6 +26,7 @@ function build() {
   } as unknown as ProviderKeyService;
   const providerService = {
     removeProvider: jest.fn().mockResolvedValue({ notifications: [] }),
+    findSubscriptionLabel: jest.fn().mockResolvedValue('Work'),
   } as unknown as ProviderService;
   const configService = {
     get: jest.fn().mockReturnValue(undefined),
@@ -91,6 +92,8 @@ describe('OpenaiOauthController', () => {
         'tenant-1',
         'https://app.example.com',
         'user-1',
+        undefined,
+        undefined,
       );
     });
 
@@ -103,6 +106,8 @@ describe('OpenaiOauthController', () => {
         'tenant-1',
         'http://localhost:3001',
         'user-1',
+        undefined,
+        undefined,
       );
     });
 

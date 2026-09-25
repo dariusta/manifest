@@ -19,6 +19,7 @@ function build() {
   const providerService = {
     removeProvider: jest.fn().mockResolvedValue({ notifications: [] }),
     getFreshSubscriptionCredential: jest.fn(),
+    findSubscriptionLabel: jest.fn().mockResolvedValue('Darius Extra'),
   } as unknown as ProviderService;
   return {
     ctrl: new AnthropicOauthController(oauth, resolveAgent, providerService),
@@ -43,7 +44,30 @@ describe('AnthropicOauthController', () => {
       });
       const result = await ctrl.authorize('demo-agent', ctx);
       expect(result).toEqual({ url: expect.any(String), state: 's1' });
-      expect(oauth.generateAuthorizationUrl).toHaveBeenCalledWith('agent-1', 'tenant-1');
+      expect(oauth.generateAuthorizationUrl).toHaveBeenCalledWith('agent-1', 'tenant-1', undefined);
+    });
+
+    it('starts a reconnect against the stored account label', async () => {
+      const { ctrl, oauth, providerService } = build();
+      (oauth.generateAuthorizationUrl as jest.Mock).mockReturnValue({ url: 'https://x', state: 's' });
+      await ctrl.authorize('demo-agent', ctx, ' darius extra ');
+      expect(providerService.findSubscriptionLabel).toHaveBeenCalledWith(
+        'tenant-1',
+        'anthropic',
+        'darius extra',
+      );
+      expect(oauth.generateAuthorizationUrl).toHaveBeenCalledWith(
+        'agent-1',
+        'tenant-1',
+        'Darius Extra',
+      );
+    });
+
+    it('rejects a reconnect label that is not this tenant\'s account', async () => {
+      const { ctrl, oauth, providerService } = build();
+      (providerService.findSubscriptionLabel as jest.Mock).mockResolvedValue(null);
+      await expect(ctrl.authorize('demo-agent', ctx, 'ghost')).rejects.toBeInstanceOf(HttpException);
+      expect(oauth.generateAuthorizationUrl).not.toHaveBeenCalled();
     });
   });
 
