@@ -96,6 +96,23 @@ describe('SpaFallbackFilter', () => {
       expect(res.status).toHaveBeenCalledWith(404);
     });
 
+    // The Gemini-native surface lives on these two. `/v1beta/` needs its own
+    // entry because it does not start with `/v1/`, and a stray file handle
+    // answered with index.html would reach the SDK as a JSON parse error.
+    it('returns JSON 404 for GET to /v1beta/ routes', () => {
+      const { host, res } = createMockHost('GET', '/v1beta/files/abc-123');
+      filter.catch(exception, host);
+      expect(res.send).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    it('returns JSON 404 for GET to /upload/ routes', () => {
+      const { host, res } = createMockHost('GET', '/upload/v1beta/files/session/t');
+      filter.catch(exception, host);
+      expect(res.send).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
     it('returns JSON 404 for GET to /assets/ routes (stale chunks)', () => {
       const { host, res } = createMockHost('GET', '/assets/MessageLog-vvlBBwmB.js');
       filter.catch(exception, host);
