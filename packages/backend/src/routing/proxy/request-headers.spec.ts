@@ -140,7 +140,7 @@ describe('sanitizeProviderRequestHeaders', () => {
       sanitizeProviderRequestHeaders({
         Authorization: 'Bearer secret-token',
         'Content-Type': 'application/json',
-        'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+        'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
         'x-app': 'cli',
         'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fallback-credit-2026-06-01',
         'x-claude-code-session-id': '2d71ef06-94ba-4b7d-85c7-4cf4bb2af162',
@@ -149,7 +149,7 @@ describe('sanitizeProviderRequestHeaders', () => {
       }),
     ).toEqual({
       'content-type': 'application/json',
-      'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+      'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
       'x-app': 'cli',
       'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fallback-credit-2026-06-01',
       'x-claude-code-session-id': '2d71ef06-94ba-4b7d-85c7-4cf4bb2af162',

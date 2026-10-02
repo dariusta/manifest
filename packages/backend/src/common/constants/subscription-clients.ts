@@ -34,7 +34,7 @@ export const CODEX_CLI_VERSION = '0.128.0';
 export const CODEX_CLI_ORIGINATOR = 'codex_cli_rs';
 export const CODEX_CLI_USER_AGENT = 'codex_cli_rs/0.0.0 (Unknown 0; unknown) unknown';
 
-export const CLAUDE_CODE_VERSION = '2.1.259';
+export const CLAUDE_CODE_VERSION = '2.1.287';
 const CLAUDE_CODE_PACKAGE_URL = 'https://registry.npmjs.org/@anthropic-ai%2fclaude-code/latest';
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const VERSION_FETCH_TIMEOUT_MS = 10_000;

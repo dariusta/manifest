@@ -787,7 +787,9 @@ describe('Anthropic Adapter', () => {
       ]);
       const system = result.system as Array<{ text: string }>;
       expect(system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
-      expect(system[1].text).toContain('x-anthropic-billing-header: cc_version=');
+      expect(system[1].text).toBe(
+        'x-anthropic-billing-header: cc_version=2.1.287; cc_entrypoint=sdk-cli;',
+      );
       expect(system[1].text).toContain('cc_entrypoint=sdk-cli');
       expect(system.some((block) => /Sharky|Hermes/i.test(block.text))).toBe(false);
     });

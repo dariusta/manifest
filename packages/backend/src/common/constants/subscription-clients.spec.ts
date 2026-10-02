@@ -43,15 +43,15 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     expect(headers['x-stainless-runtime-version']).toBe('v26.3.0');
   });
 
-  it('identifies as Claude Code 2.1.251+ so Fable 5.1 is not rejected', () => {
+  it('identifies as Claude Code 2.1.280+ so current models are not rejected', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.287 (external, sdk-cli)');
     const match = headers['user-agent']?.match(/^claude-cli\/(\d+)\.(\d+)\.(\d+) /);
     expect(match).not.toBeNull();
     const [, major, minor, patch] = match!;
     const version = Number(major) * 1_000_000 + Number(minor) * 1_000 + Number(patch);
-    const minimumFable51 = 2 * 1_000_000 + 1 * 1_000 + 251;
-    expect(version).toBeGreaterThanOrEqual(minimumFable51);
+    const minimumSupported = 2 * 1_000_000 + 1 * 1_000 + 280;
+    expect(version).toBeGreaterThanOrEqual(minimumSupported);
   });
 
   it('ALWAYS includes the oauth beta flag so Anthropic treats the bearer token as first-party Claude Code', () => {
@@ -69,7 +69,7 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
 
   it('matches the live Claude Code CLI identity that Anthropic bills as included usage', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.287 (external, sdk-cli)');
     expect(headers['x-app']).toBe('cli');
     expect(headers['x-stainless-arch']).toBe('arm64');
     expect(headers['x-stainless-os']).toBe('MacOS');

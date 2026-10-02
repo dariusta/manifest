@@ -482,7 +482,7 @@ describe('PROVIDER_ENDPOINTS', () => {
     expect(headers['anthropic-beta']).toContain('effort-2025-11-24');
     expect(headers['anthropic-beta']).toContain('fallback-credit-2026-06-01');
     expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.287 (external, sdk-cli)');
     expect(headers['x-app']).toBe('cli');
     expect(headers['x-stainless-runtime']).toBe('node');
     expect(headers['x-stainless-lang']).toBe('js');

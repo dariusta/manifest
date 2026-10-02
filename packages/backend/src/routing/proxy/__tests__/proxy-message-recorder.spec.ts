@@ -2018,14 +2018,14 @@ describe('ProxyMessageRecorder', () => {
 
     it('updateAttemptHeaders stores outbound provider identity on the attempt', async () => {
       await recorder.updateAttemptHeaders('attempt-outbound', {
-        'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+        'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
         'x-app': 'cli',
       });
       expect(updateMock).toHaveBeenCalledWith(
         { id: 'attempt-outbound' },
         {
           request_headers: {
-            'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+            'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
             'x-app': 'cli',
           },
         },
@@ -2041,7 +2041,7 @@ describe('ProxyMessageRecorder', () => {
         completedAtMs: 1_050,
         pendingWrite: Promise.resolve(true),
         outboundHeaders: {
-          'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+          'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
           'x-app': 'cli',
         },
       };
@@ -2054,7 +2054,7 @@ describe('ProxyMessageRecorder', () => {
         { requestHeaders: { 'user-agent': 'OpenAI/Python 2.24.0' }, attempt },
       );
       expect(updateMock.mock.calls.at(-1)![1].request_headers).toEqual({
-        'user-agent': 'claude-cli/2.1.259 (external, sdk-cli)',
+        'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
         'x-app': 'cli',
       });
     });

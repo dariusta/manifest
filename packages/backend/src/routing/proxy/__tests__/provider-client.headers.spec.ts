@@ -86,7 +86,7 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
       'x-stainless-timeout': '600',
     });
     expect(sentHeaders).not.toHaveProperty('x-stainless-helper-method');
-    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
+    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.287 (external, sdk-cli)');
     expect(sentHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
     expect(sentHeaders['anthropic-beta']).toContain('fallback-credit-2026-06-01');
     expect(sentHeaders['anthropic-beta']).toContain('claude-code-20250219');
@@ -119,7 +119,7 @@ describe('ProviderClient — strict header contract on auth-critical paths', () 
     });
 
     const sentHeaders = mockFetch.mock.calls[0][1].headers as Record<string, string>;
-    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.259 (external, sdk-cli)');
+    expect(sentHeaders['user-agent']).toBe('claude-cli/2.1.287 (external, sdk-cli)');
     expect(sentHeaders['x-app']).toBe('cli');
     expect(sentHeaders['x-stainless-lang']).toBe('js');
     expect(sentHeaders['x-stainless-runtime']).toBe('node');
