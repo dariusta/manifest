@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgentMessage } from '../../entities/agent-message.entity';
 import { CustomProvider } from '../../entities/custom-provider.entity';
@@ -36,7 +36,7 @@ import { AttemptRecordingService } from './attempt-recording.service';
     RoutingCoreModule,
     ModelPricesModule,
     ModelDiscoveryModule,
-    NotificationsModule,
+    forwardRef(() => NotificationsModule),
     OtlpModule,
     OAuthModule,
     ResolveModule,

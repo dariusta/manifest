@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CustomProvider } from '../entities/custom-provider.entity';
 import { TenantProvider } from '../entities/tenant-provider.entity';
@@ -13,7 +13,7 @@ import { ConnectionTestService } from './connection-test.service';
   imports: [
     TypeOrmModule.forFeature([TenantProvider, CustomProvider]),
     RoutingCoreModule,
-    ProxyModule,
+    forwardRef(() => ProxyModule),
     OAuthModule,
     CustomProviderModule,
   ],
