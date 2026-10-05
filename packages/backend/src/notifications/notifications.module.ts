@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { NotificationsController } from './notifications.controller';
+import { ConnectionTestModule } from '../connection-test/connection-test.module';
 import { NotificationRulesService } from './services/notification-rules.service';
 import { NotificationCronService } from './services/notification-cron.service';
 import { SubscriptionHealthCronService } from './services/subscription-health-cron.service';
@@ -25,6 +26,7 @@ import { Tenant } from '../entities/tenant.entity';
       Tenant,
       TenantProvider,
     ]),
+    ConnectionTestModule,
   ],
   controllers: [NotificationsController],
   providers: [

@@ -19,5 +19,6 @@ import { ConnectionTestService } from './connection-test.service';
   ],
   controllers: [ConnectionTestController],
   providers: [ConnectionTestService],
+  exports: [ConnectionTestService],
 })
 export class ConnectionTestModule {}
