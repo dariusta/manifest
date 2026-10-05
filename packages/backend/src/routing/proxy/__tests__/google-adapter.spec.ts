@@ -1068,6 +1068,64 @@ describe('Google Adapter', () => {
       ]);
     });
 
+    it('carries processing: agentic and videoMetadata onto the media Part', () => {
+      const body = {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Summarize this.' },
+              {
+                type: 'image_url',
+                image_url: { url: 'https://example.test/clip.mp4' },
+                processing: 'agentic',
+                videoMetadata: { fps: 1 },
+              },
+            ],
+          },
+        ],
+      };
+      const result = toGoogleRequest(body, 'gemini-3.5-flash');
+
+      const contents = result.contents as Array<{ parts: Array<Record<string, unknown>> }>;
+      expect(contents[0].parts).toEqual([
+        { text: 'Summarize this.' },
+        {
+          fileData: { fileUri: 'https://example.test/clip.mp4' },
+          processing: 'agentic',
+          videoMetadata: { fps: 1 },
+        },
+      ]);
+    });
+
+    it('accepts processing nested inside image_url and drops junk values', () => {
+      const body = {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: 'https://example.test/a.mp4', processing: 'agentic' },
+              },
+              {
+                type: 'image_url',
+                image_url: { url: 'https://example.test/b.mp4' },
+                processing: 'turbo',
+              },
+            ],
+          },
+        ],
+      };
+      const result = toGoogleRequest(body, 'gemini-3.5-flash');
+
+      const contents = result.contents as Array<{ parts: Array<Record<string, unknown>> }>;
+      expect(contents[0].parts).toEqual([
+        { fileData: { fileUri: 'https://example.test/a.mp4' }, processing: 'agentic' },
+        { fileData: { fileUri: 'https://example.test/b.mp4' } },
+      ]);
+    });
+
     it('resolves functionResponse name from the assistant tool_calls history', () => {
       const body = {
         messages: [

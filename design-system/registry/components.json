@@ -2931,6 +2931,7 @@
         "provider-detail__input--masked",
         "provider-detail__key-help",
         "provider-detail__key-help-link",
+        "provider-detail__key-reveal",
         "provider-detail__key-row",
         "provider-detail__label",
         "provider-detail__label-muted",
@@ -5334,7 +5335,7 @@
     "tokens": 79,
     "darkOverrides": 38,
     "blocks": 334,
-    "classes": 1774,
+    "classes": 1775,
     "canonicalRules": 48,
     "ghostRules": 48
   }

@@ -586,9 +586,8 @@ const DeviceCodeDetailView: Component<Props> = (props) => {
                             connectionId={k.id}
                             label={k.label}
                             busy={props.busy()}
-                            onReconnect={(label) =>
-                              void handleStart({ label, region: k.region })
-                            }
+                            always
+                            onReconnect={(label) => void handleStart({ label, region: k.region })}
                           />
                           <button
                             class="btn btn--outline btn--sm"

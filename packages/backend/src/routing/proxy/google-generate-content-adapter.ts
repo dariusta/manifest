@@ -53,6 +53,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** Deep-clone a JSON-ish record so the inbound body keeps no shared references. */
+function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
 /** Read a field under its camelCase name, falling back to the REST snake_case alias. */
 function alias(part: Record<string, unknown>, camel: string, snake: string): unknown {
   return part[camel] !== undefined ? part[camel] : part[snake];
@@ -190,7 +195,17 @@ function pushContentMessages(
     }
 
     const url = mediaUrl(part);
-    if (url) blocks.push({ type: 'image_url', image_url: { url } });
+    if (url) {
+      const block: Record<string, unknown> = { type: 'image_url', image_url: { url } };
+      // Preserve the agentic-video carriage so a Gemini → chat → Gemini
+      // round-trip (e.g. through a non-Google provider) keeps `processing`
+      // and `videoMetadata` instead of silently downgrading to static frames.
+      const processing = alias(part, 'processing', 'processing');
+      if (typeof processing === 'string' && processing) block.processing = processing;
+      const videoMetadata = alias(part, 'videoMetadata', 'video_metadata');
+      if (isRecord(videoMetadata)) block.videoMetadata = cloneRecord(videoMetadata);
+      blocks.push(block);
+    }
   }
 
   if (blocks.length > 0 || toolCalls.length > 0) {

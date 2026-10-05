@@ -232,6 +232,68 @@ describe('google-generate-content-adapter', () => {
         ]);
       });
 
+      it('preserves the agentic-video carriage on a fileData part', () => {
+        const chat = generateContentToChatRequest({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  fileData: { fileUri: 'gs://bucket/clip.mp4' },
+                  processing: 'agentic',
+                  videoMetadata: { fps: 1 },
+                },
+              ],
+            },
+          ],
+        });
+
+        expect(chat.messages).toEqual([
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: 'gs://bucket/clip.mp4' },
+                processing: 'agentic',
+                videoMetadata: { fps: 1 },
+              },
+            ],
+          },
+        ]);
+      });
+
+      it('accepts the snake_case agentic-video aliases', () => {
+        const chat = generateContentToChatRequest({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  file_data: { file_uri: 'gs://bucket/clip.mp4' },
+                  processing: 'agentic',
+                  video_metadata: { startOffset: '1s' },
+                },
+              ],
+            },
+          ],
+        });
+
+        expect(chat.messages).toEqual([
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: 'gs://bucket/clip.mp4' },
+                processing: 'agentic',
+                videoMetadata: { startOffset: '1s' },
+              },
+            ],
+          },
+        ]);
+      });
+
       it('ignores media parts with nothing to point at', () => {
         const chat = generateContentToChatRequest({
           contents: [

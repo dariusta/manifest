@@ -12,18 +12,18 @@ vi.mock('../../src/services/connection-test-store.js', () => ({
 }));
 
 describe('ReconnectAccountButton', () => {
-  it('is hidden until a connection test says the account must sign in again', () => {
+  it('renders a Replace action even when the connection never needed a reconnect', () => {
     render(() => (
-      <ReconnectAccountButton connectionId="ok" label="Work" onReconnect={vi.fn()} />
+      <ReconnectAccountButton connectionId="ok" label="Work" always onReconnect={vi.fn()} />
     ));
-    expect(screen.queryByRole('button', { name: 'Reconnect account Work' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Replace account Work' })).not.toBeNull();
   });
 
-  it('is hidden when this connection has never been tested', () => {
+  it('keeps the Reconnect caption after a test says the account must sign in again', () => {
     render(() => (
-      <ReconnectAccountButton connectionId="never" label="Work" onReconnect={vi.fn()} />
+      <ReconnectAccountButton connectionId="needs-it" label="Work" always onReconnect={vi.fn()} />
     ));
-    expect(screen.queryByText('Reconnect')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Reconnect account Work' })).not.toBeNull();
   });
 
   it('disables the button while the parent view is busy', () => {

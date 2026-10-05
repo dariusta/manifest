@@ -40,6 +40,13 @@ interface GeminiPart {
   // not inside the functionCall object. Gemini 3 rejects tool-use follow-ups
   // that don't round-trip this field.
   thoughtSignature?: string;
+  // Agentic video understanding (Gemini 3.5+ Flash): per-part opt-in, e.g.
+  // `{ fileData: { fileUri }, processing: "agentic" }`. Native /v1beta
+  // requests carry it verbatim via provider-client's as-is forward, so the
+  // chat-completions path must preserve it too or the flag silently vanishes
+  // whenever a chat client attaches video.
+  processing?: string;
+  videoMetadata?: Record<string, unknown>;
 }
 
 const DATA_IMAGE_URL_RE = /^data:([^;,]+)(?:;[^,]*)?;base64,(.*)$/is;
@@ -168,10 +175,51 @@ function extractImageUrl(imageUrl: unknown): string | null {
   return imageUrl.url;
 }
 
+/** Agentic video values Google accepts on a media Part. Anything else is client junk. */
+const AGENTIC_PROCESSING_VALUES = new Set(['agentic', 'default']);
+
+/** Read a per-part `processing` / `videoMetadata` carriage off a chat content block. */
+function extractPartProcessing(
+  block: Record<string, unknown>,
+): Pick<GeminiPart, 'processing' | 'videoMetadata'> {
+  const out: Pick<GeminiPart, 'processing' | 'videoMetadata'> = {};
+  // Sibling of image_url on the block: `{ type: 'image_url', image_url, processing }`.
+  if (typeof block.processing === 'string' && AGENTIC_PROCESSING_VALUES.has(block.processing)) {
+    out.processing = block.processing;
+  }
+  // Some clients nest it inside image_url alongside the url.
+  const inner = block.image_url;
+  if (isRecord(inner)) {
+    if (
+      out.processing === undefined &&
+      typeof inner.processing === 'string' &&
+      AGENTIC_PROCESSING_VALUES.has(inner.processing)
+    ) {
+      out.processing = inner.processing;
+    }
+    if (isRecord(inner.videoMetadata)) out.videoMetadata = cloneRecord(inner.videoMetadata);
+  }
+  if (isRecord(block.videoMetadata)) out.videoMetadata = cloneRecord(block.videoMetadata);
+  return out;
+}
+
+/** Stamp the agentic-video carriage onto a converted media Part. */
+function applyPartProcessing(
+  part: GeminiPart,
+  carriage: Pick<GeminiPart, 'processing' | 'videoMetadata'>,
+): void {
+  if (carriage.processing !== undefined) part.processing = carriage.processing;
+  if (carriage.videoMetadata !== undefined) part.videoMetadata = carriage.videoMetadata;
+}
+
 function imageUrlToGooglePart(imageUrl: unknown): GeminiPart | null {
   const url = extractImageUrl(imageUrl);
   if (!url) return null;
 
+  // A chat client may attach the agentic-video flag as a sibling of
+  // image_url: `{ type: 'image_url', image_url: { url }, processing: 'agentic',
+  // videoMetadata: { ... } }`. imageUrlToGooglePart only sees the inner
+  // image_url object, so extractProcessing reads the enclosing block.
   const dataUrl = DATA_IMAGE_URL_RE.exec(url);
   if (dataUrl) {
     const mimeType = dataUrl[1] || 'image/png';
@@ -226,7 +274,10 @@ function messageToContent(
         parts.push({ text: block.text });
       } else if (block.type === 'image_url' || block.type === 'input_image') {
         const imagePart = imageUrlToGooglePart(block.image_url);
-        if (imagePart) parts.push(imagePart);
+        if (imagePart) {
+          applyPartProcessing(imagePart, extractPartProcessing(block));
+          parts.push(imagePart);
+        }
       }
     }
   }

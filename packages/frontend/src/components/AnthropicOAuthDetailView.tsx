@@ -337,6 +337,7 @@ const AnthropicOAuthDetailView: Component<Props> = (props) => {
                               connectionId={k.id}
                               label={k.label}
                               busy={props.busy()}
+                              always
                               onReconnect={(label) => void handleSignIn(label)}
                             />
                             <button
