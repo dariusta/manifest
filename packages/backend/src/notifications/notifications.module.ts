@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { NotificationsController } from './notifications.controller';
 import { ConnectionTestModule } from '../connection-test/connection-test.module';
@@ -26,7 +26,7 @@ import { Tenant } from '../entities/tenant.entity';
       Tenant,
       TenantProvider,
     ]),
-    ConnectionTestModule,
+    forwardRef(() => ConnectionTestModule),
   ],
   controllers: [NotificationsController],
   providers: [

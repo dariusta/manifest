@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -40,6 +40,7 @@ export class SubscriptionHealthCronService {
     private readonly providerRepo: Repository<TenantProvider>,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
+    @Inject(forwardRef(() => ConnectionTestService))
     private readonly connectionTest: ConnectionTestService,
     private readonly emailService: NotificationEmailService,
     private readonly emailProviderConfigService: EmailProviderConfigService,
