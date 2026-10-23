@@ -733,6 +733,7 @@ User connects provider (POST /routing/:agent/providers)
 - `cached_models` — per-provider JSONB column on `tenant_providers` table
 - Discovery runs synchronously on provider connect (user sees models immediately)
 - "Refresh models" button triggers `POST /routing/:agent/refresh-models`
+- **OpenAI stays current without either:** `ScheduledModelRefreshService` re-discovers every active OpenAI connection whose `models_fetched_at` is older than 6h (hourly cron, advisory-locked across replicas). ChatGPT subscription discovery sends Codex the latest stable `@openai/codex` version from npm (`CodexCliVersionService`, 1h TTL; `CODEX_CLI_VERSION` is only the fallback) — Codex hides models newer than the client version it is told. The live Codex catalog is authoritative: OpenAI's curated `knownModels` are `knownModelsUsage: 'fallback'`, used only when live discovery returns nothing, so retired models are not re-added.
 
 ### Model Pricing
 

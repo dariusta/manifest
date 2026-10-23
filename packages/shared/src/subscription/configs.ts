@@ -69,25 +69,35 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     supportsSubscription: true as const,
     subscriptionLabel: 'ChatGPT Plus/Pro/Team',
     subscriptionAuthMode: 'popup_oauth' as const,
+    // The live Codex `/models` catalog is authoritative: discovery sends the
+    // current Codex CLI version, so it already lists the newest models and
+    // drops retired ones. This list only stands in when that call fails.
+    // Mirrors the visible entries of Codex's bundled catalog, minus models
+    // retired for ChatGPT sign-in — https://learn.chatgpt.com/docs/models
     knownModels: Object.freeze([
+      'gpt-6.1-sol',
       'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
-      'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.3-codex-spark',
     ]),
     knownModelsMatch: 'exact' as const,
+    knownModelsUsage: 'fallback' as const,
     subscriptionCapabilities: Object.freeze({
-      maxContextWindow: 200000,
+      // ChatGPT sign-in windows differ from the API's 1.05M: Codex reports a
+      // 272k default `context_window` and an 872k `max_context_window`
+      // (openai/codex codex-rs/models-manager/models.json).
+      maxContextWindow: 272000,
       modelContextWindows: Object.freeze({
-        // https://developers.openai.com/api/docs/models/gpt-6-astra
-        'gpt-6-astra': 1050000,
-        'gpt-5.6-sol': 1050000,
-        'gpt-5.6-terra': 1050000,
-        'gpt-5.6-luna': 1050000,
+        'gpt-6.1-sol': 872000,
+        'gpt-6-astra': 872000,
+        'gpt-6-sol': 872000,
+        'gpt-6-luna': 872000,
+        'gpt-5.6-sol': 872000,
+        'gpt-5.6-terra': 872000,
+        'gpt-5.6-luna': 872000,
       }),
       supportsPromptCaching: true,
       supportsBatching: false,

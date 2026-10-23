@@ -5,8 +5,11 @@
  *
  * Codex (`https://chatgpt.com/backend-api/codex/...`): the `client_version`
  * URL param is enforced — older versions silently receive an older model
- * subset. Bump `CODEX_CLI_VERSION` to track the current `openai/codex` CLI
- * release. The user-agent string is not enforced, so it stays synthetic.
+ * subset (each catalog entry carries a `minimal_client_version`). Model
+ * discovery therefore resolves the current stable `@openai/codex` release at
+ * runtime (`refreshCodexCliVersion`); `CODEX_CLI_VERSION` is only the
+ * fallback used until that lookup succeeds. The user-agent string is not
+ * enforced, so it stays synthetic.
  *
  * Claude (`https://api.anthropic.com/...`): model gates validate the Claude
  * Code version embedded in the user-agent. Keep it at or above the minimum
@@ -30,9 +33,56 @@
 
 import { createHash, randomUUID } from 'crypto';
 
-export const CODEX_CLI_VERSION = '0.128.0';
+export const CODEX_CLI_VERSION = '0.164.0';
 export const CODEX_CLI_ORIGINATOR = 'codex_cli_rs';
 export const CODEX_CLI_USER_AGENT = 'codex_cli_rs/0.0.0 (Unknown 0; unknown) unknown';
+// The `latest` dist-tag only ever names a stable release; prereleases ship
+// under `alpha`. Codex itself sends a bare major.minor.patch.
+const CODEX_CLI_PACKAGE_URL = 'https://registry.npmjs.org/@openai%2fcodex/latest';
+const STABLE_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)$/;
+let currentCodexCliVersion = CODEX_CLI_VERSION;
+
+export function getCodexCliVersion(): string {
+  return currentCodexCliVersion;
+}
+
+export function codexModelsUrl(): string {
+  return `https://chatgpt.com/backend-api/codex/models?client_version=${getCodexCliVersion()}`;
+}
+
+function compareStableVersions(a: string, b: string): number {
+  const left = STABLE_VERSION_RE.exec(a)!;
+  const right = STABLE_VERSION_RE.exec(b)!;
+  for (let i = 1; i <= 3; i++) {
+    const diff = Number(left[i]) - Number(right[i]);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/**
+ * Adopt the current stable Codex CLI release so the Codex models endpoint
+ * returns the newest catalog. Never moves backwards: a rolled-back `latest`
+ * tag must not hide models an earlier, higher version already unlocked.
+ * Returns the version in effect, or null when the registry lookup failed.
+ */
+export async function refreshCodexCliVersion(): Promise<string | null> {
+  try {
+    const response = await fetch(CODEX_CLI_PACKAGE_URL, {
+      signal: AbortSignal.timeout(VERSION_FETCH_TIMEOUT_MS),
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { version?: unknown };
+    if (typeof body.version !== 'string' || !STABLE_VERSION_RE.test(body.version)) return null;
+    if (compareStableVersions(body.version, currentCodexCliVersion) > 0) {
+      currentCodexCliVersion = body.version;
+    }
+    return currentCodexCliVersion;
+  } catch {
+    return null;
+  }
+}
 
 export const CLAUDE_CODE_VERSION = '2.1.287';
 const CLAUDE_CODE_PACKAGE_URL = 'https://registry.npmjs.org/@anthropic-ai%2fclaude-code/latest';

@@ -18,12 +18,24 @@ import {
 /* ── getProvider ────────────────────────────────── */
 
 describe('getProvider', () => {
-  it('includes exact GPT-6 Astra in the OpenAI model choices', () => {
-    expect(getProvider('openai')?.models).toContainEqual({
-      label: 'GPT-6 Astra',
-      value: 'gpt-6-astra',
-    });
+  it('labels the current GPT-6 lineup in the OpenAI model choices', () => {
+    const models = getProvider('openai')?.models;
+    for (const model of [
+      { label: 'GPT-6 Astra', value: 'gpt-6-astra' },
+      { label: 'GPT-6.1 Sol', value: 'gpt-6.1-sol' },
+      { label: 'GPT-6 Luna', value: 'gpt-6-luna' },
+    ]) {
+      expect(models).toContainEqual(model);
+    }
     expect(getProvider('openai')?.subtitle).toContain('GPT-6 Astra');
+    expect(getProvider('openai')?.subtitle).toContain('GPT-6.1 Sol');
+  });
+
+  it('drops OpenAI models that have been shut down', () => {
+    const values = getProvider('openai')?.models.map((model) => model.value);
+    for (const retired of ['gpt-3.5-turbo', 'gpt-4-turbo', 'o1', 'o1-preview', 'o3-mini']) {
+      expect(values).not.toContain(retired);
+    }
   });
   it('returns the provider definition for a known ID', () => {
     const result = getProvider('openai');

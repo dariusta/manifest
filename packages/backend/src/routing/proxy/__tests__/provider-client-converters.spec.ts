@@ -789,6 +789,18 @@ describe('provider-client-converters', () => {
       expect(result).not.toHaveProperty('max_tokens');
     });
 
+    it.each(['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-10'])(
+      'should convert max_tokens to max_completion_tokens for %s',
+      (model) => {
+        const body = { messages: [{ role: 'user', content: 'Hi' }], model, max_tokens: 4096 };
+
+        const result = sanitizeOpenAiBody(body, 'openai', model);
+
+        expect(result).toHaveProperty('max_completion_tokens', 4096);
+        expect(result).not.toHaveProperty('max_tokens');
+      },
+    );
+
     it('should convert max_tokens for o-series models', () => {
       const body = {
         messages: [{ role: 'user', content: 'Hi' }],

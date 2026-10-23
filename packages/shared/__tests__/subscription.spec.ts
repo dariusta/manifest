@@ -5,6 +5,7 @@ import {
   supportsSubscriptionProvider,
   getSubscriptionKnownModels,
   getSubscriptionKnownModelsMatch,
+  getSubscriptionKnownModelsUsage,
   getSubscriptionCapabilities,
 } from '../src/subscription';
 
@@ -378,12 +379,25 @@ describe('getSubscriptionKnownModels', () => {
 
   it('returns the curated ChatGPT plan models for OpenAI', () => {
     const models = getSubscriptionKnownModels('openai');
-    expect(models).toEqual(
-      expect.arrayContaining(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']),
-    );
+    expect(models).toEqual([
+      'gpt-6.1-sol',
+      'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+    ]);
     expect(models).not.toContain('gpt-5.6-sol-pro');
     expect(models).not.toContain('gpt-5.6-terra-pro');
     expect(models).not.toContain('gpt-5.6-luna-pro');
+  });
+
+  it('omits models retired from Codex with ChatGPT sign-in', () => {
+    const models = getSubscriptionKnownModels('openai');
+    for (const retired of ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']) {
+      expect(models).not.toContain(retired);
+    }
   });
 
   it('returns known models for copilot', () => {
@@ -532,6 +546,18 @@ describe('getSubscriptionKnownModelsMatch', () => {
   });
 });
 
+describe('getSubscriptionKnownModelsUsage', () => {
+  it('uses the OpenAI list only as a fallback for live Codex discovery', () => {
+    expect(getSubscriptionKnownModelsUsage('openai')).toBe('fallback');
+    expect(getSubscriptionKnownModelsUsage('OpenAI')).toBe('fallback');
+  });
+
+  it('supplements live discovery by default', () => {
+    expect(getSubscriptionKnownModelsUsage('anthropic')).toBe('supplement');
+    expect(getSubscriptionKnownModelsUsage('unknown')).toBe('supplement');
+  });
+});
+
 describe('getSubscriptionCapabilities', () => {
   it('returns capabilities for anthropic', () => {
     const caps = getSubscriptionCapabilities('anthropic');
@@ -549,14 +575,18 @@ describe('getSubscriptionCapabilities', () => {
   it('returns capabilities for OpenAI subscription', () => {
     const caps = getSubscriptionCapabilities('openai');
     expect(caps).toMatchObject({
-      maxContextWindow: 200000,
+      maxContextWindow: 272000,
       supportsPromptCaching: true,
       supportsBatching: false,
     });
-    expect(caps?.modelContextWindows).toMatchObject({
-      'gpt-5.6-sol': 1050000,
-      'gpt-5.6-terra': 1050000,
-      'gpt-5.6-luna': 1050000,
+    expect(caps?.modelContextWindows).toEqual({
+      'gpt-6.1-sol': 872000,
+      'gpt-6-astra': 872000,
+      'gpt-6-sol': 872000,
+      'gpt-6-luna': 872000,
+      'gpt-5.6-sol': 872000,
+      'gpt-5.6-terra': 872000,
+      'gpt-5.6-luna': 872000,
     });
   });
 

@@ -9,7 +9,7 @@ import { OLLAMA_CLOUD_HOST, OLLAMA_HOST } from '../common/constants/ollama';
 import {
   CODEX_CLI_ORIGINATOR,
   CODEX_CLI_USER_AGENT,
-  CODEX_CLI_VERSION,
+  codexModelsUrl,
   COPILOT_EDITOR_VERSION,
   COPILOT_PLUGIN_VERSION,
   buildClaudeCodeSubscriptionHeaders,
@@ -23,6 +23,7 @@ import {
 } from '../routing/xiaomi-region';
 import { getZaiCodingPlanBaseUrl, normalizeZaiCodingPlanBaseUrl } from '../routing/zai-region';
 import { OpencodeGoCatalogService } from './opencode-go-catalog.service';
+import { CodexCliVersionService } from './codex-cli-version.service';
 import {
   buildKiroHeaders,
   KIRO_BASE_URL,
@@ -73,9 +74,9 @@ interface ModelParserConfig<T> {
   contextWindowSource?: (entry: T) => DiscoveredModel['contextWindowSource'];
   inputPricePerToken?: number | null;
   outputPricePerToken?: number | null;
-  capabilityReasoning?: boolean;
+  capabilityReasoning?: boolean | ((entry: T) => boolean);
   capabilityCode?: boolean | ((entry: T) => boolean);
-  inputModalities?: readonly ModelModality[];
+  inputModalities?: readonly ModelModality[] | ((entry: T) => readonly ModelModality[] | undefined);
   outputModalities?: readonly ModelModality[];
   supportedEndpoints?: (entry: T) => readonly string[] | undefined;
   qualityScore?: number;
@@ -95,6 +96,10 @@ function createModelParser<T>(
         const ctxVal = config.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
         const contextWindowSource = config.contextWindowSource?.(entry);
         const supportedEndpoints = config.supportedEndpoints?.(entry);
+        const inputModalities =
+          typeof config.inputModalities === 'function'
+            ? config.inputModalities(entry)
+            : config.inputModalities;
         return {
           id,
           displayName: config.getDisplayName(entry, id),
@@ -103,12 +108,15 @@ function createModelParser<T>(
           ...(contextWindowSource ? { contextWindowSource } : {}),
           inputPricePerToken: config.inputPricePerToken ?? null,
           outputPricePerToken: config.outputPricePerToken ?? null,
-          capabilityReasoning: config.capabilityReasoning ?? false,
+          capabilityReasoning:
+            typeof config.capabilityReasoning === 'function'
+              ? config.capabilityReasoning(entry)
+              : (config.capabilityReasoning ?? false),
           capabilityCode:
             typeof config.capabilityCode === 'function'
               ? config.capabilityCode(entry)
               : (config.capabilityCode ?? false),
-          ...(config.inputModalities ? { inputModalities: config.inputModalities } : {}),
+          ...(inputModalities ? { inputModalities } : {}),
           ...(config.outputModalities ? { outputModalities: config.outputModalities } : {}),
           ...(supportedEndpoints && supportedEndpoints.length > 0 ? { supportedEndpoints } : {}),
           qualityScore: config.qualityScore ?? 3,
@@ -746,21 +754,37 @@ interface OpenAISubscriptionModelEntry {
   slug: string;
   display_name?: string;
   context_window?: number;
+  /** Largest window the model accepts under ChatGPT sign-in; `context_window` is Codex's default. */
+  max_context_window?: number;
   visibility?: string;
   supported_in_api?: boolean;
+  input_modalities?: unknown;
+  supported_reasoning_levels?: unknown;
 }
 
+function codexContextWindow(entry: OpenAISubscriptionModelEntry): number | undefined {
+  const windows = [entry.max_context_window, entry.context_window].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0,
+  );
+  return windows.length > 0 ? Math.max(...windows) : undefined;
+}
+
+// Codex publishes per-model metadata, so a model launched before models.dev
+// or OpenRouter catalog it still gets real modalities and reasoning flags.
 const parseOpenaiSubscription = createModelParser<OpenAISubscriptionModelEntry>({
   arrayKey: 'models',
   filter: (entry) => typeof entry.slug === 'string' && entry.visibility === 'list',
   getId: (entry) => entry.slug,
   getDisplayName: (entry, id) => entry.display_name || id,
-  contextWindow: (entry) => entry.context_window ?? 200000,
+  contextWindow: (entry) => codexContextWindow(entry) ?? 200000,
   contextWindowSource: (entry) =>
-    typeof entry.context_window === 'number' ? 'provider' : 'subscription_config',
+    codexContextWindow(entry) !== undefined ? 'provider' : 'subscription_config',
   inputPricePerToken: 0,
   outputPricePerToken: 0,
+  capabilityReasoning: (entry) =>
+    Array.isArray(entry.supported_reasoning_levels) && entry.supported_reasoning_levels.length > 0,
   capabilityCode: true,
+  inputModalities: (entry) => normalizeOpenRouterModalities(getStringArray(entry.input_modalities)),
 });
 
 /* ── GitHub Copilot (subscription-only, OpenAI-compatible /models) ── */
@@ -904,7 +928,8 @@ export const PROVIDER_CONFIGS: Record<string, FetcherConfig> = {
     parse: parseOpenAIDeduped,
   },
   'openai-subscription': {
-    endpoint: `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLI_VERSION}`,
+    // Built per request: the Codex client version is resolved at runtime.
+    endpoint: codexModelsUrl,
     buildHeaders: (key: string) => ({
       Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
@@ -1110,6 +1135,9 @@ export class ProviderModelFetcherService {
     @Optional()
     @Inject(OpencodeGoCatalogService)
     private readonly opencodeGoCatalog: OpencodeGoCatalogService | null = null,
+    @Optional()
+    @Inject(CodexCliVersionService)
+    private readonly codexCliVersion: CodexCliVersionService | null = null,
   ) {}
 
   async fetch(
@@ -1162,6 +1190,9 @@ export class ProviderModelFetcherService {
       return this.fetchPioneerModels(config, apiKey, providerId, authType);
     }
 
+    if (configKey === 'openai-subscription') {
+      await this.codexCliVersion?.ensureFresh();
+    }
     let url = typeof config.endpoint === 'function' ? config.endpoint(apiKey) : config.endpoint;
     if (endpointOverride && configKey === 'minimax-subscription') {
       const minimaxBaseUrl = normalizeMinimaxSubscriptionBaseUrl(endpointOverride);

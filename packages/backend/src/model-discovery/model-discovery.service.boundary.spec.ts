@@ -74,6 +74,7 @@ function makeMockRepo() {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
     save: jest.fn().mockImplementation((e: unknown) => Promise.resolve(e)),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
   };
 }
 

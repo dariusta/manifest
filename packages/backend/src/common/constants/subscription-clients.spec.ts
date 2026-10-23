@@ -117,3 +117,106 @@ describe('buildAntigravitySubscriptionHeaders', () => {
     });
   });
 });
+
+describe('Codex CLI version', () => {
+  type ClientsModule = typeof import('./subscription-clients');
+  let fetchSpy: jest.SpyInstance;
+
+  // Each test gets a fresh module so the resolved version starts at the fallback.
+  function loadClients(): ClientsModule {
+    let clients!: ClientsModule;
+    jest.isolateModules(() => {
+      clients = jest.requireActual<ClientsModule>('./subscription-clients');
+    });
+    return clients;
+  }
+
+  function registryReturns(body: unknown, ok = true) {
+    fetchSpy.mockResolvedValue({ ok, json: async () => body } as Response);
+  }
+
+  beforeEach(() => {
+    fetchSpy = jest.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  it('starts at the compiled fallback version', () => {
+    const clients = loadClients();
+    expect(clients.getCodexCliVersion()).toBe(clients.CODEX_CLI_VERSION);
+    expect(clients.codexModelsUrl()).toBe(
+      `https://chatgpt.com/backend-api/codex/models?client_version=${clients.CODEX_CLI_VERSION}`,
+    );
+  });
+
+  it('adopts a newer stable release from the npm latest tag', async () => {
+    const clients = loadClients();
+    registryReturns({ version: '9.0.0' });
+
+    await expect(clients.refreshCodexCliVersion()).resolves.toBe('9.0.0');
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://registry.npmjs.org/@openai%2fcodex/latest',
+      expect.objectContaining({ headers: { Accept: 'application/json' } }),
+    );
+    expect(clients.codexModelsUrl()).toBe(
+      'https://chatgpt.com/backend-api/codex/models?client_version=9.0.0',
+    );
+  });
+
+  it('compares versions numerically, not lexically', async () => {
+    const clients = loadClients();
+    const [major, minor] = clients.CODEX_CLI_VERSION.split('.').map(Number);
+    const next = `${major}.${minor + 1}.0`;
+    registryReturns({ version: next });
+
+    await clients.refreshCodexCliVersion();
+
+    expect(clients.getCodexCliVersion()).toBe(next);
+  });
+
+  it('keeps the current version when npm reports the same release', async () => {
+    const clients = loadClients();
+    registryReturns({ version: clients.CODEX_CLI_VERSION });
+
+    await expect(clients.refreshCodexCliVersion()).resolves.toBe(clients.CODEX_CLI_VERSION);
+  });
+
+  it('never moves back to an older release', async () => {
+    const clients = loadClients();
+    registryReturns({ version: '0.1.0' });
+
+    await expect(clients.refreshCodexCliVersion()).resolves.toBe(clients.CODEX_CLI_VERSION);
+    expect(clients.getCodexCliVersion()).toBe(clients.CODEX_CLI_VERSION);
+  });
+
+  it.each([
+    ['a prerelease', { version: '99.0.0-alpha.1' }],
+    ['a missing version', {}],
+    ['a non-string version', { version: 99 }],
+  ])('rejects %s', async (_label, body) => {
+    const clients = loadClients();
+    registryReturns(body);
+
+    await expect(clients.refreshCodexCliVersion()).resolves.toBeNull();
+    expect(clients.getCodexCliVersion()).toBe(clients.CODEX_CLI_VERSION);
+  });
+
+  it('keeps the current version when the registry responds with an error', async () => {
+    const clients = loadClients();
+    registryReturns({ version: '99.0.0' }, false);
+
+    await expect(clients.refreshCodexCliVersion()).resolves.toBeNull();
+    expect(clients.getCodexCliVersion()).toBe(clients.CODEX_CLI_VERSION);
+  });
+
+  it('keeps the current version when the registry is unreachable', async () => {
+    const clients = loadClients();
+    fetchSpy.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    await expect(clients.refreshCodexCliVersion()).resolves.toBeNull();
+    expect(clients.getCodexCliVersion()).toBe(clients.CODEX_CLI_VERSION);
+  });
+});

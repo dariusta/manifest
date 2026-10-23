@@ -34,11 +34,14 @@ const TEXT_TOOLS: KnownCapabilities = {
 
 /** Keyed by `<provider-id>/<model-id>`, lowercase. */
 const KNOWN_MODEL_MODALITIES: Readonly<Record<string, KnownCapabilities>> = {
-  // ChatGPT subscription (Codex models API) publishes no modality metadata,
-  // and models.dev lags behind new launches. These facts bootstrap the
-  // subscription catalog until an upstream source carries them (#2537).
+  // Live Codex discovery carries `input_modalities`, but the curated
+  // subscription fallback and API-key `/v1/models` do not, and models.dev
+  // lags behind new launches. These facts cover that gap (#2537).
   // https://developers.openai.com/api/docs/models/gpt-6-astra
+  'openai/gpt-6.1-sol': TEXT_IMAGE_TOOLS,
   'openai/gpt-6-astra': TEXT_IMAGE_TOOLS,
+  'openai/gpt-6-sol': TEXT_IMAGE_TOOLS,
+  'openai/gpt-6-luna': TEXT_IMAGE_TOOLS,
   'openai/gpt-5.6-sol': TEXT_IMAGE_TOOLS,
   'openai/gpt-5.6-terra': TEXT_IMAGE_TOOLS,
   'openai/gpt-5.6-luna': TEXT_IMAGE_TOOLS,

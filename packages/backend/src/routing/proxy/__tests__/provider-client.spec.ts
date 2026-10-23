@@ -2139,7 +2139,9 @@ describe('ProviderClient', () => {
       },
     );
 
-    const proModels = ['gpt-5-pro', 'gpt-5.2-pro', 'gpt-5.4-pro'];
+    // gpt-6-pro is not an OpenAI id today; it pins that the -pro rule covers
+    // the next generation instead of being locked to GPT-5.
+    const proModels = ['gpt-5-pro', 'gpt-5.2-pro', 'gpt-5.4-pro', 'gpt-6-pro', 'o3-pro'];
 
     it.each(proModels)('routes api_key + %s to /v1/responses', async (model) => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
@@ -2239,6 +2241,10 @@ describe('ProviderClient', () => {
       'gpt-4o-mini',
       'gpt-5-chat-latest',
       'codex-mini-latest',
+      'gpt-6-astra',
+      'gpt-6.1-sol',
+      'gpt-6-luna',
+      'o3',
     ];
 
     it.each(chatCompatibleModels)('leaves api_key + %s on /v1/chat/completions', async (model) => {

@@ -7,6 +7,8 @@ import { ModelPricesModule } from '../model-prices/model-prices.module';
 import { ProviderModelFetcherService } from './provider-model-fetcher.service';
 import { ModelDiscoveryService } from './model-discovery.service';
 import { OpencodeGoCatalogService } from './opencode-go-catalog.service';
+import { CodexCliVersionService } from './codex-cli-version.service';
+import { ScheduledModelRefreshService } from './scheduled-model-refresh.service';
 import { CopilotTokenService } from '../routing/proxy/copilot-token.service';
 
 @Module({
@@ -18,6 +20,8 @@ import { CopilotTokenService } from '../routing/proxy/copilot-token.service';
     ProviderModelFetcherService,
     ModelDiscoveryService,
     OpencodeGoCatalogService,
+    CodexCliVersionService,
+    ScheduledModelRefreshService,
     CopilotTokenService,
   ],
   exports: [ModelDiscoveryService, ProviderModelFetcherService, OpencodeGoCatalogService],

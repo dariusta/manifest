@@ -6,6 +6,7 @@ import {
 import {
   getSubscriptionKnownModels,
   getSubscriptionKnownModelsMatch,
+  getSubscriptionKnownModelsUsage,
   getSubscriptionCapabilities,
   META_MODEL_API_CONTEXT_WINDOW,
   META_MODEL_API_MODEL_BY_ID,
@@ -340,7 +341,9 @@ export function reconcileCachedSubscriptionContextWindow(
 /**
  * Supplement discovered models with knownModels from subscription-capabilities.
  * Ensures subscription users always have the known models available as selectable options,
- * even if the live provider API did not return them.
+ * even if the live provider API did not return them. Providers whose knownModels
+ * are only a fallback (`knownModelsUsage: 'fallback'`) treat the live list as
+ * authoritative, so it is returned unchanged.
  */
 export function supplementWithKnownModels(
   raw: DiscoveredModel[],
@@ -348,6 +351,7 @@ export function supplementWithKnownModels(
 ): DiscoveredModel[] {
   const knownModels = getSubscriptionKnownModels(providerId);
   if (!knownModels) return raw;
+  if (getSubscriptionKnownModelsUsage(providerId) === 'fallback') return raw;
   const matchMode = getSubscriptionKnownModelsMatch(providerId);
 
   const capabilities = getSubscriptionCapabilities(providerId);

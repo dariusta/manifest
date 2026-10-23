@@ -372,6 +372,21 @@ describe('buildSubscriptionFallbackModels', () => {
       'MiniMax-M2',
     ]);
   });
+
+  it('builds the current ChatGPT lineup with ChatGPT sign-in context windows', () => {
+    const result = buildSubscriptionFallbackModels('openai');
+
+    expect(result.map((model) => model.id)).toEqual([
+      'gpt-6.1-sol',
+      'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+    ]);
+    expect(new Set(result.map((model) => model.contextWindow))).toEqual(new Set([872000]));
+  });
 });
 
 describe('supplementWithKnownModels', () => {
@@ -397,9 +412,33 @@ describe('supplementWithKnownModels', () => {
   });
 
   it('marks supplemented context windows as subscription configuration', () => {
-    const result = supplementWithKnownModels([], 'openai');
+    const result = supplementWithKnownModels([], 'anthropic');
 
+    expect(result.length).toBeGreaterThan(0);
     expect(result.every((model) => model.contextWindowSource === 'subscription_config')).toBe(true);
+  });
+
+  it('leaves a live OpenAI catalog authoritative instead of re-adding curated models', () => {
+    // The ChatGPT catalog retires models (gpt-5.5, gpt-5.4); merging the
+    // curated list back in would re-advertise models that 4xx at chat time.
+    const raw = [
+      {
+        id: 'gpt-7-nova',
+        displayName: 'GPT-7 Nova',
+        provider: 'openai',
+        contextWindow: 872000,
+        inputPricePerToken: 0,
+        outputPricePerToken: 0,
+        capabilityReasoning: true,
+        capabilityCode: true,
+        qualityScore: 3,
+      },
+    ];
+
+    const result = supplementWithKnownModels(raw, 'openai');
+
+    expect(result).toBe(raw);
+    expect(result.map((model) => model.id)).toEqual(['gpt-7-nova']);
   });
 
   it('should not add known models that are already covered', () => {
@@ -472,7 +511,7 @@ describe('reconcileCachedSubscriptionContextWindow', () => {
         { ...model, contextWindowSource: 'subscription_config' },
         'openai',
       ),
-    ).toMatchObject({ contextWindow: 1050000, contextWindowSource: 'subscription_config' });
+    ).toMatchObject({ contextWindow: 872000, contextWindowSource: 'subscription_config' });
   });
 
   it('preserves a context window reported by the provider', () => {
@@ -513,7 +552,7 @@ describe('reconcileCachedSubscriptionContextWindow', () => {
   it('returns an already-current row unchanged', () => {
     const cached = {
       ...model,
-      contextWindow: 1050000,
+      contextWindow: 872000,
       contextWindowSource: 'subscription_config' as const,
     };
 

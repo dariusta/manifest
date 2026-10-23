@@ -19,5 +19,12 @@ export interface SubscriptionProviderConfig {
    * `exact` requires the curated model ID itself to be present.
    */
   knownModelsMatch?: 'prefix' | 'exact';
+  /**
+   * How knownModels combine with live subscription discovery: `supplement`
+   * (default) merges them into every result, while `fallback` uses them only
+   * when live discovery returns nothing — so a live catalog that has retired
+   * a model is not overruled by the curated list.
+   */
+  knownModelsUsage?: 'supplement' | 'fallback';
   subscriptionCapabilities?: Readonly<SubscriptionCapabilities>;
 }

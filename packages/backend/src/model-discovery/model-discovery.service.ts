@@ -64,6 +64,22 @@ function modelsDevModelIdPrefix(providerId: string): string | undefined {
   return lower === 'opencode-go' || lower === 'opencode-zen' ? lower : undefined;
 }
 
+/**
+ * Providers whose native `/models` catalog is authoritative and kept fresh by
+ * ScheduledModelRefreshService. When that catalog comes back empty (outage,
+ * expired token) the previous live snapshot is kept: a curated list or an
+ * external catalog that lags a new launch must not replace it.
+ */
+export const LIVE_CATALOG_PROVIDERS: ReadonlySet<string> = new Set(['openai']);
+
+function keepsPreviousLiveSnapshot(provider: TenantProvider): boolean {
+  return (
+    LIVE_CATALOG_PROVIDERS.has(provider.provider.toLowerCase()) &&
+    Array.isArray(provider.cached_models) &&
+    provider.cached_models.length > 0
+  );
+}
+
 function prefersModelsDevCatalog(providerId: string): boolean {
   const lower = providerId.toLowerCase();
   return lower === 'opencode-zen';
@@ -269,11 +285,15 @@ export class ModelDiscoveryService {
         this.modelRegistry.registerModels(provider.provider, raw);
       }
 
+      // An empty live catalog leaves raw empty so the empty-result guard
+      // below keeps the previous snapshot instead of a fallback.
+      const keepPreviousSnapshot = raw.length === 0 && keepsPreviousLiveSnapshot(provider);
+
       // Subscription providers whose `/models` endpoint either does not
       // exist (CodeAssist) or returns more than the subscription tier
       // actually grants must use the curated `knownModels` list — otherwise
       // the routing UI offers models that 404 at chat time.
-      if (raw.length === 0 && provider.auth_type === 'subscription') {
+      if (raw.length === 0 && provider.auth_type === 'subscription' && !keepPreviousSnapshot) {
         raw = buildSubscriptionFallbackModels(provider.provider);
         if (raw.length > 0) {
           this.logger.log(
@@ -284,7 +304,7 @@ export class ModelDiscoveryService {
 
       // External catalogs may enrich provider-discovered models, but they must
       // never determine which models a subscription can access.
-      if (raw.length === 0 && provider.auth_type !== 'subscription') {
+      if (raw.length === 0 && provider.auth_type !== 'subscription' && !keepPreviousSnapshot) {
         raw = buildModelsDevModels();
         if (raw.length > 0) {
           this.logger.log(
@@ -297,6 +317,7 @@ export class ModelDiscoveryService {
       if (
         raw.length === 0 &&
         provider.auth_type !== 'subscription' &&
+        !keepPreviousSnapshot &&
         !isQwenProvider(provider.provider)
       ) {
         const confirmed = this.modelRegistry?.getConfirmedModels(provider.provider) ?? null;
@@ -309,43 +330,10 @@ export class ModelDiscoveryService {
       }
     }
 
-    // A curated API addition must not replace previously discovered models
-    // when every live/catalog source is temporarily unavailable.
-    if (
-      provider.provider === 'openai' &&
-      provider.auth_type === 'api_key' &&
-      raw.length === 0 &&
-      Array.isArray(provider.cached_models)
-    ) {
-      raw = [...provider.cached_models];
-    }
-
     // For subscription providers, supplement live discovery with the explicit
     // curated list so users can always select known supported models.
     if (provider.auth_type === 'subscription') {
       raw = supplementWithKnownModels(raw, provider.provider);
-    } else if (
-      provider.provider === 'openai' &&
-      provider.auth_type === 'api_key' &&
-      !raw.some((model) => model.id === 'gpt-6-astra')
-    ) {
-      // Explicit API availability while native/external catalogs catch up.
-      // https://developers.openai.com/api/docs/models/gpt-6-astra
-      // Leave pricing unknown here; normal enrichment supplies current rates.
-      raw.push({
-        id: 'gpt-6-astra',
-        displayName: 'GPT-6 Astra',
-        provider: 'openai',
-        contextWindow: 1050000,
-        inputPricePerToken: null,
-        outputPricePerToken: null,
-        capabilityReasoning: true,
-        capabilityCode: true,
-        inputModalities: ['text', 'image'],
-        outputModalities: ['text'],
-        capabilities: ['text', 'image', 'tools', 'stream'],
-        qualityScore: 3,
-      });
     }
 
     // Preserve the full AuthType union (api_key / subscription / local) —
@@ -390,7 +378,13 @@ export class ModelDiscoveryService {
 
     provider.cached_models = filtered;
     provider.models_fetched_at = new Date().toISOString();
-    await this.providerRepo.save(provider);
+    // Write only the columns discovery owns. Saving the whole entity would
+    // write back fields read before the provider round-trip, reverting a
+    // disconnect or key rotation made meanwhile (e.g. during a scheduled refresh).
+    await this.providerRepo.update(
+      { id: provider.id },
+      { cached_models: filtered, models_fetched_at: provider.models_fetched_at },
+    );
     await this.invalidateProviderAccess(provider);
 
     this.logger.log(

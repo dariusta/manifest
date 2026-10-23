@@ -87,6 +87,7 @@ function makeMockRepo() {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
     save: jest.fn().mockImplementation((e: unknown) => Promise.resolve(e)),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
   };
 }
 
@@ -152,29 +153,115 @@ describe('ModelDiscoveryService', () => {
     );
   });
 
-  it.each(['api_key', 'subscription'] as const)(
-    'advertises and resolves exact gpt-6-astra for %s when discovery catalogs lag',
-    async (authType) => {
-      const provider = makeProvider({ auth_type: authType });
+  describe('OpenAI catalog freshness', () => {
+    it("advertises exactly what the API key's live catalog lists", async () => {
+      fetcher.fetch.mockResolvedValue([makeModel({ id: 'gpt-6.1-sol' })]);
+      const provider = makeProvider();
+
       const discovered = await service.discoverModels(provider);
-      const astra = discovered.find((model) => model.id === 'gpt-6-astra');
-      expect(astra).toMatchObject({
-        id: 'gpt-6-astra',
-        provider: 'openai',
-        authType,
-        contextWindow: 1050000,
-        inputPricePerToken: authType === 'subscription' ? 0 : null,
-        outputPricePerToken: authType === 'subscription' ? 0 : null,
+
+      expect(discovered.map((model) => model.id)).toEqual(['gpt-6.1-sol']);
+    });
+
+    it('does not invent API-key models when every catalog is empty', async () => {
+      const provider = makeProvider();
+
+      const discovered = await service.discoverModels(provider);
+
+      expect(discovered).toEqual([]);
+      expect(provider.cached_models).toEqual([]);
+    });
+
+    it('treats the live ChatGPT catalog as authoritative over the curated list', async () => {
+      fetcher.fetch.mockResolvedValue([
+        makeModel({ id: 'gpt-7-nova', inputPricePerToken: 0, outputPricePerToken: 0 }),
+      ]);
+      const provider = makeProvider({ auth_type: 'subscription' });
+
+      const discovered = await service.discoverModels(provider);
+
+      expect(discovered.map((model) => model.id)).toEqual(['gpt-7-nova']);
+      providerRepo.find.mockResolvedValue([provider]);
+      const models = await service.getModelsForAgent('tenant-1');
+      expect(models.map((model) => model.id)).toEqual(['gpt-7-nova']);
+    });
+
+    it('falls back to the current ChatGPT lineup when nothing was ever discovered', async () => {
+      const provider = makeProvider({ auth_type: 'subscription' });
+
+      const discovered = await service.discoverModels(provider);
+
+      expect(discovered.map((model) => model.id)).toEqual([
+        'gpt-6.1-sol',
+        'gpt-6-astra',
+        'gpt-6-sol',
+        'gpt-6-luna',
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+      ]);
+      expect(discovered.find((model) => model.id === 'gpt-6-astra')).toMatchObject({
+        authType: 'subscription',
+        contextWindow: 872000,
+        inputPricePerToken: 0,
+        outputPricePerToken: 0,
         capabilities: expect.arrayContaining(['text', 'image', 'tools', 'stream']),
       });
-      providerRepo.find.mockResolvedValue([provider]);
-      expect(await service.getModelForAgent('tenant-1', 'gpt-6-astra')).toMatchObject({
-        id: 'gpt-6-astra',
-        provider: 'openai',
-        authType,
+    });
+
+    it('keeps the previous API-key snapshot instead of a lagging external catalog', async () => {
+      // OpenAI briefly fails; models.dev has not caught up with gpt-6.1-sol yet.
+      mockModelsDevSync.getModelsForProvider.mockReturnValue([
+        {
+          id: 'gpt-6-astra',
+          name: 'GPT-6 Astra',
+          contextWindow: 1050000,
+          inputPricePerToken: 0.001,
+          outputPricePerToken: 0.002,
+        },
+      ]);
+      const previous = [makeModel({ id: 'gpt-6.1-sol' }), makeModel({ id: 'gpt-6-astra' })];
+      const provider = makeProvider({ cached_models: previous });
+
+      const discovered = await service.discoverModels(provider);
+
+      expect(discovered).toBe(previous);
+      expect(mockModelsDevSync.getModelsForProvider).not.toHaveBeenCalled();
+      expect(mockPricingSync.getAll).not.toHaveBeenCalled();
+      expect(providerRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('still lets other providers fall back to external catalogs', async () => {
+      mockModelsDevSync.getModelsForProvider.mockReturnValue([
+        {
+          id: 'deepseek-v4-pro',
+          name: 'DeepSeek V4 Pro',
+          contextWindow: 1000000,
+          inputPricePerToken: 0.001,
+          outputPricePerToken: 0.002,
+        },
+      ]);
+      const provider = makeProvider({
+        provider: 'deepseek',
+        cached_models: [makeModel({ id: 'deepseek-v3', provider: 'deepseek' })],
       });
-    },
-  );
+
+      const discovered = await service.discoverModels(provider);
+
+      expect(discovered.map((model) => model.id)).toEqual(['deepseek-v4-pro']);
+    });
+
+    it('keeps the previous live ChatGPT snapshot when the Codex catalog call fails', async () => {
+      const previous = [makeModel({ id: 'gpt-7-nova', authType: 'subscription' })];
+      const provider = makeProvider({ auth_type: 'subscription', cached_models: previous });
+
+      const discovered = await service.discoverModels(provider);
+
+      expect(discovered).toBe(previous);
+      expect(provider.cached_models).toBe(previous);
+      expect(providerRepo.update).not.toHaveBeenCalled();
+    });
+  });
 
   it.each(['openai', 'openai-subscription'])(
     'retains exact gpt-6-astra through the %s native parser and filters',
@@ -246,7 +333,7 @@ describe('ModelDiscoveryService', () => {
 
       expect(result).toEqual([]);
       expect(fetcher.fetch).not.toHaveBeenCalled();
-      expect(providerRepo.save).not.toHaveBeenCalled();
+      expect(providerRepo.update).not.toHaveBeenCalled();
     });
 
     it('should decrypt key, fetch, enrich, and cache models', async () => {
@@ -259,10 +346,14 @@ describe('ModelDiscoveryService', () => {
       expect(mockGetSecret).toHaveBeenCalled();
       expect(mockDecrypt).toHaveBeenCalledWith('encrypted-key', expect.any(String));
       expect(fetcher.fetch).toHaveBeenCalledWith('openai', 'decrypted-key', 'api_key', undefined);
-      expect(result.map((model) => model.id)).toEqual(['gpt-4', 'gpt-6-astra']);
+      expect(result.map((model) => model.id)).toEqual(['gpt-4']);
       expect(provider.cached_models).toEqual(result);
       expect(provider.models_fetched_at).toBeDefined();
-      expect(providerRepo.save).toHaveBeenCalledWith(provider);
+      expect(providerRepo.update).toHaveBeenCalledWith(
+        { id: provider.id },
+        { cached_models: result, models_fetched_at: provider.models_fetched_at },
+      );
+      expect(providerRepo.save).not.toHaveBeenCalled();
     });
 
     it('caches the current configured window after models.dev enrichment', async () => {
@@ -282,7 +373,7 @@ describe('ModelDiscoveryService', () => {
         toolCall: true,
       });
       mockComputeScore.mockImplementation(({ context_window }) =>
-        context_window >= 1000000 ? 5 : 4,
+        context_window >= 800000 ? 4 : 3,
       );
       const provider = makeProvider({ auth_type: 'subscription' });
 
@@ -290,17 +381,17 @@ describe('ModelDiscoveryService', () => {
       const sol = result.find((model) => model.id === 'gpt-5.6-sol');
 
       expect(sol).toMatchObject({
-        contextWindow: 1050000,
+        contextWindow: 872000,
         contextWindowSource: 'subscription_config',
         inputPricePerToken: 0.000001,
         capabilityCode: true,
-        qualityScore: 5,
+        qualityScore: 4,
       });
       expect(mockComputeScore).toHaveBeenCalledWith(
         expect.objectContaining({ context_window: 400000 }),
       );
       expect(mockComputeScore).toHaveBeenCalledWith(
-        expect.objectContaining({ context_window: 1050000 }),
+        expect.objectContaining({ context_window: 872000 }),
       );
       expect(provider.cached_models).toEqual(result);
     });
@@ -594,7 +685,7 @@ describe('ModelDiscoveryService', () => {
 
       expect(mockModelRegistry.getConfirmedModels).toHaveBeenCalledWith('openai');
       // Only confirmed models plus the explicit API catalog addition.
-      expect(result.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-6-astra']);
+      expect(result.map((model) => model.id)).toEqual(['gpt-4o']);
       expect(result[0].id).toBe('gpt-4o');
     });
 
@@ -691,8 +782,8 @@ describe('ModelDiscoveryService', () => {
       providerRepo.find.mockResolvedValue(providers);
       fetcher.fetch.mockResolvedValue([]);
 
-      // Make providerRepo.save throw on first call to trigger .catch handler
-      providerRepo.save
+      // Make the cache write throw on first call to trigger .catch handler
+      providerRepo.update
         .mockRejectedValueOnce(new Error('DB write failed'))
         .mockResolvedValueOnce({});
 
@@ -758,7 +849,7 @@ describe('ModelDiscoveryService', () => {
         forceRefresh: true,
       });
       expect(result.ok).toBe(true);
-      expect(result.model_count).toBe(3);
+      expect(result.model_count).toBe(2);
       expect(result.error).toBeNull();
       expect(result.last_fetched_at).toBeDefined();
     });
@@ -787,17 +878,16 @@ describe('ModelDiscoveryService', () => {
       const result = await service.refreshProvider('tenant-1', 'openai', 'api_key');
 
       expect(fetcher.fetch).toHaveBeenCalledTimes(2);
-      expect(first.cached_models?.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-6-astra']);
+      expect(first.cached_models?.map((model) => model.id)).toEqual(['gpt-4o']);
       expect(second.cached_models?.map((model) => model.id)).toEqual([
         'gpt-5.6-sol',
         'gpt-5.6-terra',
         'gpt-5.6-luna',
-        'gpt-6-astra',
       ]);
       expect(mockModelsDevSync.refreshCache).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         ok: true,
-        model_count: 4,
+        model_count: 3,
         last_fetched_at: expect.any(String),
         error: null,
       });
@@ -826,7 +916,7 @@ describe('ModelDiscoveryService', () => {
       // discoverModels itself swallows fetcher errors, so to land in the
       // refreshProvider catch we make the cache-write throw instead.
       fetcher.fetch.mockResolvedValue([makeModel({ id: 'gpt-4o' })]);
-      providerRepo.save.mockRejectedValueOnce(new Error('DB write failed'));
+      providerRepo.update.mockRejectedValueOnce(new Error('DB write failed'));
 
       const result = await service.refreshProvider('agent-1', 'openai');
       expect(result.ok).toBe(false);
@@ -838,7 +928,7 @@ describe('ModelDiscoveryService', () => {
     it('reports a non-Error thrown value via String() in the error field', async () => {
       providerRepo.find.mockResolvedValue([makeProvider({ provider: 'openai' })]);
       fetcher.fetch.mockResolvedValue([makeModel({ id: 'gpt-4o' })]);
-      providerRepo.save.mockRejectedValueOnce('plain-string-failure');
+      providerRepo.update.mockRejectedValueOnce('plain-string-failure');
 
       const result = await service.refreshProvider('agent-1', 'openai');
       expect(result.ok).toBe(false);
@@ -863,12 +953,11 @@ describe('ModelDiscoveryService', () => {
 
       const result = await service.discoverModels(provider);
 
-      expect(result.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-4o-mini', 'gpt-6-astra']);
-      expect(result.slice(0, 2)).toEqual(
-        cachedModels.map((model) => ({ ...model, authType: 'api_key' })),
-      );
-      expect(provider.cached_models).toEqual(result);
-      expect(providerRepo.save).toHaveBeenCalledWith(provider);
+      expect(result).toBe(cachedModels);
+      expect(provider.cached_models).toBe(cachedModels);
+      // The failed refresh is not stamped as fresh, so the scheduled refresh retries it.
+      expect(provider.models_fetched_at).toBe('2026-04-01T08:00:00.000Z');
+      expect(providerRepo.update).not.toHaveBeenCalled();
     });
   });
 
@@ -1042,9 +1131,9 @@ describe('ModelDiscoveryService', () => {
 
       const result = await service.getModelsForAgent('tenant-1');
 
-      // Snapshot rows come first; the curated top-up follows and is not under test here.
-      expect(result.slice(0, 3).map((model) => [model.id, model.contextWindow])).toEqual([
-        ['gpt-5.6-sol', 1050000],
+      // The live ChatGPT snapshot is authoritative, so no curated rows follow.
+      expect(result.map((model) => [model.id, model.contextWindow])).toEqual([
+        ['gpt-5.6-sol', 872000],
         ['gpt-5.6-terra', 272000],
         ['gpt-5.6-luna', 272000],
       ]);
@@ -2462,9 +2551,13 @@ describe('ModelDiscoveryService', () => {
       );
 
       const ids = result.map((m) => m.id);
-      expect(ids).toContain('gpt-5.5');
-      expect(ids).toContain('gpt-5.4');
-      expect(ids).toContain('gpt-5.3-codex-spark');
+      expect(ids).toContain('gpt-6.1-sol');
+      expect(ids).toContain('gpt-6-astra');
+      expect(ids).toContain('gpt-6-luna');
+      // Retired from Codex with ChatGPT sign-in.
+      expect(ids).not.toContain('gpt-5.5');
+      expect(ids).not.toContain('gpt-5.4');
+      expect(ids).not.toContain('gpt-5.3-codex-spark');
       expect(ids).not.toContain('gpt-5.2-codex');
       expect(ids).not.toContain('gpt-5.1-codex-max');
       expect(ids).not.toContain('gpt-4o');
@@ -2840,31 +2933,32 @@ describe('ModelDiscoveryService', () => {
 
   describe('supplementWithKnownModels', () => {
     it('should add missing knownModels to discovered models', () => {
-      const raw: DiscoveredModel[] = [makeModel({ id: 'gpt-oss-120b', provider: 'openai' })];
+      const raw: DiscoveredModel[] = [makeModel({ id: 'mimo-v3-preview', provider: 'xiaomi' })];
 
-      const result = supplementWithKnownModels(raw, 'openai');
+      const result = supplementWithKnownModels(raw, 'xiaomi');
 
-      // 1 discovered + 8 ChatGPT-account supported knownModels
-      expect(result.length).toBe(9);
-      expect(result[0].id).toBe('gpt-oss-120b');
-      expect(result.map((m) => m.id)).toContain('gpt-5.6-sol');
-      expect(result.map((m) => m.id)).toContain('gpt-5.6-terra');
-      expect(result.map((m) => m.id)).toContain('gpt-5.6-luna');
-      expect(result.map((m) => m.id)).toContain('gpt-5.5');
-      expect(result.map((m) => m.id)).toContain('gpt-5.4');
-      expect(result.map((m) => m.id)).toContain('gpt-5.4-mini');
-      expect(result.map((m) => m.id)).toContain('gpt-5.3-codex-spark');
-      expect(result.map((m) => m.id)).not.toContain('gpt-5.2-codex');
+      // 1 discovered + 5 MiMo Token Plan knownModels
+      expect(result.length).toBe(6);
+      expect(result[0].id).toBe('mimo-v3-preview');
+      expect(result.map((m) => m.id)).toEqual(
+        expect.arrayContaining([
+          'mimo-v2.5-pro',
+          'mimo-v2-pro',
+          'mimo-v2.5',
+          'mimo-v2-omni',
+          'mimo-v2-flash',
+        ]),
+      );
     });
 
     it('should not duplicate models already in raw', () => {
       const raw: DiscoveredModel[] = [
-        makeModel({ id: 'gpt-5.5', provider: 'openai', contextWindow: 200000 }),
+        makeModel({ id: 'mimo-v2.5-pro', provider: 'xiaomi', contextWindow: 200000 }),
       ];
 
-      const result = supplementWithKnownModels(raw, 'openai');
+      const result = supplementWithKnownModels(raw, 'xiaomi');
 
-      const matchingModels = result.filter((m) => m.id === 'gpt-5.5');
+      const matchingModels = result.filter((m) => m.id === 'mimo-v2.5-pro');
       expect(matchingModels).toHaveLength(1);
       // Original model preserved (not replaced)
       expect(matchingModels[0].contextWindow).toBe(200000);
@@ -2894,8 +2988,9 @@ describe('ModelDiscoveryService', () => {
     });
 
     it('should set zero pricing on supplemented models', () => {
-      const result = supplementWithKnownModels([], 'openai');
+      const result = supplementWithKnownModels([], 'xiaomi');
 
+      expect(result.length).toBeGreaterThan(0);
       for (const m of result) {
         expect(m.inputPricePerToken).toBe(0);
         expect(m.outputPricePerToken).toBe(0);
@@ -3478,7 +3573,7 @@ describe('ModelDiscoveryService', () => {
       const result = await service.discoverModels(makeProvider());
 
       expect(mockModelsDevSync.getModelsForProvider).toHaveBeenCalledWith('openai');
-      expect(result.map((model) => model.id)).toEqual(['md-model', 'gpt-6-astra']);
+      expect(result.map((model) => model.id)).toEqual(['md-model']);
       expect(result[0].id).toBe('md-model');
       expect(result[0].capabilityReasoning).toBe(true);
       // OpenRouter fallback should NOT be called when models.dev has data
@@ -3496,7 +3591,7 @@ describe('ModelDiscoveryService', () => {
 
       expect(mockModelsDevSync.getModelsForProvider).toHaveBeenCalledWith('openai');
       expect(mockPricingSync.getAll).toHaveBeenCalled();
-      expect(result.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-6-astra']);
+      expect(result.map((model) => model.id)).toEqual(['gpt-4o']);
       expect(result[0].id).toBe('gpt-4o');
     });
 
@@ -3519,7 +3614,7 @@ describe('ModelDiscoveryService', () => {
       const result = await serviceNoMd.discoverModels(makeProvider());
 
       // Should go straight to OpenRouter fallback
-      expect(result.map((model) => model.id)).toEqual(['gpt-4o', 'gpt-6-astra']);
+      expect(result.map((model) => model.id)).toEqual(['gpt-4o']);
       expect(result[0].id).toBe('gpt-4o');
     });
   });

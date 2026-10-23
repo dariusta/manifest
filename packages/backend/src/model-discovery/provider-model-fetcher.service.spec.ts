@@ -1,4 +1,6 @@
 import { ProviderModelFetcherService, PROVIDER_CONFIGS } from './provider-model-fetcher.service';
+import { CODEX_CLI_VERSION } from '../common/constants/subscription-clients';
+import type { CodexCliVersionService } from './codex-cli-version.service';
 
 describe('ProviderModelFetcherService', () => {
   let service: ProviderModelFetcherService;
@@ -2459,6 +2461,101 @@ describe('ProviderModelFetcherService', () => {
   /* ── OpenAI subscription parser ── */
 
   describe('parseOpenaiSubscription (via openai provider with subscription authType)', () => {
+    it('reads ChatGPT sign-in limits, modalities, and reasoning from the Codex catalog', async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          models: [
+            {
+              slug: 'gpt-6.1-sol',
+              display_name: 'GPT-6.1-Sol',
+              context_window: 272000,
+              max_context_window: 872000,
+              visibility: 'list',
+              input_modalities: ['text', 'image'],
+              supported_reasoning_levels: [{ effort: 'low', description: 'Fast' }],
+            },
+          ],
+        }),
+      });
+
+      const [model] = await service.fetch('openai', 'oauth-token', 'subscription');
+
+      expect(model).toEqual(
+        expect.objectContaining({
+          id: 'gpt-6.1-sol',
+          displayName: 'GPT-6.1-Sol',
+          contextWindow: 872000,
+          contextWindowSource: 'provider',
+          capabilityReasoning: true,
+          inputModalities: ['text', 'image'],
+        }),
+      );
+    });
+
+    it('ignores malformed Codex catalog metadata', async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          models: [
+            {
+              slug: 'gpt-6-luna',
+              context_window: 272000,
+              max_context_window: 'huge',
+              visibility: 'list',
+              input_modalities: 'image',
+              supported_reasoning_levels: [],
+            },
+            {
+              slug: 'gpt-6-sol',
+              max_context_window: 0,
+              visibility: 'list',
+              input_modalities: ['hologram'],
+              supported_reasoning_levels: 'max',
+            },
+          ],
+        }),
+      });
+
+      const [luna, sol] = await service.fetch('openai', 'oauth-token', 'subscription');
+
+      expect(luna).toMatchObject({ contextWindow: 272000, capabilityReasoning: false });
+      expect(luna.inputModalities).toBeUndefined();
+      expect(sol).toMatchObject({
+        contextWindow: 200000,
+        contextWindowSource: 'subscription_config',
+        capabilityReasoning: false,
+      });
+      expect(sol.inputModalities).toBeUndefined();
+    });
+
+    it('lists subscription models with the Codex CLI version resolved just before', async () => {
+      // Fresh modules so the version bump below cannot leak into other tests.
+      let clients!: typeof import('../common/constants/subscription-clients');
+      let Fetcher!: typeof ProviderModelFetcherService;
+      jest.isolateModules(() => {
+        clients = jest.requireActual('../common/constants/subscription-clients');
+        Fetcher = jest.requireActual(
+          './provider-model-fetcher.service',
+        ).ProviderModelFetcherService;
+      });
+      fetchSpy
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ version: '999.0.0' }) })
+        .mockResolvedValue({ ok: true, json: async () => ({ models: [] }) });
+      const ensureFresh = jest.fn(() => clients.refreshCodexCliVersion());
+      const versioned = new Fetcher(null, { ensureFresh } as unknown as CodexCliVersionService);
+
+      await versioned.fetch('openai', 'oauth-token', 'subscription');
+      await versioned.fetch('openai', 'sk-api-key');
+
+      expect(ensureFresh).toHaveBeenCalledTimes(1);
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
+        'https://registry.npmjs.org/@openai%2fcodex/latest',
+        'https://chatgpt.com/backend-api/codex/models?client_version=999.0.0',
+        'https://api.openai.com/v1/models',
+      ]);
+    });
+
     it('should parse valid Codex models response', async () => {
       fetchSpy.mockResolvedValue({
         ok: true,
@@ -2610,7 +2707,7 @@ describe('ProviderModelFetcherService', () => {
       await service.fetch('openai', 'my-oauth-token', 'subscription');
 
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://chatgpt.com/backend-api/codex/models?client_version=0.128.0',
+        `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLI_VERSION}`,
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: 'Bearer my-oauth-token',
