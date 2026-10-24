@@ -4,7 +4,7 @@ import { MODEL_MODALITIES } from 'manifest-shared';
 import type { AuthType, ModelCapability, ModelModality } from 'manifest-shared';
 import type { DiscoveredModel } from './model-fetcher';
 import type { ModelsDevModelEntry } from '../database/models-dev-sync.service';
-import { lookupKnownModalities } from './known-model-modalities';
+import { lookupKnownModalities, lookupKnownSubscriptionModalities } from './known-model-modalities';
 
 type RawModalities = { input?: string[]; output?: string[] } | undefined;
 
@@ -153,9 +153,11 @@ export async function resolveModelCapabilityMetadata(
   );
   const metadataProvider = metadata.provider ?? model.provider;
   // Modalities the provider stated in its own /models response win; models.dev
-  // fills gaps. Curated facts are the last resort, and applying them here (not
-  // only at discovery time) means stale cached_models still resolve correctly.
+  // fills gaps. Code Assist's fixed catalog has no modality discovery, so its
+  // curated inputs also replace old inferred text-only snapshots. Other curated
+  // facts only fill gaps. Resolve on read so stale cached_models are repaired.
   const known = lookupKnownModalities(metadataProvider, metadata.model);
+  const subscription = lookupKnownSubscriptionModalities(model.provider, model.id, model.authType);
   return {
     capabilities: mergeModelCapabilities(
       model.capabilities,
@@ -164,7 +166,11 @@ export async function resolveModelCapabilityMetadata(
       modelSupportsStreaming(metadataProvider, metadata.model) ? ['stream'] : undefined,
       known?.capabilities,
     ),
-    inputModalities: model.inputModalities ?? modelsDevEntry?.inputModalities ?? known?.input,
+    inputModalities:
+      subscription?.input ??
+      model.inputModalities ??
+      modelsDevEntry?.inputModalities ??
+      known?.input,
     outputModalities: model.outputModalities ?? modelsDevEntry?.outputModalities ?? known?.output,
     modelsDevEntry,
   };

@@ -1,6 +1,18 @@
 import { lookupKnownModalities } from './known-model-modalities';
+import { getSubscriptionKnownModels } from 'manifest-shared';
 
 describe('lookupKnownModalities', () => {
+  it('describes every curated Google subscription wire model as multimodal input with text output', () => {
+    for (const id of getSubscriptionKnownModels('gemini') ?? []) {
+      expect(lookupKnownModalities('gemini', id)).toEqual({
+        input: ['text', 'image', 'audio', 'video'],
+        output: ['text'],
+        capabilities: ['text', 'image', 'audio', 'video', 'tools', 'stream'],
+      });
+      expect(lookupKnownModalities('Google', id)).toEqual(lookupKnownModalities('gemini', id));
+    }
+    expect(lookupKnownModalities('gemini', 'gemini-unknown-speech-model')).toBeUndefined();
+  });
   it('identifies gpt-5.3-codex-spark as text-only, case-insensitively', () => {
     expect(lookupKnownModalities('OpenAI', 'GPT-5.3-Codex-Spark')).toEqual({
       input: ['text'],

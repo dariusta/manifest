@@ -201,6 +201,22 @@ describe('google-generate-content-adapter', () => {
           },
         ]);
       });
+      it.each(['image/png', 'video/mp4', 'audio/wav'])(
+        'preserves the REST mime_type alias for %s',
+        (mime) => {
+          const chat = generateContentToChatRequest({
+            contents: [
+              { role: 'user', parts: [{ inline_data: { mime_type: mime, data: 'MEDIA' } }] },
+            ],
+          });
+          expect(chat.messages).toEqual([
+            {
+              role: 'user',
+              content: [{ type: 'image_url', image_url: { url: `data:${mime};base64,MEDIA` } }],
+            },
+          ]);
+        },
+      );
 
       it('defaults a missing inline mime type to octet-stream and accepts the snake alias', () => {
         const chat = generateContentToChatRequest({

@@ -104,8 +104,8 @@ function mediaUrl(part: Record<string, unknown>): string | null {
   if (isRecord(inline)) {
     const data = inline.data;
     if (typeof data !== 'string' || !data) return null;
-    const mimeType =
-      typeof inline.mimeType === 'string' ? inline.mimeType : 'application/octet-stream';
+    const mime = alias(inline, 'mimeType', 'mime_type');
+    const mimeType = typeof mime === 'string' ? mime : 'application/octet-stream';
     return `data:${mimeType};base64,${data}`;
   }
   const file = alias(part, 'fileData', 'file_data');

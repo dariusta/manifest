@@ -73,6 +73,48 @@ describe('resolveModelCapabilityMetadata', () => {
     modelsDevSync.lookupModelCapabilities.mockReset().mockReturnValue(null);
   });
 
+  it.each([
+    'gemini-pro-agent',
+    'gemini-3.1-pro-low',
+    'gemini-3.8-flash-high',
+    'gemini-3.8-flash-medium',
+    'gemini-3.8-flash-low',
+    'gemini-3.7-flash-tiered',
+  ])(
+    'repairs stale text-only Google subscription metadata without a discovery refresh (%s)',
+    async (id) => {
+      const resolved = await resolveModelCapabilityMetadata(
+        makeModel({
+          id,
+          provider: 'gemini',
+          authType: 'subscription',
+          inputModalities: ['text'],
+          capabilities: ['stream'],
+        }),
+        paramSpecs,
+        modelsDevSync,
+      );
+      expect(resolved.inputModalities).toEqual(['text', 'image', 'audio', 'video']);
+      expect(resolved.outputModalities).toEqual(['text']);
+      expect(resolved.capabilities).toEqual(
+        expect.arrayContaining(['tools', 'image', 'audio', 'video', 'stream']),
+      );
+    },
+  );
+  it('keeps explicitly discovered restrictions on Google API-key models', async () => {
+    const resolved = await resolveModelCapabilityMetadata(
+      makeModel({
+        id: 'gemini-3.8-flash',
+        provider: 'gemini',
+        authType: 'api_key',
+        inputModalities: ['text'],
+      }),
+      paramSpecs,
+      modelsDevSync,
+    );
+    expect(resolved.inputModalities).toEqual(['text']);
+  });
+
   it('merges discovery, models.dev, param-spec, and streaming-heuristic capabilities', async () => {
     paramSpecs.getCapabilities.mockResolvedValue(['tools']);
     modelsDevSync.lookupModelCapabilities.mockReturnValue(makeModelsDevEntry());

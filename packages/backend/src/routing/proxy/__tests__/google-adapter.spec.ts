@@ -17,6 +17,77 @@ function transformGoogleStreamChunk(chunk: string, model: string): string | null
 
 describe('Google Adapter', () => {
   describe('toGoogleRequest', () => {
+    it('keeps text, images, video and audio together in a chat request', () => {
+      const body = {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Compare these inputs' },
+              { type: 'image_url', image_url: { url: 'data:image/png;base64,IMAGE' } },
+              {
+                type: 'video_url',
+                video_url: { url: 'https://example.test/clip.mp4', mime_type: 'video/mp4' },
+                processing: 'agentic',
+                videoMetadata: { fps: 1 },
+              },
+              { type: 'input_audio', input_audio: { data: 'AUDIO', format: 'mp3' } },
+              {
+                type: 'audio_url',
+                audio_url: { url: 'gs://bucket/sound.wav', mime_type: 'audio/wav' },
+              },
+              { type: 'input_file', file_data: 'data:application/pdf;base64,PDF' },
+            ],
+          },
+        ],
+      };
+      expect(toGoogleRequest(body, 'gemini-3.8-flash').contents).toEqual([
+        {
+          role: 'user',
+          parts: [
+            { text: 'Compare these inputs' },
+            { inlineData: { mimeType: 'image/png', data: 'IMAGE' } },
+            {
+              fileData: { fileUri: 'https://example.test/clip.mp4', mimeType: 'video/mp4' },
+              processing: 'agentic',
+              videoMetadata: { fps: 1 },
+            },
+            { inlineData: { mimeType: 'audio/mpeg', data: 'AUDIO' } },
+            { fileData: { fileUri: 'gs://bucket/sound.wav', mimeType: 'audio/wav' } },
+            { inlineData: { mimeType: 'application/pdf', data: 'PDF' } },
+          ],
+        },
+      ]);
+      expect(body.messages[0].content[2]).toHaveProperty('video_url');
+    });
+    it('converts Anthropic-compatible image sources and nested file blocks', () => {
+      const request = toGoogleRequest(
+        {
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image',
+                  source: { type: 'base64', media_type: 'image/jpeg', data: 'PHOTO' },
+                },
+                { type: 'file', file: { file_data: 'data:video/mp4;base64,VIDEO' } },
+              ],
+            },
+          ],
+        },
+        'gemini-pro-agent',
+      );
+      expect(request.contents).toEqual([
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType: 'image/jpeg', data: 'PHOTO' } },
+            { inlineData: { mimeType: 'video/mp4', data: 'VIDEO' } },
+          ],
+        },
+      ]);
+    });
     it('converts basic messages', () => {
       const body = {
         messages: [{ role: 'user', content: 'Hello world' }],

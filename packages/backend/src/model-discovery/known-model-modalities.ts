@@ -1,12 +1,14 @@
-import type { ModelCapability, ModelModality } from 'manifest-shared';
+import type { AuthType, ModelCapability, ModelModality } from 'manifest-shared';
 
 /**
  * Hand-curated capability facts for models where both the provider's own
  * metadata and models.dev are silent.
  *
  * **Authority:** modalities already discovered from the provider or models.dev
- * win. Capability lists are positive assertions, so they merge; an upstream
- * omission means unknown, never unsupported. Keep this list minimal: add an
+ * win, except for Code Assist's fixed subscription catalog: it has no modality
+ * discovery, so old inferred text-only snapshots must be repaired. Capability
+ * lists are positive assertions, so they merge; an upstream omission means
+ * unknown, never unsupported. Keep this list minimal: add an
  * entry only when support was confirmed against the provider's actual behavior
  * and no upstream catalog carries it.
  */
@@ -31,9 +33,34 @@ const TEXT_TOOLS: KnownCapabilities = {
   output: ['text'],
   capabilities: ['text', 'tools', 'stream'],
 };
+const MULTIMODAL_TOOLS: KnownCapabilities = {
+  input: ['text', 'image', 'audio', 'video'],
+  output: ['text'],
+  capabilities: ['text', 'image', 'audio', 'video', 'tools', 'stream'],
+};
+
+// Code Assist uses private wire IDs rather than the public Gemini API names.
+// Those IDs have no models.dev modality entry. Keep the list explicit so a
+// future speech-only or image-generation model is not promoted by a prefix.
+const GEMINI_SUBSCRIPTION_MODELS = new Set([
+  'gemini-pro-agent',
+  'gemini-3.1-pro-low',
+  'gemini-3.8-flash-high',
+  'gemini-3.8-flash-medium',
+  'gemini-3.8-flash-low',
+  'gemini-3.7-flash-tiered',
+]);
 
 /** Keyed by `<provider-id>/<model-id>`, lowercase. */
 const KNOWN_MODEL_MODALITIES: Readonly<Record<string, KnownCapabilities>> = {
+  // https://ai.google.dev/gemini-api/docs/long-context
+  // https://ai.google.dev/gemini-api/docs/video-understanding
+  ...Object.fromEntries(
+    [...GEMINI_SUBSCRIPTION_MODELS].map((id) => [`gemini/${id}`, MULTIMODAL_TOOLS]),
+  ),
+  'gemini/gemini-3.8-flash': MULTIMODAL_TOOLS,
+  'gemini/gemini-3.7-flash': MULTIMODAL_TOOLS,
+  'gemini/gemini-3.1-pro-preview': MULTIMODAL_TOOLS,
   // Live Codex discovery carries `input_modalities`, but the curated
   // subscription fallback and API-key `/v1/models` do not, and models.dev
   // lags behind new launches. These facts cover that gap (#2537).
@@ -63,5 +90,18 @@ export function lookupKnownModalities(
   providerId: string,
   modelId: string,
 ): KnownCapabilities | undefined {
-  return KNOWN_MODEL_MODALITIES[`${providerId.toLowerCase()}/${modelId.toLowerCase()}`];
+  const provider = providerId.toLowerCase() === 'google' ? 'gemini' : providerId.toLowerCase();
+  return KNOWN_MODEL_MODALITIES[`${provider}/${modelId.toLowerCase()}`];
+}
+
+/** CCA has no modality discovery; replace old inferred text-only snapshots. */
+export function lookupKnownSubscriptionModalities(
+  providerId: string,
+  modelId: string,
+  authType: AuthType | undefined,
+): KnownCapabilities | undefined {
+  if (authType !== 'subscription' || !['gemini', 'google'].includes(providerId.toLowerCase()))
+    return undefined;
+  if (!GEMINI_SUBSCRIPTION_MODELS.has(modelId.toLowerCase())) return undefined;
+  return MULTIMODAL_TOOLS;
 }

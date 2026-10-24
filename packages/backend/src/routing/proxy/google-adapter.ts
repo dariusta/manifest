@@ -33,7 +33,7 @@ interface GeminiFunctionResponse {
 interface GeminiPart {
   text?: string;
   inlineData?: { mimeType: string; data: string };
-  fileData?: { fileUri: string };
+  fileData?: { fileUri: string; mimeType?: string };
   functionCall?: GeminiFunctionCall;
   functionResponse?: GeminiFunctionResponse;
   // Google attaches thoughtSignature at the Part level (sibling of functionCall),
@@ -188,7 +188,7 @@ function extractPartProcessing(
     out.processing = block.processing;
   }
   // Some clients nest it inside image_url alongside the url.
-  const inner = block.image_url;
+  const inner = block.image_url ?? block.video_url ?? block.audio_url;
   if (isRecord(inner)) {
     if (
       out.processing === undefined &&
@@ -237,6 +237,56 @@ function imageUrlToGooglePart(imageUrl: unknown): GeminiPart | null {
   return { fileData: { fileUri: url } };
 }
 
+const AUDIO_FORMAT_MIME: Readonly<Record<string, string>> = {
+  wav: 'audio/wav',
+  mp3: 'audio/mpeg',
+  mpeg: 'audio/mpeg',
+  aac: 'audio/aac',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  aiff: 'audio/aiff',
+  m4a: 'audio/mp4',
+  mp4: 'audio/mp4',
+};
+
+/** Preserve the media blocks chat clients use instead of dropping them as text. */
+function mediaBlockToGooglePart(block: Record<string, unknown>): GeminiPart | null {
+  let media: unknown;
+  let metadata: Record<string, unknown> = block;
+  if (block.type === 'image_url' || block.type === 'input_image') media = block.image_url;
+  else if (block.type === 'video_url' || block.type === 'input_video') media = block.video_url;
+  else if (block.type === 'audio_url') media = block.audio_url;
+  else if (block.type === 'input_audio' && isRecord(block.input_audio)) {
+    const audio = block.input_audio;
+    const format = typeof audio.format === 'string' ? audio.format.toLowerCase() : '';
+    const mime = typeof audio.mime_type === 'string' ? audio.mime_type : AUDIO_FORMAT_MIME[format];
+    if (typeof audio.data !== 'string' || !audio.data || !mime || !mime.startsWith('audio/'))
+      return null;
+    media = audio.data.startsWith('data:') ? audio.data : `data:${mime};base64,${audio.data}`;
+  } else if (block.type === 'file' || block.type === 'input_file') {
+    metadata = isRecord(block.file) ? block.file : block;
+    media = metadata.file_data ?? metadata.file_url;
+  } else if (block.type === 'image' && isRecord(block.source)) {
+    // Anthropic-compatible clients can supply their native base64/URL source.
+    const source = block.source;
+    if (
+      source.type === 'base64' &&
+      typeof source.data === 'string' &&
+      typeof source.media_type === 'string'
+    ) {
+      media = `data:${source.media_type};base64,${source.data}`;
+    } else if (source.type === 'url') media = source.url;
+  }
+  const part = imageUrlToGooglePart(media);
+  if (!part) return null;
+  const nested = isRecord(media) ? media : metadata;
+  const mime = nested.mime_type ?? nested.mimeType ?? metadata.mime_type ?? metadata.mimeType;
+  if (part.fileData && typeof mime === 'string' && isInlineMediaType(mime))
+    part.fileData.mimeType = mime;
+  applyPartProcessing(part, extractPartProcessing(block));
+  return part;
+}
+
 /**
  * Scan the message list for assistant tool_calls and build a map from
  * tool_call_id to function name. Needed because OpenAI's tool-response
@@ -272,12 +322,9 @@ function messageToContent(
         (block.type === 'text' || block.type === 'input_text' || block.type === 'output_text')
       ) {
         parts.push({ text: block.text });
-      } else if (block.type === 'image_url' || block.type === 'input_image') {
-        const imagePart = imageUrlToGooglePart(block.image_url);
-        if (imagePart) {
-          applyPartProcessing(imagePart, extractPartProcessing(block));
-          parts.push(imagePart);
-        }
+      } else {
+        const media = mediaBlockToGooglePart(block);
+        if (media) parts.push(media);
       }
     }
   }

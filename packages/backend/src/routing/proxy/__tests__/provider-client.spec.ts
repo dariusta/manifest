@@ -5962,6 +5962,41 @@ describe('ProviderClient', () => {
   });
 
   describe('Gemini-native inbound (generate_content)', () => {
+    it.each(['api_key', 'subscription'] as const)(
+      'forwards mixed native media without losing bytes or MIME types (%s)',
+      async (authType) => {
+        mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+        const contents = [
+          {
+            role: 'user',
+            parts: [
+              { text: 'Describe all of these' },
+              { inlineData: { mimeType: 'image/png', data: 'IMAGE' } },
+              { inlineData: { mimeType: 'audio/wav', data: 'AUDIO' } },
+              {
+                fileData: { mimeType: 'video/mp4', fileUri: 'gs://bucket/clip.mp4' },
+                videoMetadata: { fps: 1 },
+              },
+            ],
+          },
+        ];
+        await client.forward({
+          provider: 'gemini',
+          apiKey: 'preview-token',
+          authType,
+          model: authType === 'subscription' ? 'gemini-pro-agent' : 'gemini-3.8-flash',
+          providerResource: 'preview-project',
+          body: { model: 'auto', stream: false, contents },
+          stream: false,
+          apiMode: 'generate_content',
+        });
+        const sent = JSON.parse(mockFetch.mock.calls[0][1].body);
+        expect(authType === 'subscription' ? sent.request.contents : sent.contents).toEqual(
+          contents,
+        );
+        expect(authType === 'subscription' ? sent.request.model : sent.model).toBeUndefined();
+      },
+    );
     const geminiBody = {
       // `model` and `stream` are synthesized by the `/v1beta` route so routing,
       // validation and stream detection work; they must not reach Google.
@@ -6053,6 +6088,45 @@ describe('ProviderClient', () => {
   });
 
   describe('Gemini subscription (CodeAssist envelope)', () => {
+    it.each(['api_key', 'subscription'] as const)(
+      'converts chat audio and video inside the correct Google envelope (%s)',
+      async (authType) => {
+        mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+        await client.forward({
+          provider: 'gemini',
+          apiKey: 'preview-token',
+          authType,
+          model: authType === 'subscription' ? 'gemini-pro-agent' : 'gemini-3.8-flash',
+          providerResource: 'preview-project',
+          stream: false,
+          body: {
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: 'Compare the clip and recording' },
+                  { type: 'video_url', video_url: { url: 'data:video/mp4;base64,VIDEO' } },
+                  { type: 'input_audio', input_audio: { format: 'wav', data: 'AUDIO' } },
+                ],
+              },
+            ],
+          },
+        });
+        const sent = JSON.parse(mockFetch.mock.calls[0][1].body);
+        const request = authType === 'subscription' ? sent.request : sent;
+        expect(request.contents).toEqual([
+          {
+            role: 'user',
+            parts: [
+              { text: 'Compare the clip and recording' },
+              { inlineData: { mimeType: 'video/mp4', data: 'VIDEO' } },
+              { inlineData: { mimeType: 'audio/wav', data: 'AUDIO' } },
+            ],
+          },
+        ]);
+      },
+    );
+
     it('wraps the request body in the CodeAssist envelope for gemini subscription', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 

@@ -352,7 +352,13 @@ describe('ModelDiscoveryService', () => {
 
       expect(getDecryptionSecrets).toHaveBeenCalled();
       expect(mockDecrypt).toHaveBeenCalledWith('encrypted-key', expect.any(String));
-      expect(fetcher.fetch).toHaveBeenCalledWith('openai', 'decrypted-key', 'api_key', undefined, {});
+      expect(fetcher.fetch).toHaveBeenCalledWith(
+        'openai',
+        'decrypted-key',
+        'api_key',
+        undefined,
+        {},
+      );
       expect(result.map((model) => model.id)).toEqual(['gpt-4']);
       expect(provider.cached_models).toEqual(result);
       expect(provider.models_fetched_at).toBeDefined();
@@ -1083,6 +1089,27 @@ describe('ModelDiscoveryService', () => {
   /* ── getModelsForAgent ── */
 
   describe('getModelsForAgent', () => {
+    it('repairs old Google subscription input metadata on read without changing the stored snapshot', async () => {
+      const cached = makeModel({
+        id: 'gemini-pro-agent',
+        provider: 'gemini',
+        authType: 'subscription',
+        inputModalities: ['text'],
+        capabilities: ['stream'],
+      });
+      providerRepo.find.mockResolvedValue([
+        makeProvider({ provider: 'gemini', auth_type: 'subscription', cached_models: [cached] }),
+      ]);
+      const models = await service.getModelsForAgent('tenant-1');
+      expect(models.length).toBeGreaterThan(0);
+      for (const model of models) {
+        expect(model.inputModalities).toEqual(['text', 'image', 'audio', 'video']);
+        expect(model.outputModalities).toEqual(['text']);
+      }
+      expect(cached.inputModalities).toEqual(['text']);
+      expect(fetcher.fetch).not.toHaveBeenCalled();
+      expect(providerRepo.update).not.toHaveBeenCalled();
+    });
     it('hides built-in local models in cloud but keeps tunneled custom models', async () => {
       process.env['MANIFEST_MODE'] = 'cloud';
       providerRepo.find.mockResolvedValue([

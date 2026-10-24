@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { resolveProviderMetadataIdentity, type AuthType, type ModelModality } from 'manifest-shared';
+import type { AuthType, ModelModality } from 'manifest-shared';
 import { TenantProvider } from '../entities/tenant-provider.entity';
 import { TenantCacheService } from '../common/services/tenant-cache.service';
 import { AgentEnabledProvider } from '../entities/agent-enabled-provider.entity';
@@ -48,7 +48,7 @@ import {
 } from './model-fallback';
 import { resolveMetadataEntry } from './metadata-identity';
 import { lookupKnownPrice } from './known-model-prices';
-import { lookupKnownModalities } from './known-model-modalities';
+import { lookupKnownModalities, lookupKnownSubscriptionModalities } from './known-model-modalities';
 import { mergeModelCapabilities, modelSupportsStreaming } from './model-capabilities';
 import {
   CLOUD_LOCAL_PROVIDER_MESSAGE,
@@ -363,7 +363,7 @@ export class ModelDiscoveryService {
     // frontend uses to render the house badge and the Local tab.
     const authType: AuthType = provider.auth_type;
     const enriched = raw.map((model) => ({
-      ...this.enrichModel(model, provider.provider),
+      ...this.enrichModel({ ...model, authType }, provider.provider),
       authType,
     }));
     const reconciled =
@@ -655,7 +655,19 @@ export class ModelDiscoveryService {
         const dedupeKey = `${providerId}::${effectiveAuthType}::${m.id}`;
         if (!seen.has(dedupeKey)) {
           seen.set(dedupeKey, models.length);
-          models.push({ ...m, provider: p.provider, authType: effectiveAuthType });
+          const known = lookupKnownSubscriptionModalities(p.provider, m.id, effectiveAuthType);
+          models.push({
+            ...m,
+            provider: p.provider,
+            authType: effectiveAuthType,
+            ...(known
+              ? {
+                  inputModalities: known.input,
+                  outputModalities: known.output,
+                  capabilities: mergeModelCapabilities(m.capabilities, known.capabilities),
+                }
+              : {}),
+          });
         }
       }
     }
@@ -752,6 +764,7 @@ export class ModelDiscoveryService {
    */
   private enrichModel(model: DiscoveredModel, providerId: string): DiscoveredModel {
     const known = lookupKnownModalities(providerId, model.id);
+    const subscription = lookupKnownSubscriptionModalities(providerId, model.id, model.authType);
     if (!known) return this.enrichFromCatalogs(model, providerId);
     const enriched = this.enrichFromCatalogs(
       { ...model, capabilities: mergeModelCapabilities(model.capabilities, known.capabilities) },
@@ -759,7 +772,7 @@ export class ModelDiscoveryService {
     );
     return {
       ...enriched,
-      inputModalities: enriched.inputModalities ?? known.input,
+      inputModalities: subscription?.input ?? enriched.inputModalities ?? known.input,
       outputModalities: enriched.outputModalities ?? known.output,
     };
   }
