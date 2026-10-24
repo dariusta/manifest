@@ -39,6 +39,12 @@ const PING_BODY = Object.freeze({
 @Injectable()
 export class ConnectionTestService {
   private readonly logger = new Logger(ConnectionTestService.name);
+  // Shared by the hourly subscription watchdog and explicit account tests.
+  // Keep this diagnostic out of the config endpoint and analytics tables.
+  private readonly results = new Map<
+    string,
+    { tenantId: string; revision: string; modelsFetchedAt: string; result: ConnectionTestResult }
+  >();
 
   constructor(
     @InjectRepository(TenantProvider)
@@ -55,6 +61,32 @@ export class ConnectionTestService {
     private readonly xaiOauth: XaiOauthService,
   ) {}
 
+  /** Latest checks only: opening the dashboard must never send a completion. */
+  async subscriptionHealth(tenantId: string | null): Promise<ConnectionTestResult[]> {
+    if (!tenantId) return [];
+    const connections = await this.providerRepo.find({
+      where: { tenant_id: tenantId, auth_type: 'subscription', is_active: true },
+    });
+    const currentIds = new Set(connections.map((connection) => connection.id));
+    for (const [id, snapshot] of this.results) {
+      if (snapshot.tenantId === tenantId && !currentIds.has(id)) this.results.delete(id);
+    }
+    return connections.flatMap((connection) => {
+      const snapshot = this.results.get(connection.id);
+      if (!snapshot || snapshot.tenantId !== tenantId) return [];
+      // Relinking, replacing, or refreshing models invalidates the old check.
+      if (
+        snapshot.revision !== String(connection.updated_at) ||
+        (snapshot.result.status === 'untestable' &&
+          snapshot.modelsFetchedAt !== String(connection.models_fetched_at))
+      ) {
+        this.results.delete(connection.id);
+        return [];
+      }
+      return [{ ...snapshot.result, label: connection.label }];
+    });
+  }
+
   /**
    * Send one real, non-streaming completion through this exact connection.
    *
@@ -63,7 +95,7 @@ export class ConnectionTestService {
    * so a green result proves *this* account works rather than "some account on
    * this provider works".
    *
-   * Nothing is recorded. This calls `ProviderClient.forward()` directly rather
+   * Results are kept in memory for the dashboard. This calls `ProviderClient.forward()` rather
    * than `ProxyService.proxyRequest()`, so a diagnostic never lands in
    * `requests` / `agent_messages` and never skews provider reliability metrics.
    */
@@ -85,15 +117,26 @@ export class ConnectionTestService {
       status: ConnectionTestStatus,
       message: string,
       extra: Partial<ConnectionTestResult> = {},
-    ): ConnectionTestResult => ({
-      ...base,
-      status,
-      message,
-      model: null,
-      latency_ms: null,
-      http_status: null,
-      ...extra,
-    });
+    ): ConnectionTestResult => {
+      const result = {
+        ...base,
+        status,
+        message,
+        model: null,
+        latency_ms: null,
+        http_status: null,
+        ...extra,
+      };
+      if (connection.auth_type === 'subscription') {
+        this.results.set(connection.id, {
+          tenantId,
+          revision: String(connection.updated_at),
+          modelsFetchedAt: String(connection.models_fetched_at),
+          result,
+        });
+      }
+      return result;
+    };
 
     const preferredModel =
       connection.auth_type === 'subscription'

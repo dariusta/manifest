@@ -8,6 +8,7 @@ import {
   clearConnectionTestResult,
   connectionTestResult,
   isConnectionTestRunning,
+  rememberConnectionTestResult,
   runConnectionTest,
 } from '../../src/services/connection-test-store';
 import { testProviderConnection, type ConnectionTestResult } from '../../src/services/api.js';
@@ -32,6 +33,17 @@ const result = (over: Partial<ConnectionTestResult> = {}): ConnectionTestResult 
 beforeEach(() => mockTest.mockClear());
 
 describe('connection test store', () => {
+  it('lets a newer hourly check supersede a manual failure', () => {
+    const failed = result({ connection_id: 'tp-watchdog', status: 'failed' });
+    rememberConnectionTestResult(failed);
+    const recovered = result({
+      connection_id: 'tp-watchdog',
+      tested_at: '2026-09-22T00:00:00.000Z',
+    });
+    expect(connectionTestResult('tp-watchdog', recovered)).toEqual(recovered);
+    expect(connectionTestResult('tp-watchdog', result())).toEqual(failed);
+  });
+
   it('reports nothing and not-running for a connection that was never tested', () => {
     expect(connectionTestResult('tp-untouched')).toBeUndefined();
     expect(isConnectionTestRunning('tp-untouched')).toBe(false);

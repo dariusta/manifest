@@ -3,6 +3,18 @@ import { RequestMethod } from '@nestjs/common';
 import { ConnectionTestController } from './connection-test.controller';
 
 describe('ConnectionTestController', () => {
+  it('exposes a tenant-scoped GET for cached subscription health', async () => {
+    const service = { subscriptionHealth: jest.fn().mockResolvedValue([]) };
+    const controller = new ConnectionTestController(service as never);
+    await expect(
+      controller.subscriptionHealth({ tenantId: 'tenant-1', userId: 'user-1' }),
+    ).resolves.toEqual({ connections: [] });
+    expect(service.subscriptionHealth).toHaveBeenCalledWith('tenant-1');
+    expect(
+      Reflect.getMetadata(METHOD_METADATA, ConnectionTestController.prototype.subscriptionHealth),
+    ).toBe(RequestMethod.GET);
+  });
+
   it('exposes POST /api/v1/providers/connection-test/:connectionId and forwards the tenant', async () => {
     const service = { test: jest.fn().mockResolvedValue({ connection_id: 'tp-1', status: 'ok' }) };
     const controller = new ConnectionTestController(service as never);

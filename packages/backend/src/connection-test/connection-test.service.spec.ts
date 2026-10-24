@@ -59,6 +59,13 @@ function harness(options?: {
 }) {
   const connections = options?.connections ?? [connection()];
   const providerRepo = {
+    find: jest
+      .fn()
+      .mockImplementation(async ({ where }: { where: { tenant_id: string; auth_type: string } }) =>
+        connections.filter(
+          (c) => c.tenant_id === where.tenant_id && c.auth_type === where.auth_type && c.is_active,
+        ),
+      ),
     findOne: jest
       .fn()
       .mockImplementation(
@@ -99,6 +106,65 @@ function harness(options?: {
 }
 
 describe('ConnectionTestService', () => {
+  it('exposes the latest subscription checks without making another provider call', async () => {
+    const { service, forward, credential } = harness({
+      connections: [connection({ auth_type: 'subscription' })],
+      forward: jest.fn().mockResolvedValue({ response: providerResponse(401) }),
+    });
+    const result = await service.test('tenant-1', 'tp-1');
+    expect(result.status).toBe('needs_reconnect');
+    await expect(service.subscriptionHealth('tenant-1')).resolves.toEqual([result]);
+    expect(forward).toHaveBeenCalledTimes(1);
+    expect(credential).toHaveBeenCalledTimes(1);
+
+    forward.mockResolvedValue({ response: providerResponse(200) });
+    const recovered = await service.test('tenant-1', 'tp-1');
+    await expect(service.subscriptionHealth('tenant-1')).resolves.toEqual([recovered]);
+    expect(recovered.status).toBe('ok');
+  });
+
+  it('never exposes another tenant, BYOK, or disabled connection in subscription health', async () => {
+    const owned = connection({ id: 'owned', auth_type: 'subscription' });
+    const disabled = connection({ id: 'disabled', auth_type: 'subscription', is_active: false });
+    const other = connection({ id: 'other', tenant_id: 'tenant-2', auth_type: 'subscription' });
+    const { service, providerRepo } = harness({
+      connections: [owned, disabled, other, connection()],
+    });
+    await service.test('tenant-1', 'owned');
+    await service.test('tenant-1', 'disabled');
+    await service.test('tenant-1', 'tp-1');
+    await service.test('tenant-2', 'other');
+    const results = await service.subscriptionHealth('tenant-1');
+    expect(results.map((r) => r.connection_id)).toEqual(['owned']);
+    await expect(service.subscriptionHealth(null)).resolves.toEqual([]);
+    expect(providerRepo.find).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops old failures when an account is relinked or removed', async () => {
+    const account = connection({ auth_type: 'subscription' });
+    const accounts = [account];
+    const { service } = harness({
+      connections: accounts,
+      forward: jest.fn().mockResolvedValue({ response: providerResponse(401) }),
+    });
+    await service.test('tenant-1', 'tp-1');
+    account.updated_at = '2026-10-23T12:00:00.000Z';
+    await expect(service.subscriptionHealth('tenant-1')).resolves.toEqual([]);
+    await service.test('tenant-1', 'tp-1');
+    accounts.pop();
+    await expect(service.subscriptionHealth('tenant-1')).resolves.toEqual([]);
+  });
+
+  it('invalidates an untestable check after models have been refreshed', async () => {
+    const account = connection({ auth_type: 'subscription', cached_models: null });
+    const { service } = harness({ connections: [account] });
+    await service.test('tenant-1', 'tp-1');
+    expect((await service.subscriptionHealth('tenant-1'))[0].status).toBe('untestable');
+    account.cached_models = [model()];
+    account.models_fetched_at = '2026-10-23T12:00:00.000Z';
+    await expect(service.subscriptionHealth('tenant-1')).resolves.toEqual([]);
+  });
+
   it('404s an id that names no connection in this tenant', async () => {
     const { service, providerRepo } = harness();
 

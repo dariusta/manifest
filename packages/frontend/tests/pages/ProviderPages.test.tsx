@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockSetSearchParams = vi.fn();
 let mockSearchParams: Record<string, string | undefined> = {};
 const mockGetGlobalProviders = vi.fn();
+const mockGetSubscriptionHealth = vi.fn();
+const mockTestProviderConnection = vi.fn();
+const mockRefreshProviderModels = vi.fn();
 const mockGetAgents = vi.fn();
 const mockGetAgentProviders = vi.fn();
 const mockGetCustomProviders = vi.fn();
@@ -90,6 +93,7 @@ vi.mock('../../src/services/api/providers.js', async () => {
   return {
     getProviders: (...args: unknown[]) => mockGetGlobalProviders(...args),
     getProviderUsage: (...args: unknown[]) => mockGetProviderUsage(...args),
+    getSubscriptionHealth: (...args: unknown[]) => mockGetSubscriptionHealth(...args),
     mergeUsage: actual.mergeUsage,
     connectionUsage: actual.connectionUsage,
   };
@@ -99,6 +103,8 @@ vi.mock('../../src/services/api.js', () => ({
   getAgents: (...args: unknown[]) => mockGetAgents(...args),
   getProviders: (...args: unknown[]) => mockGetAgentProviders(...args),
   getCustomProviders: (...args: unknown[]) => mockGetCustomProviders(...args),
+  testProviderConnection: (...args: unknown[]) => mockTestProviderConnection(...args),
+  refreshProviderModels: (...args: unknown[]) => mockRefreshProviderModels(...args),
 }));
 
 vi.mock('../../src/services/api/analytics.js', () => ({
@@ -158,6 +164,19 @@ vi.mock('../../src/services/toast-store.js', () => ({
 import Subscriptions from '../../src/pages/providers/Subscriptions';
 import Byok from '../../src/pages/providers/Byok';
 import LocalProviders from '../../src/pages/providers/Local';
+import { clearConnectionTestResult } from '../../src/services/connection-test-store';
+
+const healthResult = (status: 'ok' | 'needs_reconnect' | 'failed' | 'untestable') => ({
+  connection_id: 'sub-openai',
+  provider: 'openai',
+  label: 'ChatGPT',
+  status,
+  model: null,
+  latency_ms: null,
+  http_status: null,
+  message: status === 'failed' ? 'Provider did not respond within 20s.' : 'Account check result',
+  tested_at: '2026-10-23T00:00:00.000Z',
+});
 
 const connection = (id: string, label: string, active = true) => ({
   id,
@@ -219,6 +238,9 @@ describe('provider pages', () => {
     mockIsSelfHosted = true;
     mockRenameProviderKey.mockResolvedValue(undefined);
     mockGetGlobalProviders.mockResolvedValue(globalProvidersResponse);
+    mockGetSubscriptionHealth.mockResolvedValue({ connections: [] });
+    mockRefreshProviderModels.mockResolvedValue({ ok: true, model_count: 3 });
+    clearConnectionTestResult('sub-openai');
     // The usage endpoint returns the per-(provider, auth_type) stats that the
     // page merges into config. Derive it from the same fixture so the existing
     // usage assertions still hold.
@@ -265,6 +287,101 @@ describe('provider pages', () => {
       ).toBe(true),
     );
   };
+
+  it('shows an actionable relink banner and opens the affected subscription provider', async () => {
+    mockGetSubscriptionHealth.mockResolvedValue({ connections: [healthResult('needs_reconnect')] });
+    render(() => <Subscriptions />);
+    await waitForConnectedAgent('ChatGPT');
+    expect((await screen.findByRole('alert')).textContent).toContain('OpenAI · ChatGPT');
+    expect(screen.getByText('Needs relink')).toBeDefined();
+    expect(mockTestProviderConnection).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Relink ChatGPT' }));
+    await screen.findByRole('dialog', { name: 'provider modal' });
+    expect(mockProviderSelectModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerDeepLink: { providerId: 'openai', authType: 'subscription' },
+      }),
+    );
+
+    mockGetSubscriptionHealth.mockResolvedValue({ connections: [] });
+    clearConnectionTestResult('sub-openai');
+    fireEvent.click(screen.getByText('update'));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('clears a failed connection warning after a successful explicit check', async () => {
+    mockGetSubscriptionHealth.mockResolvedValue({ connections: [healthResult('failed')] });
+    mockTestProviderConnection.mockResolvedValue({
+      ...healthResult('ok'),
+      tested_at: '2026-10-23T01:00:00.000Z',
+    });
+    render(() => <Subscriptions />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Provider did not respond');
+    fireEvent.click(screen.getByRole('button', { name: 'Check ChatGPT again' }));
+    await waitFor(() => expect(mockTestProviderConnection).toHaveBeenCalledWith('sub-openai'));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(screen.queryByText('Connection issue')).toBeNull();
+  });
+
+  it('offers model refresh for an account without discovered models and clears when restored', async () => {
+    const noModels = structuredClone(globalProvidersResponse);
+    noModels.providers[0]!.connections[0]!.cached_model_count = 0;
+    mockGetGlobalProviders.mockResolvedValueOnce(noModels);
+    render(() => <Subscriptions />);
+    await waitForConnectedAgent('ChatGPT');
+    await screen.findByText('Needs refresh');
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh models for ChatGPT' }));
+    await waitFor(() =>
+      expect(mockRefreshProviderModels).toHaveBeenCalledWith(
+        'demo-agent',
+        'openai',
+        'subscription',
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('keeps shared and inactive subscriptions out of the health actions', async () => {
+    const response = structuredClone(globalProvidersResponse);
+    response.providers[0]!.connections = [
+      { ...connection('sub-openai', 'Shared plan'), shared: true } as ReturnType<typeof connection>,
+      connection('disabled-plan', 'Paused plan', false),
+    ];
+    mockGetGlobalProviders.mockResolvedValue(response);
+    mockGetSubscriptionHealth.mockResolvedValue({
+      connections: [
+        healthResult('needs_reconnect'),
+        { ...healthResult('failed'), connection_id: 'disabled-plan' },
+      ],
+    });
+    render(() => <Subscriptions />);
+    await screen.findByText('Shared plan');
+    await waitFor(() => expect(mockGetSubscriptionHealth).toHaveBeenCalled());
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('does not infer relink problems from old usage failures or a failed health read', async () => {
+    mockGetSubscriptionHealth.mockRejectedValue(new Error('Offline'));
+    render(() => <Subscriptions />);
+    await screen.findByText('ChatGPT');
+    await waitFor(() => expect(mockGetSubscriptionHealth).toHaveBeenCalled());
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText('Active')).toBeDefined();
+  });
+
+  it('keeps a known warning when a later health read fails', async () => {
+    mockGetSubscriptionHealth.mockResolvedValue({ connections: [healthResult('failed')] });
+    render(() => <Subscriptions />);
+    await waitForConnectedAgent('ChatGPT');
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getAllByText('Connect')[0]!);
+    await screen.findByRole('dialog', { name: 'provider modal' });
+    mockGetSubscriptionHealth.mockRejectedValue(new Error('Offline'));
+    fireEvent.click(screen.getByText('update'));
+    await waitFor(() => expect(mockGetSubscriptionHealth).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('alert').textContent).toContain('Provider did not respond');
+  });
 
   it('shows each connection its OWN attempt rate, never the provider blend', async () => {
     // The bug this pins: OpenAI subscription at 92.2% was displayed as ~83%

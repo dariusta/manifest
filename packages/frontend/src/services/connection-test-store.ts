@@ -13,8 +13,20 @@ import { testProviderConnection, type ConnectionTestResult } from './api.js';
 const [results, setResults] = createSignal<Record<string, ConnectionTestResult>>({});
 const [running, setRunning] = createSignal<Record<string, boolean>>({});
 
-export function connectionTestResult(connectionId: string): ConnectionTestResult | undefined {
-  return results()[connectionId];
+export function connectionTestResult(
+  connectionId: string,
+  serverResult?: ConnectionTestResult,
+): ConnectionTestResult | undefined {
+  const local = results()[connectionId];
+  if (!local) return serverResult;
+  return serverResult && Date.parse(serverResult.tested_at) > Date.parse(local.tested_at)
+    ? serverResult
+    : local;
+}
+
+/** Share a watchdog result with the account's existing relink controls. */
+export function rememberConnectionTestResult(result: ConnectionTestResult): void {
+  setResults((prev) => ({ ...prev, [result.connection_id]: result }));
 }
 
 export function isConnectionTestRunning(connectionId: string): boolean {
