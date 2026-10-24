@@ -92,6 +92,7 @@ const entities = [
   CliAuthCode,
 ];
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
+const MODELS_DEV_URL = 'https://models.dev/api.json';
 const OPENROUTER_MODELS_FIXTURE = {
   data: [
     {
@@ -229,7 +230,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
   process.env['NODE_ENV'] = 'test';
   process.env['BETTER_AUTH_SECRET'] =
     process.env['BETTER_AUTH_SECRET'] ?? 'test-secret-for-e2e-at-least-32chars!!';
-  const restoreFetch = stubOpenRouterPricingFetch();
+  const restoreFetch = stubStartupCatalogFetches();
 
   try {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -358,7 +359,7 @@ export function stubProviderDiscoveryFetch(): () => void {
   };
 }
 
-function stubOpenRouterPricingFetch(): () => void {
+function stubStartupCatalogFetches(): () => void {
   const originalFetch = global.fetch;
 
   global.fetch = (async (
@@ -371,6 +372,21 @@ function stubOpenRouterPricingFetch(): () => void {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+    // Keep background warmups inside the lifetime of this test app. Live
+    // catalogs can finish after app.close(), racing another suite's schema
+    // reset, and must not change the routing/pricing fixtures under a test.
+    if (url === MODELS_DEV_URL) {
+      return new Response('{}', { headers: { 'Content-Type': 'application/json' } });
+    }
+    if (
+      url.startsWith('https://modelparams.dev/') ||
+      url.startsWith('https://raw.githubusercontent.com/anomalyco/opencode/') ||
+      url.startsWith('https://raw.githubusercontent.com/mnfst/awesome-free-llm-apis/')
+    ) {
+      // Retain bundled parameter specs and empty optional catalogs. Their
+      // live refresh/parse behavior is covered by the services' unit tests.
+      return new Response(null, { status: 503 });
     }
     return originalFetch(input, init);
   }) as typeof fetch;

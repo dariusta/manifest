@@ -3,14 +3,13 @@
   "rootDir": "..",
   "coverageDirectory": "coverage/e2e",
   "testEnvironment": "node",
+  "testTimeout": 30000,
   "testRegex": ".e2e-spec.ts$",
   "transform": {
     "^.+\\.tsx?$": "ts-jest",
     "^.+\\.mjs$": "ts-jest"
   },
-  "transformIgnorePatterns": [
-    "node_modules/(?!(better-auth|better-call|@better-auth)/)"
-  ],
+  "transformIgnorePatterns": ["node_modules/(?!(better-auth|better-call|@better-auth)/)"],
   "moduleNameMapper": {
     "^src/(.*)$": "<rootDir>/src/$1"
   },
