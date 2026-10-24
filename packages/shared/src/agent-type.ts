@@ -1,4 +1,4 @@
-export const AGENT_CATEGORIES = ['personal', 'app', 'coding'] as const;
+export const AGENT_CATEGORIES = ['personal', 'automation', 'app', 'coding'] as const;
 export type AgentCategory = (typeof AGENT_CATEGORIES)[number];
 
 export const AGENT_PLATFORMS = [
@@ -6,9 +6,11 @@ export const AGENT_PLATFORMS = [
   'hermes',
   'nanobot',
   'craft',
+  'n8n',
   'claude-code',
   'cursor',
   'opencode',
+  'codex',
   'openai-sdk',
   'anthropic-sdk',
   'google-genai-sdk',
@@ -28,8 +30,37 @@ export function coerceAgentPlatform(value: string | null | undefined): AgentPlat
 
 export const CATEGORY_LABELS: Readonly<Record<AgentCategory, string>> = {
   personal: 'AI agent',
+  automation: 'Automation',
   app: 'App AI SDK',
   coding: 'Coding Assistant',
+};
+
+/**
+ * Which proxy surface a platform's NATIVE traffic speaks. Single source of
+ * truth for anything that impersonates or reasons about platform traffic
+ * (CLI `routing test`, Wingman profiles, docs). Adding a platform above
+ * without a surface here is a type error — the mapping can never go stale.
+ */
+export const API_SURFACES = ['chat_completions', 'messages', 'responses', 'generate_content'] as const;
+export type ApiSurface = (typeof API_SURFACES)[number];
+
+export const PLATFORM_API_SURFACES: Readonly<Record<AgentPlatform, ApiSurface>> = {
+  openclaw: 'chat_completions',
+  hermes: 'chat_completions',
+  nanobot: 'chat_completions',
+  craft: 'chat_completions',
+  n8n: 'chat_completions',
+  'claude-code': 'messages',
+  cursor: 'chat_completions',
+  'google-genai-sdk': 'generate_content',
+  opencode: 'chat_completions',
+  codex: 'responses',
+  'openai-sdk': 'chat_completions',
+  'anthropic-sdk': 'messages',
+  'vercel-ai-sdk': 'chat_completions',
+  langchain: 'chat_completions',
+  curl: 'chat_completions',
+  other: 'chat_completions',
 };
 
 export const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
@@ -37,9 +68,11 @@ export const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
   hermes: 'Hermes Agent',
   nanobot: 'Nanobot',
   craft: 'Craft Agent',
+  n8n: 'n8n',
   'claude-code': 'Claude Code',
   cursor: 'Cursor',
   opencode: 'OpenCode',
+  codex: 'Codex',
   'openai-sdk': 'OpenAI SDK',
   'anthropic-sdk': 'Anthropic SDK',
   'google-genai-sdk': 'Google Gen AI SDK',
@@ -51,8 +84,9 @@ export const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
 
 export const PLATFORMS_BY_CATEGORY: Readonly<Record<AgentCategory, readonly AgentPlatform[]>> = {
   personal: ['openclaw', 'hermes', 'nanobot', 'craft', 'other'],
+  automation: ['n8n', 'other'],
   app: ['openai-sdk', 'anthropic-sdk', 'google-genai-sdk', 'vercel-ai-sdk', 'langchain', 'other'],
-  coding: ['claude-code', 'cursor', 'opencode', 'other'],
+  coding: ['claude-code', 'cursor', 'opencode', 'codex', 'other'],
 };
 
 export const PLATFORM_ICONS: Readonly<Partial<Record<AgentPlatform, string>>> = {
@@ -60,9 +94,11 @@ export const PLATFORM_ICONS: Readonly<Partial<Record<AgentPlatform, string>>> = 
   hermes: '/icons/hermes.svg',
   nanobot: '/icons/nanobot.png',
   craft: '/icons/craft.png',
+  n8n: '/icons/n8n.svg',
   'claude-code': '/icons/providers/claude-code.svg',
   cursor: '/icons/providers/cursor.svg',
   opencode: '/icons/providers/opencode.svg',
+  codex: '/icons/providers/codex.svg',
   'openai-sdk': '/icons/providers/openai.svg',
   'anthropic-sdk': '/icons/providers/anthropic.svg',
   'google-genai-sdk': '/icons/gemini.svg',

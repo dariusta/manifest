@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { Response as ExpressResponse } from 'express';
 import { PlaygroundService } from './playground.service';
@@ -1312,6 +1313,61 @@ describe('PlaygroundService.runStream', () => {
     expect(forwardArgs.extraHeaders['X-Custom']).toBe('keep');
     expect(forwardArgs.extraHeaders.authorization).toBeUndefined();
     expect(forwardArgs.stream).toBe(true);
+  });
+
+  describe('provider-required headers', () => {
+    const scopedSessionId = `manifest-${createHash('sha256')
+      .update(`${AGENT.tenant_id}\u0000${AGENT.id}`)
+      .digest('hex')
+      .slice(0, 32)}`;
+
+    async function forwardedHeaders(
+      overrides: Partial<RunPlaygroundDto>,
+    ): Promise<Record<string, string> | undefined> {
+      const { service, mocks } = buildService();
+      mocks.providerClient.forward.mockResolvedValue(
+        okStream(['data: {"usage":{"prompt_tokens":0,"completion_tokens":0}}\n\n']),
+      );
+      await service.runStream(CTX, makeDto(overrides), asRes(mockRes()));
+      return mocks.providerClient.forward.mock.calls[0][0].extraHeaders;
+    }
+
+    it.each(['opencode-go', 'opencode-zen', 'opencodego'])(
+      'sends the agent-scoped x-opencode-session for %s',
+      async (provider) => {
+        const headers = await forwardedHeaders({ provider });
+        expect(headers).toEqual({ 'x-opencode-session': scopedSessionId });
+      },
+    );
+
+    it('keeps the session id stable across runs of the same agent', async () => {
+      const first = await forwardedHeaders({ provider: 'opencode-go' });
+      const second = await forwardedHeaders({ provider: 'opencode-go' });
+      expect(second).toEqual(first);
+    });
+
+    it('merges the session id with sanitized user headers', async () => {
+      const headers = await forwardedHeaders({
+        provider: 'opencode-go',
+        requestHeaders: { 'X-Custom': 'keep', authorization: 'drop-me' },
+      });
+      expect(headers).toEqual({ 'X-Custom': 'keep', 'x-opencode-session': scopedSessionId });
+    });
+
+    it('lets a user-supplied header override the session id regardless of casing', async () => {
+      const headers = await forwardedHeaders({
+        provider: 'opencode-go',
+        requestHeaders: { 'X-OpenCode-Session': 'mine' },
+      });
+      expect(headers).toEqual({ 'X-OpenCode-Session': 'mine' });
+    });
+
+    it('adds nothing for providers without a header builder', async () => {
+      expect(await forwardedHeaders({ provider: 'openai' })).toBeUndefined();
+      expect(
+        await forwardedHeaders({ provider: 'openai', requestHeaders: { 'X-Custom': 'keep' } }),
+      ).toEqual({ 'X-Custom': 'keep' });
+    });
   });
 
   it('send() is a no-op once the response has ended (no write after end)', async () => {

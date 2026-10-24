@@ -6,7 +6,9 @@ import helmet from 'helmet';
 import compression from 'compression';
 import * as express from 'express';
 import { AppModule } from './app.module';
-import { auth } from './auth/auth.instance';
+import { auth, mcpDisabledReason, mcpEnabled } from './auth/auth.instance';
+import { mcpOAuthResponse } from './auth/mcp-oauth-response';
+import { mountMcpDiscovery, mountMcpUnavailable } from './mcp/mcp-discovery';
 import { SpaFallbackFilter } from './common/filters/spa-fallback.filter';
 import { httpErrorLogger } from './common/middleware/http-error-logger.middleware';
 import {
@@ -17,7 +19,6 @@ import {
 } from './common/middleware/body-parser-limits';
 import { UPLOAD_SESSION_PREFIX } from './routing/gemini-native/google-native-wire';
 import {
-  PIVOT_CLAIM_CLOUD_ORIGIN,
   applyPivotClaimCors,
   applyPrivateNetworkAllow,
   buildCorsOptions,
@@ -61,9 +62,7 @@ export async function bootstrap() {
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", 'data:'],
-          // The pivot waiting-list claim is posted cross-origin to the cloud
-          // from self-hosted dashboards; the CSP must allow that connection.
-          connectSrc: ["'self'", PIVOT_CLAIM_CLOUD_ORIGIN],
+          connectSrc: ["'self'"],
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],
           frameSrc,
@@ -214,7 +213,13 @@ export async function bootstrap() {
 
   // Mount Better Auth handler (needs raw body, before express.json)
   const { toNodeHandler } = await import('better-auth/node');
-  expressApp.all('/api/auth/*splat', toNodeHandler(auth));
+  const authHandler = (request: Request) =>
+    auth.handler(request).then((response) => mcpOAuthResponse(request, response));
+  expressApp.all(
+    '/api/auth/*splat',
+    // Better Auth's adapter checks for a handler property and delegates to it.
+    toNodeHandler({ handler: authHandler } as typeof auth),
+  );
 
   // Re-add body parsing for NestJS routes. The OpenAI-compatible proxy has a
   // separate parser because clients may legitimately send large inline image
@@ -238,6 +243,17 @@ export async function bootstrap() {
   expressApp.use(express.json({ limit: API_BODY_LIMIT }));
   expressApp.use(express.urlencoded({ extended: true, limit: API_BODY_LIMIT }));
   expressApp.use(bodyParserErrorHandler);
+
+  // Both the OAuth discovery documents and the MCP module go together: with the
+  // Better Auth MCP plugin unloaded there is no authorization server to
+  // advertise, and publishing metadata for an endpoint that does not exist
+  // sends clients into a flow that cannot complete.
+  if (mcpEnabled) {
+    mountMcpDiscovery(app);
+  } else {
+    mountMcpUnavailable(app);
+    logger.warn(`Remote MCP server disabled: ${mcpDisabledReason}`);
+  }
 
   const port = Number(process.env['PORT'] ?? 3001);
   const host = process.env['BIND_ADDRESS'] ?? '127.0.0.1';

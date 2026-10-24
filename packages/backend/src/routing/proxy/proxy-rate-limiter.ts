@@ -1,3 +1,4 @@
+import { optionalPositiveInteger } from '../../config/env.util';
 import { Injectable, OnModuleDestroy, HttpStatus } from '@nestjs/common';
 import { ManifestError } from '../../common/errors/manifest-error';
 
@@ -48,11 +49,11 @@ export class ProxyRateLimiter implements OnModuleDestroy {
     // change means a restart, and per-request env reads would show up on the
     // hot path of every proxied call.
     this.rateMaxRequests = parseProxyLimit(
-      process.env['PROXY_RATE_MAX_REQUESTS'],
+      process.env['PROXY_RATE_MAX_REQUESTS'] ?? String(optionalPositiveInteger(process.env['MANIFEST_RATE_MAX_REQUESTS']) ?? DEFAULT_RATE_MAX_REQUESTS),
       DEFAULT_RATE_MAX_REQUESTS,
     );
     this.ipRateMaxRequests = parseProxyLimit(
-      process.env['PROXY_IP_RATE_MAX_REQUESTS'],
+      process.env['PROXY_IP_RATE_MAX_REQUESTS'] ?? String(optionalPositiveInteger(process.env['MANIFEST_IP_RATE_MAX_REQUESTS']) ?? DEFAULT_IP_RATE_MAX_REQUESTS),
       DEFAULT_IP_RATE_MAX_REQUESTS,
     );
     this.concurrencyMax = Infinity;

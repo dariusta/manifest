@@ -32,6 +32,9 @@ const enterpriseFeatures = [
   'Dedicated support (Slack and email)',
 ];
 
+export const FREE_PLAN_ENDS_NOTE =
+  'Available until November 1, 2026. From November 2, Manifest Cloud is $19/month.';
+
 export type PlanId = 'free' | 'pro' | 'enterprise';
 
 interface PlanDef {
@@ -125,6 +128,9 @@ const PlanPicker: Component<PlanPickerProps> = (props) => {
 
               <Show when={isExpanded()}>
                 <div class="plan-picker__details">
+                  <Show when={plan.id === 'free'}>
+                    <p class="plan-picker__notice">{FREE_PLAN_ENDS_NOTE}</p>
+                  </Show>
                   <Show when={plan.id === 'free' && props.usedRequests != null}>
                     <p class="plan-picker__usage">{fmt(props.usedRequests!)} used this month</p>
                   </Show>

@@ -232,22 +232,106 @@ describe('resolveEndpointKey', () => {
 });
 
 describe('resolveBedrockEndpointKey', () => {
-  it.each(['openai.gpt-5.6-luna', 'us.openai.gpt-5.6-luna', 'bedrock/openai.gpt-5.6-luna'])(
+  it.each(['openai.gpt-5.6-luna', 'bedrock/openai.gpt-5.6-luna'])(
     'routes %s through Responses',
     (model) => {
       expect(resolveBedrockEndpointKey(model)).toBe('bedrock-responses');
     },
   );
 
-  it.each(['anthropic.claude-sonnet-5', 'us.anthropic.claude-sonnet-5'])(
-    'routes %s through Messages',
-    (model) => {
-      expect(resolveBedrockEndpointKey(model)).toBe('bedrock-anthropic');
-    },
-  );
+  it.each([
+    'anthropic.claude-sonnet-5',
+    'anthropic.claude-opus-5-5',
+    'bedrock/anthropic.claude-sonnet-5',
+  ])('routes %s through Messages', (model) => {
+    expect(resolveBedrockEndpointKey(model)).toBe('bedrock-anthropic');
+  });
+
+  it.each([
+    'us.anthropic.claude-sonnet-5-5',
+    'eu.anthropic.claude-sonnet-5-5',
+    'global.anthropic.claude-sonnet-5-5',
+    'apac.anthropic.claude-sonnet-5-5',
+    'us.anthropic.claude-opus-5-5',
+    'us.anthropic.claude-sonnet-5',
+    'global.anthropic.claude-opus-5',
+    'bedrock/us.anthropic.claude-sonnet-5-5',
+    'bedrock/global.anthropic.claude-sonnet-5-5',
+  ])('routes the Claude CRIS profile %s to Runtime Messages on every API mode', (model) => {
+    expect(resolveBedrockEndpointKey(model)).toBe('bedrock-runtime-anthropic');
+    expect(resolveBedrockEndpointKey(model, 'chat_completions')).toBe('bedrock-runtime-anthropic');
+    expect(resolveBedrockEndpointKey(model, 'messages')).toBe('bedrock-runtime-anthropic');
+    expect(resolveBedrockEndpointKey(model, 'responses')).toBe('bedrock-runtime-anthropic');
+  });
 
   it('keeps other Bedrock model families on Chat Completions', () => {
     expect(resolveBedrockEndpointKey('mistral.ministral-3-8b-instruct')).toBe('bedrock');
+  });
+
+  it.each([
+    'us.openai.gpt-5.6-luna',
+    'global.openai.gpt-6-astra',
+    'us.openai.gpt-6-sol',
+    'global.openai.gpt-6-luna',
+    'global.moonshotai.kimi-k3',
+    'bedrock/us.moonshotai.kimi-k3',
+  ])('routes the catalogued CRIS profile %s to Runtime on the API the agent called', (model) => {
+    expect(resolveBedrockEndpointKey(model)).toBe('bedrock-runtime');
+    expect(resolveBedrockEndpointKey(model, 'chat_completions')).toBe('bedrock-runtime');
+    expect(resolveBedrockEndpointKey(model, 'messages')).toBe('bedrock-runtime');
+    expect(resolveBedrockEndpointKey(model, 'responses')).toBe('bedrock-runtime-responses');
+  });
+
+  it('keeps uncatalogued CRIS profiles on their Mantle route', () => {
+    expect(resolveBedrockEndpointKey('global.openai.gpt-7', 'responses')).toBe('bedrock-responses');
+    expect(resolveBedrockEndpointKey('eu.mistral.pixtral-large-2502-v1:0')).toBe('bedrock');
+  });
+});
+
+describe('Bedrock Runtime endpoints', () => {
+  it('serves Claude CRIS profiles through the Anthropic Messages API on the Runtime host', () => {
+    const ep = PROVIDER_ENDPOINTS['bedrock-runtime-anthropic'];
+    expect(ep.baseUrl).toBe('https://bedrock-runtime.us-east-1.amazonaws.com');
+    expect(ep.format).toBe('anthropic');
+    expect(ep.buildPath('us.anthropic.claude-sonnet-5-5')).toBe('/anthropic/v1/messages');
+    expect(ep.skipSubscriptionIdentity).toBe(true);
+  });
+
+  it('builds Runtime Claude headers like the Mantle Anthropic endpoint, with a single credential', () => {
+    const runtime = PROVIDER_ENDPOINTS['bedrock-runtime-anthropic'];
+    const mantle = PROVIDER_ENDPOINTS['bedrock-anthropic'];
+    const headers = runtime.buildHeaders('ABSK-test');
+    expect(headers).toEqual(mantle.buildHeaders('ABSK-test'));
+    expect(headers).toEqual({
+      'x-api-key': 'ABSK-test',
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    });
+    expect(headers).not.toHaveProperty('Authorization');
+  });
+
+  it('serves Chat Completions under /openai/v1 on the Runtime host', () => {
+    const ep = PROVIDER_ENDPOINTS['bedrock-runtime'];
+    expect(ep.baseUrl).toBe('https://bedrock-runtime.us-east-1.amazonaws.com');
+    expect(ep.format).toBe('openai');
+    expect(ep.buildPath('us.openai.gpt-6-sol')).toBe('/openai/v1/chat/completions');
+    expect(ep.buildHeaders('ABSK-test')).toEqual({
+      Authorization: 'Bearer ABSK-test',
+      'Content-Type': 'application/json',
+    });
+    expect(ep.streamUsageReporting).toBe('openai_stream_options');
+    expect(ep.acceptsPromptCacheKey).toBe(true);
+  });
+
+  it('serves Responses under /openai/v1 on the Runtime host', () => {
+    const ep = PROVIDER_ENDPOINTS['bedrock-runtime-responses'];
+    expect(ep.baseUrl).toBe('https://bedrock-runtime.us-east-1.amazonaws.com');
+    expect(ep.format).toBe('chatgpt');
+    expect(ep.buildPath('us.openai.gpt-6-sol')).toBe('/openai/v1/responses');
+    expect(ep.forwardResponsesStream).toBe(true);
+    expect(ep.acceptsMaxOutputTokens).toBe(true);
+    expect(ep.acceptsPromptCacheKey).toBe(true);
+    expect(ep.streamUsageReporting).toBeUndefined();
   });
 });
 
@@ -264,12 +348,16 @@ describe('PROVIDER_ENDPOINTS', () => {
     'openai.gpt-5.99-future',
     'us.openai.gpt-5.6-luna',
     'bedrock/openai.gpt-5.6-luna',
+    'openai.gpt-6-sol',
+    'openai.gpt-6-luna',
+    'global.openai.gpt-6-luna',
+    'openai.gpt-7',
   ])('uses the namespaced Bedrock Responses path for %s', (model) => {
     expect(PROVIDER_ENDPOINTS['bedrock-responses'].buildPath(model)).toBe('/openai/v1/responses');
   });
 
-  it.each(['openai.gpt-oss-120b', 'openai.gpt-50'])(
-    'keeps non-GPT-5 Bedrock model %s on the generic Responses path',
+  it.each(['openai.gpt-oss-120b', 'openai.gpt-oss-20b', 'openai.gpt-4.1', 'openai.gpt-50'])(
+    'keeps Bedrock model %s on the generic Responses path',
     (model) => {
       expect(PROVIDER_ENDPOINTS['bedrock-responses'].buildPath(model)).toBe('/v1/responses');
     },
@@ -482,7 +570,7 @@ describe('PROVIDER_ENDPOINTS', () => {
     expect(headers['anthropic-beta']).toContain('effort-2025-11-24');
     expect(headers['anthropic-beta']).toContain('fallback-credit-2026-06-01');
     expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.287 (external, sdk-cli)');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.293 (external, sdk-cli)');
     expect(headers['x-app']).toBe('cli');
     expect(headers['x-stainless-runtime']).toBe('node');
     expect(headers['x-stainless-lang']).toBe('js');
@@ -591,6 +679,11 @@ describe('PROVIDER_ENDPOINTS', () => {
   it('google buildPath includes model name with generateContent suffix', () => {
     const path = PROVIDER_ENDPOINTS['google'].buildPath('gemini-2.0-flash');
     expect(path).toBe('/v1beta/models/gemini-2.0-flash:generateContent');
+  });
+
+  it('google buildStreamPath uses streamGenerateContent', () => {
+    const path = PROVIDER_ENDPOINTS['google'].buildStreamPath!('gemini-2.0-flash');
+    expect(path).toBe('/v1beta/models/gemini-2.0-flash:streamGenerateContent');
   });
 
   it('openrouter buildPath returns /api/v1/chat/completions', () => {
@@ -1006,5 +1099,56 @@ describe('buildProviderExtraHeaders', () => {
     expect(buildProviderExtraHeaders('anthropic', 'sess-abc')).toBeUndefined();
     expect(buildProviderExtraHeaders('openai', 'sess-abc')).toBeUndefined();
     expect(buildProviderExtraHeaders('unknown', 'sess-abc')).toBeUndefined();
+  });
+
+  it('returns x-opencode-session for opencode-go and opencode-zen', () => {
+    expect(buildProviderExtraHeaders('opencode-go', 'v1:scoped-session')).toEqual({
+      'x-opencode-session': expect.stringMatching(/^manifest-[a-f0-9]{32}$/),
+    });
+    expect(buildProviderExtraHeaders('opencode-zen', 'v1:scoped-session')).toEqual({
+      'x-opencode-session': expect.stringMatching(/^manifest-[a-f0-9]{32}$/),
+    });
+  });
+
+  it('resolves registry aliases (opencodego / opencodezen) to the canonical builder', () => {
+    expect(buildProviderExtraHeaders('opencodego', 'v1:scoped-session')).toEqual({
+      'x-opencode-session': expect.stringMatching(/^manifest-[a-f0-9]{32}$/),
+    });
+    expect(buildProviderExtraHeaders('opencodezen', 'v1:scoped-session')).toEqual({
+      'x-opencode-session': expect.stringMatching(/^manifest-[a-f0-9]{32}$/),
+    });
+  });
+
+  it('falls back to the agent scope key for opencode when no session key exists', () => {
+    expect(buildProviderExtraHeaders('opencode-go', undefined, 'tenant-1\u0000agent-1')).toEqual({
+      'x-opencode-session': expect.stringMatching(/^manifest-[a-f0-9]{32}$/),
+    });
+  });
+
+  it('prefers the per-conversation key over the agent scope fallback', () => {
+    const withSession = buildProviderExtraHeaders(
+      'opencode-go',
+      'v1:scoped-session',
+      'tenant-1\u0000agent-1',
+    );
+    const fallbackOnly = buildProviderExtraHeaders(
+      'opencode-go',
+      undefined,
+      'tenant-1\u0000agent-1',
+    );
+    expect(withSession!['x-opencode-session']).not.toBe(fallbackOnly!['x-opencode-session']);
+    expect(withSession).toEqual(buildProviderExtraHeaders('opencode-go', 'v1:scoped-session'));
+  });
+
+  it('does not extend the agent scope fallback to xai or openrouter', () => {
+    expect(buildProviderExtraHeaders('xai', undefined, 'tenant-1\u0000agent-1')).toBeUndefined();
+    expect(
+      buildProviderExtraHeaders('openrouter', undefined, 'tenant-1\u0000agent-1'),
+    ).toBeUndefined();
+  });
+
+  it('returns undefined for opencode without any key', () => {
+    expect(buildProviderExtraHeaders('opencode-go')).toBeUndefined();
+    expect(buildProviderExtraHeaders('opencode-zen')).toBeUndefined();
   });
 });

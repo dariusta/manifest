@@ -8,6 +8,7 @@ import {
   invalidateGroup,
   INVALIDATION_GROUPS,
   DEFAULT_TTL_MS,
+  STALE_RETENTION_MS,
 } from '../../../src/services/api/cache';
 
 describe('api SWR cache', () => {
@@ -211,7 +212,7 @@ describe('api SWR cache', () => {
       vi.setSystemTime(0);
       // Seed a cacheable entry, then let it expire fully (no refetch touches it).
       await cachedFetch('/api/v1/messages', () => Promise.resolve({ n: 1 }));
-      vi.setSystemTime(DEFAULT_TTL_MS + 1);
+      vi.setSystemTime(DEFAULT_TTL_MS + STALE_RETENTION_MS + 1);
       // A successful write to a *different* key triggers a prune sweep that drops
       // the now-expired, idle /messages entry.
       await cachedFetch('/api/v1/overview', () => Promise.resolve({ n: 2 }));

@@ -1,8 +1,9 @@
+import { createCachedResource as createResource } from '../services/cached-resource.js';
 import { Title } from '@solidjs/meta';
 import { toggleScrollFade } from '../services/scroll-fade.js';
 import { A, useNavigate, useSearchParams } from '@solidjs/router';
 import {
-  createResource,
+
   createSignal,
   createMemo,
   createEffect,
@@ -19,6 +20,7 @@ import {
   getAgents,
   getGlobalProviders,
   getGlobalProviderUsage,
+  getRecentRequests,
   mergeUsage,
 } from '../services/api.js';
 import { customProviderColor } from '../services/formatters.js';
@@ -26,6 +28,7 @@ import { customProviderLogo } from '../components/ProviderIcon.jsx';
 import { stripCustomPrefix } from '../services/routing-utils.js';
 import {
   getOverview,
+  getModelUsage,
   getOverviewAgentUsage,
   getOverviewProviderUsage,
 } from '../services/api/analytics.js';
@@ -51,7 +54,7 @@ import {
   type MessageColumnKey,
   type MessageRow,
 } from '../components/message-table-types.js';
-import { agentPing, analyticsPing, routingPing } from '../services/sse.js';
+import { agentPing, analyticsPing, messagePing, routingPing } from '../services/sse.js';
 import '../styles/overview.css';
 import '../styles/charts.css';
 import '../styles/analytics-overview.css';
@@ -112,11 +115,9 @@ interface OverviewResponse {
     attempt_success_rate: number;
     manifest_lift_pct: number;
     recovered: number;
-  };
+  } | null;
   token_usage: Array<{ hour?: string; date?: string; input_tokens: number; output_tokens: number }>;
   message_usage: Array<{ hour?: string; date?: string; count: number }>;
-  cost_by_model: CostByModelRow[];
-  recent_activity: MessageRow[];
   has_data: boolean;
   has_providers: boolean;
 }
@@ -152,6 +153,21 @@ function loadRange(): string {
   }
   return '7d';
 }
+
+/** Placeholder rows for a panel whose own data is still loading. */
+const PanelRowsSkeleton = () => (
+  <div data-testid="panel-rows-skeleton">
+    <For each={[1, 2, 3]}>
+      {() => (
+        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+          <div class="skeleton skeleton--text" style="width: 140px;" />
+          <div class="skeleton skeleton--text" style="width: 100px;" />
+          <div class="skeleton skeleton--text" style="width: 50px;" />
+        </div>
+      )}
+    </For>
+  </div>
+);
 
 const GlobalOverview: Component = () => {
   const navigate = useNavigate();
@@ -232,19 +248,51 @@ const GlobalOverview: Component = () => {
   });
 
   // ── Data resources (5 parallel) ──────────────────────────────────────
-  const [overview] = createResource(
+  const [overviewResult] = createResource(
     () => ({ range: effectiveChartRange(), _ping: analyticsPing() }),
-    (p) => getOverview(p.range) as Promise<OverviewResponse>,
+    async (p) => ({
+      range: p.range,
+      data: (await getOverview(p.range, undefined, true)) as OverviewResponse,
+    }),
   );
+  const overview = () => overviewResult()?.data;
 
   // Show the skeleton on a range change, but not on the frequent background SSE
   // `_ping` refetches (those update in place). Track the range the visible
   // overview belongs to; while a newer range is loading, treat it as changing.
-  const [loadedRange, setLoadedRange] = createSignal(effectiveChartRange());
+  const [loadedRange, setLoadedRange] = createSignal<string>();
   createEffect(() => {
-    if (!overview.loading && overview() !== undefined) setLoadedRange(effectiveChartRange());
+    const result = overviewResult();
+    if (!overviewResult.loading && result !== undefined) setLoadedRange(result.range);
   });
-  const rangeChanging = () => overview.loading && loadedRange() !== effectiveChartRange();
+  // Recent Requests and Model usage load on their own, in parallel with the
+  // overview, so neither waits on it. Recent Requests follows the live message
+  // feed; Model usage is an aggregate and refreshes at the analytics cadence.
+  // Each keeps the range it was loaded for, so a range change shows the
+  // panel's skeleton instead of the previous range's rows.
+  const [recentRequestsResult] = createResource(
+    () => ({ range: effectiveChartRange(), _ping: messagePing() }),
+    async (p) => ({
+      range: p.range,
+      data: ((await getRecentRequests(p.range)) as { items: MessageRow[] }).items,
+    }),
+  );
+  const recentRequests = () => {
+    const result = recentRequestsResult();
+    return result?.range === effectiveChartRange() ? result.data : undefined;
+  };
+  const [modelUsageResult] = createResource(
+    () => ({ range: effectiveChartRange(), _ping: analyticsPing() }),
+    async (p) => ({
+      range: p.range,
+      data: (await getModelUsage(p.range)) as CostByModelRow[],
+    }),
+  );
+  const modelUsage = () => {
+    const result = modelUsageResult();
+    return result?.range === effectiveChartRange() ? result.data : undefined;
+  };
+  const rangeChanging = () => overviewResult.loading && loadedRange() !== effectiveChartRange();
 
   const [agents] = createResource(
     () => ({ _agentPing: agentPing(), _analyticsPing: analyticsPing() }),
@@ -289,10 +337,15 @@ const GlobalOverview: Component = () => {
   );
 
   // ── Autofix resources ─────────────────────────────────
-  const [autofixStats] = createResource(
-    () => ({ range: effectiveChartRange(), _ping: analyticsPing() }),
-    (p) => getAutofixStats(p.range),
+  const autofixScope = createMemo(() => ({ range: effectiveChartRange() }));
+  const [autofixStatsResult] = createResource(
+    () => ({ scope: autofixScope(), _ping: analyticsPing() }),
+    async (p) => ({ scope: p.scope, data: await getAutofixStats(p.scope.range) }),
   );
+  const autofixStats = () => {
+    const result = autofixStatsResult();
+    return result?.scope === autofixScope() ? result.data : undefined;
+  };
 
   // Disposition timeseries: feeds the "By request status" chart view AND the
   // Self-healed requests tab (recovered subset: healed + fallback series).
@@ -789,13 +842,17 @@ const GlobalOverview: Component = () => {
                 ];
               };
               return (
-                <MessageTable
-                  items={overview()?.recent_activity ?? []}
-                  columns={cols()}
-                  customProviderName={() => undefined}
-                  expandable
-                  onRowSelect={(id) => navigate(`/messages?request=${id}`)}
-                />
+                <Show when={recentRequests()} fallback={<PanelRowsSkeleton />}>
+                  {(items) => (
+                    <MessageTable
+                      items={items()}
+                      columns={cols()}
+                      customProviderName={() => undefined}
+                      expandable
+                      onRowSelect={(id) => navigate(`/messages?request=${id}`)}
+                    />
+                  )}
+                </Show>
               );
             })()}
           </div>
@@ -823,7 +880,14 @@ const GlobalOverview: Component = () => {
                 </tr>
               </thead>
               <tbody>
-                <For each={(overview()?.cost_by_model ?? []).slice(0, 10)}>
+                <Show when={modelUsage() === undefined}>
+                  <tr>
+                    <td colspan="6">
+                      <PanelRowsSkeleton />
+                    </td>
+                  </tr>
+                </Show>
+                <For each={(modelUsage() ?? []).slice(0, 10)}>
                   {(row) => (
                     <tr>
                       <td>
@@ -909,7 +973,7 @@ const GlobalOverview: Component = () => {
                     </tr>
                   )}
                 </For>
-                <Show when={(overview()?.cost_by_model ?? []).length === 0}>
+                <Show when={modelUsage()?.length === 0}>
                   <tr>
                     <td
                       colspan="3"
@@ -1154,6 +1218,7 @@ const GlobalOverview: Component = () => {
                                 alt=""
                                 width="20"
                                 height="20"
+                                class="platform-icon"
                                 style="flex-shrink: 0;"
                               />
                             </Show>

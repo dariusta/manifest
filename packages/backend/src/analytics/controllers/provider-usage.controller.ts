@@ -1,7 +1,7 @@
 import { Controller, Get, UseInterceptors } from '@nestjs/common';
 import { CacheTTL } from '@nestjs/cache-manager';
 import { TenantCtx, TenantContext } from '../../common/decorators/tenant-context.decorator';
-import { UserCacheInterceptor } from '../../common/interceptors/user-cache.interceptor';
+import { StaleAnalyticsCacheInterceptor } from '../../common/interceptors/stale-analytics-cache.interceptor';
 import { DASHBOARD_CACHE_TTL_MS } from '../../common/constants/cache.constants';
 import { ProviderUsageService, ProviderUsageSummary } from '../services/provider-usage.service';
 import { filterProvidersForDeployment } from '../../common/utils/provider-availability';
@@ -17,7 +17,7 @@ import { filterProvidersForDeployment } from '../../common/utils/provider-availa
  * once this resolves.
  */
 @Controller('api/v1/providers/usage')
-@UseInterceptors(UserCacheInterceptor)
+@UseInterceptors(StaleAnalyticsCacheInterceptor)
 @CacheTTL(DASHBOARD_CACHE_TTL_MS)
 export class ProviderUsageController {
   constructor(private readonly providerUsage: ProviderUsageService) {}

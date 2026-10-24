@@ -80,10 +80,12 @@ export function unambiguousRoute(
  *
  * Matches count route classes, not connections: discovery collapses multiple
  * api_key connections of one provider into a single api_key row, and the
- * subscription still wins over any number of metered keys.
+ * subscription still wins over any number of metered keys — the same rationale
+ * applies whether one key or several would otherwise be billed.
  *
  * Returns null for every other multi-match shape (single match, cross-provider
- * collision, three or more route classes, a `local` route involved).
+ * collision, three or more route classes, a `local` route involved) — those
+ * stay ambiguous and keep M302, exactly as unambiguousRoute treated them.
  */
 export function subscriptionPreferredRoute(
   model: string,

@@ -1,9 +1,9 @@
+import { createCachedResource as createResource } from '../../services/cached-resource.js';
 import { Title } from '@solidjs/meta';
 import { useNavigate, useSearchParams } from '@solidjs/router';
 import {
   createEffect,
   createMemo,
-  createResource,
   createSignal,
   For,
   Show,
@@ -26,7 +26,7 @@ import { toggleScrollFade } from '../../services/scroll-fade.js';
 import { renameProviderKey } from '../../services/api/routing.js';
 import type { AuthType, CustomProviderData, RoutingProvider } from '../../services/api.js';
 import type { CustomProviderPrefill, ProviderDeepLink } from '../../services/routing-params.js';
-import { PROVIDERS, type ProviderDef } from '../../services/providers.js';
+import { PROVIDERS, subscriptionCatalog, type ProviderDef } from '../../services/providers.js';
 import {
   customProviderColor,
   formatCost,
@@ -119,9 +119,11 @@ const PAGE_COPY: Record<
 
 const CONNECTIONS_COLLAPSE_THRESHOLD = 6;
 
-const providerListForKind = (kind: ProviderPageKind): ProviderDef[] => {
-  if (kind === 'subscriptions')
-    return PROVIDERS.filter((provider) => provider.supportsSubscription);
+const providerListForKind = (
+  kind: ProviderPageKind,
+  hasConnection: (providerId: string) => boolean,
+): ProviderDef[] => {
+  if (kind === 'subscriptions') return subscriptionCatalog(PROVIDERS, hasConnection);
   if (kind === 'local') return PROVIDERS.filter((provider) => provider.localOnly);
   return PROVIDERS.filter((provider) => !provider.subscriptionOnly && !provider.localOnly);
 };
@@ -411,6 +413,15 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
     return map;
   };
 
+  const catalogProviders = () =>
+    providerListForKind(
+      props.kind,
+      (providerId) =>
+        connectedByProvider()
+          .get(providerId)
+          ?.connections.some((connection) => connection.is_active) ?? false,
+    );
+
   const activeConnectionCount = (providerId: string) =>
     connectedByProvider()
       .get(providerId)
@@ -554,7 +565,8 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
       <Show when={connectedRows().length > 0}>
         <div
           class="overview-stats"
-          style={`grid-template-columns: repeat(${showMetricCard() ? 4 : 3}, 1fr); margin-bottom: 24px;`}
+          classList={{ 'overview-stats--3': !showMetricCard() }}
+          style="margin-bottom: 24px;"
         >
           <Show when={showMetricCard()}>
             <div class="overview-stat-card">
@@ -933,7 +945,7 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
               </tr>
             </thead>
             <tbody>
-              <For each={providerListForKind(props.kind)}>
+              <For each={catalogProviders()}>
                 {(provider) => {
                   const activeCount = () => activeConnectionCount(provider.id);
                   return (
@@ -981,7 +993,7 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
 
       <Show when={viewMode() === 'grid'}>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
-          <For each={providerListForKind(props.kind)}>
+          <For each={catalogProviders()}>
             {(provider) => {
               const activeCount = () => activeConnectionCount(provider.id);
               return (

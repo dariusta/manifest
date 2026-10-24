@@ -437,11 +437,50 @@ describe('Anthropic Messages adapter', () => {
       expect(ignoredNamed.tool_choice).toBeUndefined();
     });
 
+    it('translates tool_choice none so tools stay off on chat routes', () => {
+      const result = messagesToChatCompletionsRequest({
+        messages: [{ role: 'user', content: 'x' }],
+        tools: [{ name: 'search', input_schema: { type: 'object' } }],
+        tool_choice: { type: 'none' },
+      });
+      expect(result.tool_choice).toBe('none');
+      expect(result).not.toHaveProperty('parallel_tool_calls');
+    });
+
+    it('maps disable_parallel_tool_use to parallel_tool_calls false', () => {
+      const tools = [{ name: 'search', input_schema: { type: 'object' } }];
+      for (const choice of [{ type: 'auto' }, { type: 'any' }, { type: 'tool', name: 'search' }]) {
+        const result = messagesToChatCompletionsRequest({
+          messages: [{ role: 'user', content: 'x' }],
+          tools,
+          tool_choice: { ...choice, disable_parallel_tool_use: true },
+        });
+        expect(result.parallel_tool_calls).toBe(false);
+      }
+
+      const allowed = messagesToChatCompletionsRequest({
+        messages: [{ role: 'user', content: 'x' }],
+        tools,
+        tool_choice: { type: 'auto', disable_parallel_tool_use: false },
+      });
+      expect(allowed).not.toHaveProperty('parallel_tool_calls');
+    });
+
+    it('omits parallel_tool_calls when no tools are sent', () => {
+      // OpenAI rejects parallel_tool_calls on a request without tools.
+      const result = messagesToChatCompletionsRequest({
+        messages: [{ role: 'user', content: 'x' }],
+        tool_choice: { type: 'auto', disable_parallel_tool_use: true },
+      });
+      expect(result).not.toHaveProperty('parallel_tool_calls');
+    });
+
     it('exposes Anthropic server tools to the scorer by function.name (issue #1886)', () => {
-      // chatBody is only consumed by the routing/scoring layer in messages
-      // mode — the wire body goes through applyAnthropicMessagesMutations
-      // direct from the inbound body, so server-tool `type` tags are
-      // preserved upstream. Scoring just needs tool count + function.name.
+      // chatBody is consumed by the routing/scoring layer in messages mode —
+      // the scorer reads tool count + function.name. When the resolved
+      // provider is Anthropic, the wire body goes through
+      // applyAnthropicMessagesMutations direct from the inbound body instead
+      // of this translation, so server-tool `type` tags are preserved there.
       const result = messagesToChatCompletionsRequest({
         messages: [{ role: 'user', content: 'x' }],
         tools: [
@@ -463,6 +502,48 @@ describe('Anthropic Messages adapter', () => {
         'mcp',
         'my_custom',
         'explicit_custom',
+      ]);
+    });
+
+    it('gives Anthropic server tools a safe empty schema so strict chat-completions providers accept them (issue #2754)', () => {
+      // chatBody.tools is also the literal wire payload forwarded to
+      // non-Anthropic providers reached via the chat-completions wire format
+      // (ProviderClient.forward's needsChatBody path). Anthropic server
+      // tools (web_search, bash, computer, etc.) carry no `input_schema`;
+      // some strict providers (e.g. MiniMax) reject any function tool with
+      // no `parameters` field at all, so omitting it 400s the request even
+      // though Manifest itself never executes the tool.
+      const result = messagesToChatCompletionsRequest({
+        messages: [{ role: 'user', content: 'x' }],
+        tools: [
+          { type: 'web_search_20250305', name: 'web_search' },
+          { type: 'bash_20250124', name: 'bash' },
+          { type: 'mcp_toolset', name: 'mcp' },
+        ],
+      });
+
+      expect(result.tools).toEqual([
+        {
+          type: 'function',
+          function: {
+            name: 'web_search',
+            parameters: { type: 'object', properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'bash',
+            parameters: { type: 'object', properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'mcp',
+            parameters: { type: 'object', properties: {}, additionalProperties: false },
+          },
+        },
       ]);
     });
 
@@ -705,6 +786,12 @@ describe('Anthropic Messages adapter', () => {
       );
       expect(length.stop_reason).toBe('max_tokens');
 
+      const filtered = chatCompletionsResponseToMessages(
+        { choices: [{ message: { content: 'x' }, finish_reason: 'content_filter' }] },
+        'm',
+      );
+      expect(filtered.stop_reason).toBe('refusal');
+
       const unknown = chatCompletionsResponseToMessages(
         { choices: [{ message: { content: 'x' }, finish_reason: 'mystery' }] },
         'm',
@@ -905,6 +992,17 @@ describe('Anthropic Messages adapter', () => {
         'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"q"}}',
       );
       expect(sse).toContain('"stop_reason":"tool_use"');
+    });
+
+    it('streams a content_filter finish_reason as a refusal stop_reason', () => {
+      const t = createMessagesStreamTransformer('claude-sonnet-4');
+      const sse = flushChunks(t, [
+        'data: {"model":"claude","choices":[{"delta":{"content":"Partial"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}\n\n',
+      ]);
+
+      expect(sse).toContain('"stop_reason":"refusal"');
+      expect(sse).not.toContain('"stop_reason":"end_turn"');
     });
 
     it('translates DeepSeek-style delta.reasoning_content into a leading thinking block', () => {

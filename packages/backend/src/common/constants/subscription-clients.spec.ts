@@ -43,14 +43,14 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
     expect(headers['x-stainless-runtime-version']).toBe('v26.3.0');
   });
 
-  it('identifies as Claude Code 2.1.280+ so current models are not rejected', () => {
+  it('identifies as Claude Code 2.1.293+ so Haiku 5.5 is not rejected', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.287 (external, sdk-cli)');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.293 (external, sdk-cli)');
     const match = headers['user-agent']?.match(/^claude-cli\/(\d+)\.(\d+)\.(\d+) /);
     expect(match).not.toBeNull();
     const [, major, minor, patch] = match!;
     const version = Number(major) * 1_000_000 + Number(minor) * 1_000 + Number(patch);
-    const minimumSupported = 2 * 1_000_000 + 1 * 1_000 + 280;
+    const minimumSupported = 2 * 1_000_000 + 1 * 1_000 + 293;
     expect(version).toBeGreaterThanOrEqual(minimumSupported);
   });
 
@@ -69,7 +69,7 @@ describe('buildClaudeCodeSubscriptionHeaders', () => {
 
   it('matches the live Claude Code CLI identity that Anthropic bills as included usage', () => {
     const headers = buildClaudeCodeSubscriptionHeaders('key-123');
-    expect(headers['user-agent']).toBe('claude-cli/2.1.287 (external, sdk-cli)');
+    expect(headers['user-agent']).toBe('claude-cli/2.1.293 (external, sdk-cli)');
     expect(headers['x-app']).toBe('cli');
     expect(headers['x-stainless-arch']).toBe('arm64');
     expect(headers['x-stainless-os']).toBe('MacOS');

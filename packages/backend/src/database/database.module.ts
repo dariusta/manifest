@@ -25,6 +25,7 @@ import { ModelPricesModule } from '../model-prices/model-prices.module';
 import { shouldRetryDbConnection } from '../common/utils/db-retry';
 import { RequestRecordingRetentionService } from './request-recording-retention.service';
 import { databaseTlsOptions } from '../common/utils/database-tls';
+import { SecretReencryptionService } from './secret-reencryption.service';
 
 @Module({
   imports: [
@@ -95,7 +96,12 @@ import { databaseTlsOptions } from '../common/utils/database-tls';
     ]),
     ModelPricesModule,
   ],
-  providers: [DatabaseSeederService, DbTuningService, RequestRecordingRetentionService],
+  providers: [
+    DatabaseSeederService,
+    DbTuningService,
+    RequestRecordingRetentionService,
+    SecretReencryptionService,
+  ],
   exports: [DatabaseSeederService],
 })
 export class DatabaseModule {}

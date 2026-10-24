@@ -93,6 +93,19 @@ describe('getSubscriptionProviderConfig', () => {
     });
   });
 
+  it('offers current Sonnet and Haiku models and tests Claude with Haiku', () => {
+    const config = getSubscriptionProviderConfig('anthropic');
+    expect(config?.knownModels).toEqual(
+      expect.arrayContaining(['claude-sonnet-5-5', 'claude-haiku-5-5']),
+    );
+    expect(config?.connectionTestModel).toBe('claude-haiku-5-5');
+    expect(config?.knownModels).toContain(config?.connectionTestModel);
+    expect(config?.subscriptionCapabilities?.modelContextWindows).toMatchObject({
+      'claude-sonnet-5-5': 1000000,
+      'claude-haiku-5-5': 1000000,
+    });
+  });
+
   it('returns config for openai', () => {
     const config = getSubscriptionProviderConfig('openai');
     expect(config).toMatchObject({
@@ -309,6 +322,7 @@ describe('getSubscriptionProviderConfig', () => {
     expect(config?.knownModels).not.toContain('gemini-2.5-pro');
     expect(config?.knownModels).not.toContain('gemini-3.1-pro-preview');
     expect(config?.knownModels).not.toContain('gemini-3-flash-preview');
+    expect(config?.knownModels).not.toContain('gemini-3.6-flash');
     expect(config?.subscriptionCapabilities).toMatchObject({
       maxContextWindow: 1048576,
       supportsPromptCaching: true,
@@ -375,6 +389,10 @@ describe('getSubscriptionKnownModels', () => {
     expect(models).toContain('claude-sonnet-4');
     // claude-sonnet-5 (launched 2026-06-30) is served on the Claude plan.
     expect(models).toContain('claude-sonnet-5');
+    // Opus 5.5 is a point release addressed directly by callers.
+    expect(models).toContain('claude-opus-5-5');
+    expect(models).toContain('claude-sonnet-5-5');
+    expect(models).toContain('claude-haiku-5-5');
   });
 
   it('returns the curated ChatGPT plan models for OpenAI', () => {
@@ -488,6 +506,7 @@ describe('getSubscriptionKnownModels', () => {
     expect(models).not.toContain('gemini-2.5-pro');
     expect(models).not.toContain('gemini-3.1-pro-preview');
     expect(models).not.toContain('gemini-3-flash-preview');
+    expect(models).not.toContain('gemini-3.6-flash');
   });
 
   it('returns known models for xai', () => {

@@ -1,6 +1,8 @@
+import RouteLoadingSkeleton from './RouteLoadingSkeleton.jsx';
+import { createCachedResource as createResource } from '../services/cached-resource.js';
 import { useParams } from '@solidjs/router';
 import {
-  createResource,
+
   createMemo,
   createEffect,
   Show,
@@ -81,7 +83,7 @@ const AgentGuard: ParentComponent = (props) => {
     // Only blank on the very first load. Once a list has resolved, keep the
     // children mounted while a param-change refetch is in flight so switching
     // agents (and the post-create redirect) doesn't flash an empty page.
-    <Show when={!data.loading || data() !== undefined} fallback={null}>
+    <Show when={!data.loading || data() !== undefined} fallback={<RouteLoadingSkeleton />}>
       <Show when={!data.error} fallback={<ErrorState error={data.error} onRetry={refetch} />}>
         <Show when={data()?.agents}>
           <Show when={agentExists()} fallback={<NotFound />}>

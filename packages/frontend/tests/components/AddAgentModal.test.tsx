@@ -135,10 +135,8 @@ describe('AddAgentModal', () => {
     });
 
     it('does not navigate to the created harness if the modal is reopened mid-provider-lookup', async () => {
-      // Models the real parent: <AddAgentModal open={signal()} onClose={...}>,
-      // where closing does not unmount. The success path closes the modal and
-      // *then* awaits getGlobalProviders, so a user who reopens to add a second
-      // harness used to get redirected to the first one when that lookup landed.
+      // A modal dismissed and reopened while its provider lookup is pending
+      // must not navigate using the previous attempt.
       let resolveProviders!: (v: { providers: unknown[] }) => void;
       mockGetGlobalProviders.mockReturnValue(
         new Promise<{ providers: unknown[] }>((r) => (resolveProviders = r)),
@@ -151,7 +149,9 @@ describe('AddAgentModal', () => {
       fireEvent.input(input, { target: { value: 'first-harness' } });
       fireEvent.click(screen.getByText('Create'));
 
-      await vi.waitFor(() => expect(open()).toBe(false));
+      await vi.waitFor(() => expect(mockGetGlobalProviders).toHaveBeenCalled());
+      fireEvent.click(container.querySelector('.modal-overlay')!);
+      expect(open()).toBe(false);
       setOpen(true); // user reopens to add another harness
       resolveProviders({ providers: [] });
       await Promise.resolve();
@@ -399,11 +399,9 @@ describe('AddAgentModal', () => {
     fireEvent.input(input, { target: { value: 'late-dismiss' } });
     fireEvent.click(screen.getByText('Create'));
 
-    // createAgent resolves first (it ran the success side effects), then the
-    // providers lookup is in flight when the user dismisses the modal.
+    // The provider lookup is still part of the cancellable create flow.
     await vi.waitFor(() => expect(mockGetGlobalProviders).toHaveBeenCalled());
-    // Default mock returns agent.name "new-agent" as the slug.
-    expect(mockMarkAgentCreated).toHaveBeenCalledWith('new-agent');
+    expect(mockMarkAgentCreated).not.toHaveBeenCalled();
 
     fireEvent.click(container.querySelector('.modal-overlay')!);
     resolveProviders!({ providers: [{ provider: 'openai' }] });

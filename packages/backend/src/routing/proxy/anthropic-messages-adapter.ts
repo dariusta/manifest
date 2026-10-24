@@ -21,28 +21,8 @@ const DEFAULT_CUSTOM_TOOL_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-const ANTHROPIC_SERVER_TOOL_PREFIXES = [
-  'bash_',
-  'code_execution_',
-  'computer_',
-  'memory_',
-  'text_editor_',
-  'tool_search_tool_',
-  'web_fetch_',
-  'web_search_',
-] as const;
-
-const ANTHROPIC_SERVER_TOOL_TYPES = ['mcp_toolset'] as const;
-
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isAnthropicServerToolType(type: string): boolean {
-  return (
-    ANTHROPIC_SERVER_TOOL_TYPES.includes(type as (typeof ANTHROPIC_SERVER_TOOL_TYPES)[number]) ||
-    ANTHROPIC_SERVER_TOOL_PREFIXES.some((prefix) => type.startsWith(prefix))
-  );
 }
 
 function normalizeOpenAiFunctionSchema(schema: unknown): unknown {
@@ -233,7 +213,19 @@ function buildUserMessages(content: unknown, pendingToolImages: JsonRecord[]): O
 // and array length, nothing else. The Anthropic wire body is emitted by
 // `applyAnthropicMessagesMutations` directly from the inbound body, so this
 // translation can lose Anthropic-only tool fields (e.g. server-tool `type`
-// tags, omitted input_schema) without affecting upstream behavior.
+// tags, omitted input_schema) without affecting upstream behavior *when the
+// resolved provider is Anthropic*.
+//
+// But `chatBody.tools` is also the literal wire payload forwarded to
+// non-Anthropic providers reached via the chat-completions wire format (see
+// `ProviderClient.forward`'s `needsChatBody` path) — those providers never
+// see the native Anthropic body. Anthropic server tools (`web_search_*`,
+// `bash_*`, `computer_*`, etc.) have no `input_schema`, and some strict
+// chat-completions providers (e.g. MiniMax) reject any function tool whose
+// `parameters` field is missing entirely — even though the tool itself can't
+// run there regardless. Emitting the same safe empty-object schema used for
+// unrecognized tool types (issue #1897) keeps the request well-formed
+// without pretending the schema is meaningful (fixes #2754).
 function toChatTools(tools: unknown[]): JsonRecord[] {
   return tools.filter(isRecord).map((tool) => ({
     type: 'function',
@@ -242,9 +234,7 @@ function toChatTools(tools: unknown[]): JsonRecord[] {
       ...(typeof tool.description === 'string' && { description: tool.description }),
       ...(tool.input_schema !== undefined
         ? { parameters: normalizeOpenAiFunctionSchema(tool.input_schema) }
-        : typeof tool.type === 'string' &&
-            tool.type !== 'custom' &&
-            !isAnthropicServerToolType(tool.type)
+        : typeof tool.type === 'string' && tool.type !== 'custom'
           ? { parameters: DEFAULT_CUSTOM_TOOL_INPUT_SCHEMA }
           : {}),
     },
@@ -255,6 +245,7 @@ function toChatToolChoice(choice: unknown): unknown {
   if (!isRecord(choice)) return undefined;
   if (choice.type === 'auto') return 'auto';
   if (choice.type === 'any') return 'required';
+  if (choice.type === 'none') return 'none';
   if (choice.type === 'tool' && typeof choice.name === 'string') {
     return { type: 'function', function: { name: choice.name } };
   }
@@ -296,13 +287,28 @@ export function messagesToChatCompletionsRequest(body: JsonRecord): JsonRecord {
   if (body.stop_sequences !== undefined) chatBody.stop = body.stop_sequences;
   // Anthropic-native fields with no chat_completions analogue. Carried on
   // chatBody so toAnthropicRequest can forward them when the resolved
-  // provider is Anthropic; harmlessly ignored by other adapters.
+  // provider is Anthropic. Native OpenAI rejects `thinking` as an unknown
+  // parameter, so the forwarding boundary only preserves the lossless case:
+  // `thinking: {type: disabled}` becomes reasoning_effort `none` (and only on a
+  // model that reasons); every other thinking config is dropped and falls back
+  // to the provider's default reasoning (see applyAnthropicThinkingForOpenAi
+  // in provider-client).
   if (body.thinking !== undefined) chatBody.thinking = body.thinking;
   if (body.top_k !== undefined) chatBody.top_k = body.top_k;
 
   if (Array.isArray(body.tools)) chatBody.tools = toChatTools(body.tools);
   const toolChoice = toChatToolChoice(body.tool_choice);
   if (toolChoice !== undefined) chatBody.tool_choice = toolChoice;
+  // Anthropic carries the parallel switch on tool_choice; chat_completions has
+  // a top-level flag, which OpenAI rejects on a request without tools.
+  if (
+    isRecord(body.tool_choice) &&
+    body.tool_choice.disable_parallel_tool_use === true &&
+    Array.isArray(chatBody.tools) &&
+    chatBody.tools.length > 0
+  ) {
+    chatBody.parallel_tool_calls = false;
+  }
 
   return chatBody;
 }
@@ -311,6 +317,9 @@ const STOP_REASON_MAP: Record<string, string> = {
   stop: 'end_turn',
   length: 'max_tokens',
   tool_calls: 'tool_use',
+  // A provider safety filter cut the reply short; Anthropic reports its own
+  // policy stops as `refusal`, so clients don't treat it as a finished turn.
+  content_filter: 'refusal',
 };
 
 function toAnthropicStopReason(finishReason: unknown): string {

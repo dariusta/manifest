@@ -1,3 +1,4 @@
+import { mockScopeResolver, selectedAgent } from '../__tests__/scope.fixture';
 import { AutofixAnalyticsController } from './autofix-analytics.controller';
 
 describe('AutofixAnalyticsController', () => {
@@ -10,7 +11,11 @@ describe('AutofixAnalyticsController', () => {
     getPerProviderStats: jest.fn(),
   };
   const cache = { del: jest.fn().mockResolvedValue(undefined) };
-  const controller = new AutofixAnalyticsController(service as never, cache as never);
+  const controller = new AutofixAnalyticsController(
+    mockScopeResolver(),
+    service as never,
+    cache as never,
+  );
   const ctx = { tenantId: 'tenant' } as never;
 
   beforeEach(() => jest.clearAllMocks());
@@ -40,20 +45,20 @@ describe('AutofixAnalyticsController', () => {
     expect(service.getStats).toHaveBeenCalledWith({
       tenantId: 'tenant',
       range: '30d',
-      agentName: 'demo',
+      agentScope: selectedAgent('tenant', 'demo'),
     });
     expect(service.getTimeseries).toHaveBeenCalledWith({
       tenantId: 'tenant',
       range: '24h',
       by: 'autofix',
-      agentName: 'demo',
+      agentScope: selectedAgent('tenant', 'demo'),
       failedOnly: true,
     });
     expect(service.getPerAgentStats).toHaveBeenCalledWith({ tenantId: 'tenant', range: '7d' });
     expect(service.getPerProviderStats).toHaveBeenCalledWith({
       tenantId: 'tenant',
       range: '90d',
-      agentName: 'demo',
+      agentScope: selectedAgent('tenant', 'demo'),
     });
   });
 
@@ -63,7 +68,7 @@ describe('AutofixAnalyticsController', () => {
       tenantId: 'tenant',
       range: undefined,
       by: undefined,
-      agentName: undefined,
+      agentScope: undefined,
       failedOnly: false,
     });
   });

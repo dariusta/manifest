@@ -51,10 +51,10 @@ describe('SetupStepAddProvider', () => {
     expect(activeBtn!.textContent).toBe('Agents');
   });
 
-  it('shows OpenClaw, Hermes, Nanobot, Craft, Claude Code, and OpenCode tabs inside Agents', () => {
+  it('shows OpenClaw, Hermes, Nanobot, Craft, Claude Code, OpenCode, and Codex tabs inside Agents', () => {
     const { container } = render(() => <SetupStepAddProvider {...defaultProps} />);
     const agentTabs = container.querySelectorAll('.panel__tab');
-    expect(agentTabs).toHaveLength(6);
+    expect(agentTabs).toHaveLength(7);
     expect(agentTabs[0].textContent).toContain('OpenClaw');
     expect(agentTabs[1].textContent).toContain('Hermes Agent');
     expect(agentTabs[2].textContent).toContain('Nanobot');

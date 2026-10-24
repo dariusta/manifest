@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { resolveProviderMetadataIdentity, type AuthType } from 'manifest-shared';
+import { resolveProviderMetadataIdentity, type AuthType, type ModelModality } from 'manifest-shared';
 import { TenantProvider } from '../entities/tenant-provider.entity';
 import { TenantCacheService } from '../common/services/tenant-cache.service';
 import { AgentEnabledProvider } from '../entities/agent-enabled-provider.entity';
@@ -11,13 +11,17 @@ import {
   PROVIDER_BLOCKLIST,
   PROVIDER_NON_CHAT,
   filterNonChatModels,
+  type ProviderModelFetchOptions,
 } from './provider-model-fetcher.service';
 import { ProviderModelRegistryService } from './provider-model-registry.service';
 import { DiscoveredModel, DEFAULT_CONTEXT_WINDOW } from './model-fetcher';
-import { decrypt, getEncryptionSecret } from '../common/utils/crypto.util';
+import { decryptWithAny, getDecryptionSecrets } from '../common/utils/crypto.util';
 import { computeQualityScore } from '../database/quality-score.util';
 import { PricingSyncService } from '../database/pricing-sync.service';
-import { ModelsDevSyncService } from '../database/models-dev-sync.service';
+import {
+  ModelsDevSyncService,
+  type ModelsDevModelEntry,
+} from '../database/models-dev-sync.service';
 import { parseOAuthTokenBlob } from '../routing/oauth/core';
 import { getQwenCompatibleBaseUrl, isQwenResolvedEndpoint } from '../routing/qwen-region';
 import {
@@ -42,6 +46,7 @@ import {
   reconcileCachedSubscriptionContextWindow,
   supplementWithKnownModels,
 } from './model-fallback';
+import { resolveMetadataEntry } from './metadata-identity';
 import { lookupKnownPrice } from './known-model-prices';
 import { lookupKnownModalities } from './known-model-modalities';
 import { mergeModelCapabilities, modelSupportsStreaming } from './model-capabilities';
@@ -100,6 +105,7 @@ function nonChatFilterKey(providerId: string, authType: AuthType): string {
 const MODELS_CACHE_TTL_MS = 120_000;
 
 interface ModelsCacheEntry {
+  tenantId: string;
   data: DiscoveredModel[];
   expiresAt: number;
 }
@@ -160,7 +166,7 @@ export class ModelDiscoveryService {
     const lowerProvider = provider.provider.toLowerCase();
     if (provider.api_key_encrypted) {
       try {
-        apiKey = decrypt(provider.api_key_encrypted, getEncryptionSecret());
+        apiKey = decryptWithAny(provider.api_key_encrypted, getDecryptionSecrets()).plaintext;
       } catch {
         this.logger.warn(`Failed to decrypt key for provider ${provider.provider}`);
         return [];
@@ -206,6 +212,13 @@ export class ModelDiscoveryService {
         }
       }
     }
+    if (
+      lowerProvider === 'minimax' &&
+      provider.auth_type === 'api_key' &&
+      provider.region === 'cn'
+    ) {
+      endpointOverride = `${MINIMAX_BASE_URLS.cn}/v1`;
+    }
     if (isQwenProvider(provider.provider) && isQwenResolvedEndpoint(provider.region)) {
       endpointOverride = getQwenCompatibleBaseUrl(provider.region);
     }
@@ -236,12 +249,21 @@ export class ModelDiscoveryService {
     const useCuratedSubscriptionModels =
       provider.auth_type === 'subscription' && (!apiKey || lowerProvider === 'anthropic');
 
+    const fetchOptions: ProviderModelFetchOptions = {
+      ...(options.forceRefresh ? { forceRefresh: true } : {}),
+      // Bedrock keeps its last discovered CRIS profiles if the control plane fails.
+      ...(isBedrockProvider(provider.provider)
+        ? { previousModels: provider.cached_models ?? [] }
+        : {}),
+    };
     const fetchProviderModels = () =>
-      options.forceRefresh
-        ? this.fetcher.fetch(provider.provider, apiKey, provider.auth_type, endpointOverride, {
-            forceRefresh: true,
-          })
-        : this.fetcher.fetch(provider.provider, apiKey, provider.auth_type, endpointOverride);
+      this.fetcher.fetch(
+        provider.provider,
+        apiKey,
+        provider.auth_type,
+        endpointOverride,
+        fetchOptions,
+      );
 
     const buildModelsDevModels = () => {
       const models = buildModelsDevFallback(this.modelsDevSync, provider.provider, {
@@ -352,18 +374,16 @@ export class ModelDiscoveryService {
           })
         : enriched;
 
-    // Filter out models confirmed to lack tool support (models.dev toolCall === false).
-    // AI agents (OpenClaw, Hermes, SDK-based agents) almost always
-    // include tools in every request, so models without tool calling are
-    // unusable. Only filter when models.dev has data — if no entry exists we
-    // keep the model (we don't know its capabilities).
-    const filtered = reconciled.filter((model) => {
-      const metadata = resolveProviderMetadataIdentity(provider.provider, model.id);
-      const metadataProvider = metadata.provider ?? provider.provider;
-      const mdEntry = this.modelsDevSync?.lookupModelCapabilities(metadataProvider, metadata.model);
-      if (mdEntry && mdEntry.toolCall === false) return false;
-      return true;
-    });
+    // Drop models that cannot hold a text conversation: no text in (speech
+    // recognition, video analysis) or no text out (video, image, speech
+    // generation). Modalities are the ones enrichment resolved from the
+    // provider's own /models response, models.dev, or the curated list; a
+    // model no source describes is kept. Tool support is deliberately NOT a
+    // criterion: routes are user-chosen, and a tool-less chat model (Groq's
+    // allam-2-7b, #2963) still serves requests that send no tools.
+    const filtered = reconciled.filter(
+      (model) => carriesText(model.inputModalities) && carriesText(model.outputModalities),
+    );
 
     const previousCachedCount = Array.isArray(provider.cached_models)
       ? provider.cached_models.length
@@ -459,11 +479,13 @@ export class ModelDiscoveryService {
     }
 
     if (providers[0].provider.startsWith('custom:')) {
-      const previousCount = Math.max(
-        ...providers.map((provider) =>
-          Array.isArray(provider.cached_models) ? provider.cached_models.length : 0,
-        ),
-      );
+      // A custom provider's models live on its custom_providers row, entered by
+      // hand. The connection row's discovery cache is never filled, so report
+      // the real list rather than a 0 that reads like a wiped catalog.
+      const custom = await this.customProviderRepo.findOne({
+        where: { id: providers[0].provider.slice('custom:'.length), tenant_id: tenantId },
+      });
+      const modelCount = Array.isArray(custom?.models) ? custom.models.length : 0;
       const previousFetchedAt = providers
         .map((provider) => provider.models_fetched_at)
         .filter((value): value is string => value !== null)
@@ -471,7 +493,7 @@ export class ModelDiscoveryService {
         .pop();
       return {
         ok: false,
-        model_count: previousCount,
+        model_count: modelCount,
         last_fetched_at: previousFetchedAt ?? null,
         error: 'Custom providers are managed manually — edit the provider to update its model list',
       };
@@ -545,7 +567,11 @@ export class ModelDiscoveryService {
     for (const [key, entry] of this.modelsCache) {
       if (entry.expiresAt <= now) this.modelsCache.delete(key);
     }
-    this.modelsCache.set(agentId, { data: models, expiresAt: now + MODELS_CACHE_TTL_MS });
+    this.modelsCache.set(agentId, {
+      tenantId,
+      data: models,
+      expiresAt: now + MODELS_CACHE_TTL_MS,
+    });
     return models;
   }
 
@@ -555,6 +581,17 @@ export class ModelDiscoveryService {
    */
   invalidate(agentId: string): void {
     this.modelsCache.delete(agentId);
+  }
+
+  /**
+   * Drop the cached model list of every agent in a tenant. Custom providers
+   * are tenant-global, so their alias, name or model-list edits change what
+   * every agent publishes at once (bridged from RoutingCacheService).
+   */
+  invalidateTenant(tenantId: string): void {
+    for (const [agentId, entry] of this.modelsCache) {
+      if (entry.tenantId === tenantId) this.modelsCache.delete(agentId);
+    }
   }
 
   private async invalidateProviderAccess(provider: TenantProvider): Promise<void> {
@@ -670,6 +707,8 @@ export class ModelDiscoveryService {
             ? { inputModalities: m.input_modalities, capabilities: m.input_modalities }
             : {}),
           qualityScore: 2,
+          providerName: cp.name,
+          ...(cp.alias ? { providerAlias: cp.alias } : {}),
         });
       }
     }
@@ -706,19 +745,26 @@ export class ModelDiscoveryService {
     return matches.length === 1 ? matches[0] : undefined;
   }
 
+  /**
+   * Modality authority: the provider's own /models response, then models.dev,
+   * then the curated list. Capability lists are positive facts and merge from
+   * every source.
+   */
   private enrichModel(model: DiscoveredModel, providerId: string): DiscoveredModel {
-    // Fill modality gaps from the curated list before enrichment, so
-    // provider-native and models.dev modalities (applied below) still win.
-    const knownModalities = lookupKnownModalities(providerId, model.id);
-    if (knownModalities) {
-      model = {
-        ...model,
-        inputModalities: model.inputModalities ?? knownModalities.input,
-        outputModalities: model.outputModalities ?? knownModalities.output,
-        capabilities: mergeModelCapabilities(model.capabilities, knownModalities.capabilities),
-      };
-    }
+    const known = lookupKnownModalities(providerId, model.id);
+    if (!known) return this.enrichFromCatalogs(model, providerId);
+    const enriched = this.enrichFromCatalogs(
+      { ...model, capabilities: mergeModelCapabilities(model.capabilities, known.capabilities) },
+      providerId,
+    );
+    return {
+      ...enriched,
+      inputModalities: enriched.inputModalities ?? known.input,
+      outputModalities: enriched.outputModalities ?? known.output,
+    };
+  }
 
+  private enrichFromCatalogs(model: DiscoveredModel, providerId: string): DiscoveredModel {
     // Skip pricing enrichment when both prices are already set (price=0 for free/subscription)
     // but still apply capability flags from models.dev for better scoring
     if (
@@ -742,11 +788,15 @@ export class ModelDiscoveryService {
     // capability flags (reasoning / tool-call) — those drive tier auto-
     // assignment quality scoring and shouldn't be lost just because we
     // overrode the price. Mirrors the price-already-set branch above.
-    const metadata = resolveProviderMetadataIdentity(providerId, model.id);
+    const { metadata, entry: metadataEntry } = resolveMetadataEntry(
+      providerId,
+      model.id,
+      (lookupProvider, lookupModel) =>
+        this.modelsDevSync?.lookupModel(lookupProvider, lookupModel) ?? null,
+    );
     const metadataProvider = metadata.provider ?? providerId;
     const metadataModel = metadata.model;
     const isBedrock = providerId.toLowerCase() === 'bedrock';
-    const metadataEntry = this.modelsDevSync?.lookupModel(metadataProvider, metadataModel) ?? null;
     const modelWithMetadataName =
       metadataEntry?.name && metadataEntry.name !== model.id
         ? { ...model, displayName: metadataEntry.name }
@@ -786,12 +836,7 @@ export class ModelDiscoveryService {
           displayName: capabilityEntry.name || mdEntry.name || modelWithMetadataName.displayName,
           capabilityReasoning: capabilityEntry.reasoning ?? model.capabilityReasoning,
           capabilityCode: capabilityEntry.toolCall ?? model.capabilityCode,
-          ...(capabilityEntry.inputModalities
-            ? { inputModalities: capabilityEntry.inputModalities }
-            : {}),
-          ...(capabilityEntry.outputModalities
-            ? { outputModalities: capabilityEntry.outputModalities }
-            : {}),
+          ...providerModalitiesFirst(model, capabilityEntry),
           capabilities: mergeModelCapabilities(
             model.capabilities,
             capabilityEntry.capabilities,
@@ -830,16 +875,19 @@ export class ModelDiscoveryService {
   /** Merge capability flags from models.dev without touching pricing or display name. */
   private applyCapabilities(model: DiscoveredModel, providerId: string): DiscoveredModel {
     if (!this.modelsDevSync) return model;
-    const metadata = resolveProviderMetadataIdentity(providerId, model.id);
+    const { metadata, entry: mdEntry } = resolveMetadataEntry(
+      providerId,
+      model.id,
+      (lookupProvider, lookupModel) =>
+        this.modelsDevSync!.lookupModelCapabilities(lookupProvider, lookupModel),
+    );
     const metadataProvider = metadata.provider ?? providerId;
-    const mdEntry = this.modelsDevSync.lookupModelCapabilities(metadataProvider, metadata.model);
     if (!mdEntry) return model;
     return {
       ...model,
       capabilityReasoning: mdEntry.reasoning ?? model.capabilityReasoning,
       capabilityCode: mdEntry.toolCall ?? model.capabilityCode,
-      ...(mdEntry.inputModalities ? { inputModalities: mdEntry.inputModalities } : {}),
-      ...(mdEntry.outputModalities ? { outputModalities: mdEntry.outputModalities } : {}),
+      ...providerModalitiesFirst(model, mdEntry),
       capabilities: mergeModelCapabilities(
         model.capabilities,
         mdEntry.capabilities,
@@ -859,4 +907,22 @@ export class ModelDiscoveryService {
     });
     return { ...model, qualityScore: score };
   }
+}
+
+/** Unknown modalities (no list) count as text so the model is kept. */
+function carriesText(modalities: readonly ModelModality[] | undefined): boolean {
+  return !modalities || modalities.includes('text');
+}
+
+/** Modalities the provider stated win; models.dev only fills the gaps. */
+function providerModalitiesFirst(
+  model: DiscoveredModel,
+  entry: Pick<ModelsDevModelEntry, 'inputModalities' | 'outputModalities'>,
+): Pick<DiscoveredModel, 'inputModalities' | 'outputModalities'> {
+  const inputModalities = model.inputModalities ?? entry.inputModalities;
+  const outputModalities = model.outputModalities ?? entry.outputModalities;
+  return {
+    ...(inputModalities ? { inputModalities } : {}),
+    ...(outputModalities ? { outputModalities } : {}),
+  };
 }

@@ -239,8 +239,26 @@ export function getPerProviderCostTimeseries(agentName: string, range = '24h'): 
   }) as PivotedTimeseries;
 }
 
-export function getOverview(range = '24h', agentName?: string) {
-  return fetchJson('/overview', { range, ...(agentName ? { agent_name: agentName } : {}) });
+export function getOverview(range = '24h', agentName?: string, fast = false) {
+  return fetchJson('/overview', {
+    range,
+    ...(agentName ? { agent_name: agentName } : {}),
+    ...(fast ? { fast: 'true' } : {}),
+  });
+}
+
+export function getModelUsage(range = '24h', agentName?: string) {
+  return fetchJson('/overview/model-usage', {
+    range,
+    ...(agentName ? { agent_name: agentName } : {}),
+  });
+}
+
+export function getOverviewDetails(range = '24h', agentName?: string) {
+  return fetchJson('/overview/details', {
+    range,
+    ...(agentName ? { agent_name: agentName } : {}),
+  });
 }
 
 export interface AttemptMetric {

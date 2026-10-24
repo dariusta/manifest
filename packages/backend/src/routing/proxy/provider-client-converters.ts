@@ -3,10 +3,13 @@ import {
   fromGoogleResponse,
   transformGoogleStreamChunk,
   type GoogleStreamChunkResult,
+  type GoogleStreamState,
 } from './google-adapter';
 import {
   applyAnthropicAutomaticCacheControl,
+  applyAnthropicLastMessageCacheControl,
   applyAnthropicMessagesMutations,
+  hasMessageCacheControl,
   extractThinkingBlocksFromMessagesResponse,
   toAnthropicRequest,
   fromAnthropicResponse,
@@ -23,8 +26,6 @@ import {
 import {
   normalizeOpenAiReasoningDelta,
   type OpenAiReasoningStreamFormat,
-  supportsReasoningContent,
-  type ReasoningModelCatalog,
 } from './reasoning-format';
 
 /** Convert a ChatGPT Responses API response to OpenAI format. */
@@ -50,9 +51,16 @@ export function convertGoogleResponse(
   return fromGoogleResponse(googleBody, model);
 }
 
-/** Convert a Google SSE chunk to OpenAI SSE format. */
-export function convertGoogleStreamChunk(chunk: string, model: string): GoogleStreamChunkResult {
-  return transformGoogleStreamChunk(chunk, model);
+/**
+ * Convert a Google SSE chunk to OpenAI SSE format. Pass one `state` (from
+ * `createGoogleStreamState`) for every chunk of a stream.
+ */
+export function convertGoogleStreamChunk(
+  chunk: string,
+  model: string,
+  state?: GoogleStreamState,
+): GoogleStreamChunkResult {
+  return transformGoogleStreamChunk(chunk, model, state);
 }
 
 /** Convert an Anthropic non-streaming response to OpenAI format. */
@@ -81,7 +89,9 @@ export function createAnthropicTransformer(
 // Re-export adapter functions used by ProviderClient.forward()
 export {
   applyAnthropicAutomaticCacheControl,
+  applyAnthropicLastMessageCacheControl,
   applyAnthropicMessagesMutations,
+  hasMessageCacheControl,
   extractThinkingBlocksFromMessagesResponse,
   toGoogleRequest,
   toAnthropicRequest,
@@ -93,11 +103,24 @@ export type { GoogleStreamChunkResult } from './google-adapter';
 export type { ThinkingBlocksCallback } from './anthropic-adapter';
 export type { SignatureLookup, ThinkingBlockLookup } from './proxy-types';
 
-// ─── OpenAI body sanitization (used by ProviderClient.forward) ───────────────
+// ─── OpenAI wire normalization (used by ProviderClient.forward) ─────────────
+
+// This layer keeps unconditional wire-format adaptations: provider-level
+// protocol facts (a field that is simply not part of a given API) and
+// cross-protocol translations. Model- and version-specific corrections — a
+// parameter that some models accept and others reject — stay out of here and
+// belong to Autofix, where the provider error can scope a patch.
 
 /**
- * OpenAI-only fields that other providers reject as "extra inputs not permitted".
- * Stripped before forwarding to non-OpenAI, non-OpenRouter providers.
+ * Providers that use `max_completion_tokens` without a legacy alias rewrite.
+ */
+const PASSTHROUGH_PROVIDERS = new Set(['openai', 'openrouter']);
+
+/**
+ * OpenAI-only fields other providers reject as "extra inputs not permitted".
+ * Stripped before forwarding to non-OpenAI, non-OpenRouter providers: these are
+ * not part of those wire protocols, so dropping them cannot remove a parameter
+ * the target would have honoured.
  */
 const OPENAI_ONLY_FIELDS = new Set([
   'store',
@@ -110,14 +133,20 @@ const OPENAI_ONLY_FIELDS = new Set([
   'reasoning_effort',
 ]);
 
-/**
- * Providers that accept the full OpenAI top-level request schema without modification.
- * Nested message fields may still need target-aware cleanup.
- */
-const PASSTHROUGH_PROVIDERS = new Set(['openai', 'openrouter']);
 const OLLAMA_ENDPOINTS = new Set(['ollama', 'ollama-cloud']);
 const MISTRAL_TOOL_CALL_ID_REGEX = /^[A-Za-z0-9]{9}$/;
-const DEEPSEEK_MAX_TOKENS_LIMIT = 8192;
+
+/**
+ * NVIDIA Nemotron models served through OpenRouter (e.g. `nvidia/nemotron-3-*`)
+ * validate request params strictly and reject Anthropic's top-level `thinking`
+ * field with a 400 ("Unsupported parameter(s): `thinking`"). NeMo expresses
+ * reasoning through `extra_body.chat_template_kwargs.enable_thinking` instead,
+ * but OpenRouter is a passthrough provider so we can't inject that shape here —
+ * the safe fix is to drop `thinking` for just this family, leaving DeepSeek,
+ * Kimi, Gemma, etc. pass through unchanged. Matched on the bare model id so
+ * `nvidia/nemotron-3-ultra-550b-a55b` and `nemotron-3-super-120b-a12b` both hit.
+ */
+const NVIDIA_NEMOTRON_FAMILY_RE = /^nemotron(?:[-_.\d]|$)/i;
 
 /**
  * OpenAI models that require `max_completion_tokens` instead of `max_tokens`.
@@ -130,7 +159,7 @@ const OPENAI_MAX_COMPLETION_TOKENS_RE = /^(o\d|gpt-(?:[5-9]|\d{2,}))/i;
  * Endpoints that ultimately hit OpenAI infrastructure and therefore need
  * `max_tokens` rewritten to `max_completion_tokens` for o-series / GPT-5+.
  * Copilot belongs here because GitHub Copilot proxies these models to OpenAI
- * (issue mnfst/manifest#1849).
+ * (issue mnfst/llm-gateway#1849).
  */
 const OPENAI_MAX_COMPLETION_TOKENS_ENDPOINTS = new Set(['openai', 'copilot']);
 
@@ -205,28 +234,9 @@ export function createReasoningContentStreamTransformer(
   };
 }
 
-/**
- * `reasoning_details` is OpenRouter's structured echo of extended-thinking
- * blocks in assistant messages (array of `{type, thinking, signature}`).
- * Only OpenRouter accepts it as an input field — every other OpenAI-compatible
- * provider (Mistral, native OpenAI, Groq, etc.) rejects unknown message fields
- * with `extra_forbidden` / 422. Strip it before forwarding to those targets so
- * that turn N+1 doesn't fail when routing flips off a reasoning model.
- */
-function supportsReasoningDetails(endpointKey: string): boolean {
-  return endpointKey === 'openrouter';
-}
-
-function sanitizeOpenAiMessages(
-  messages: unknown,
-  endpointKey: string,
-  model: string,
-  catalog?: ReasoningModelCatalog,
-): unknown {
+function normalizeOpenAiMessages(messages: unknown, endpointKey: string): unknown {
   if (!Array.isArray(messages)) return messages;
 
-  const preserveReasoningContent = supportsReasoningContent(endpointKey, model, catalog);
-  const preserveReasoningDetails = supportsReasoningDetails(endpointKey);
   const isMistral = endpointKey === 'mistral';
   const mistralIdMap = new Map<string, string>();
   const reservedMistralIds = new Set<string>();
@@ -289,74 +299,82 @@ function sanitizeOpenAiMessages(
       return message;
     }
 
-    const cleaned = { ...(message as Record<string, unknown>) };
-    if (!preserveReasoningContent) {
-      delete cleaned.reasoning_content;
-    }
-    if (endpointKey !== 'openrouter') {
-      delete cleaned.reasoning;
-    }
-    delete cleaned.reasoning_text;
-    if (!preserveReasoningDetails) {
-      delete cleaned.reasoning_details;
-    }
+    const normalized = { ...(message as Record<string, unknown>) };
 
-    if (isMistral && Array.isArray(cleaned.tool_calls)) {
-      cleaned.tool_calls = cleaned.tool_calls.map((toolCall) => {
+    // OpenRouter dialect fields. Every other OpenAI-compatible host rejects them
+    // as unknown message inputs, so their presence is a wire-protocol fact, not a
+    // model-specific correction. `reasoning_content` is deliberately NOT touched:
+    // it is required by DeepSeek-dialect hosts and rejected by strict hosts
+    // serving the same model, a split only the provider error can settle.
+    if (endpointKey !== 'openrouter') {
+      delete normalized.reasoning;
+      delete normalized.reasoning_details;
+    }
+    delete normalized.reasoning_text;
+
+    if (isMistral && Array.isArray(normalized.tool_calls)) {
+      normalized.tool_calls = normalized.tool_calls.map((toolCall) => {
         if (!toolCall || typeof toolCall !== 'object' || Array.isArray(toolCall)) {
           return toolCall;
         }
-        const cleanedToolCall = { ...(toolCall as Record<string, unknown>) };
-        cleanedToolCall.id = normalizeMistralToolCallId(cleanedToolCall.id);
-        return cleanedToolCall;
+        const normalizedToolCall = { ...(toolCall as Record<string, unknown>) };
+        normalizedToolCall.id = normalizeMistralToolCallId(normalizedToolCall.id);
+        return normalizedToolCall;
       });
     }
 
-    if (isMistral && 'tool_call_id' in cleaned) {
-      cleaned.tool_call_id = normalizeMistralToolCallId(cleaned.tool_call_id);
+    if (isMistral && 'tool_call_id' in normalized) {
+      normalized.tool_call_id = normalizeMistralToolCallId(normalized.tool_call_id);
     }
 
-    return cleaned;
+    return normalized;
   });
 }
 
-function normalizeDeepSeekMaxTokens(body: Record<string, unknown>): void {
-  if (!('max_tokens' in body)) return;
-
-  const raw = body.max_tokens;
-  const parsed = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
-
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    delete body.max_tokens;
-    return;
-  }
-
-  body.max_tokens = Math.min(Math.trunc(parsed), DEEPSEEK_MAX_TOKENS_LIMIT);
-  if ((body.max_tokens as number) < 1) delete body.max_tokens;
+export interface SanitizeOpenAiBodyOptions {
+  /**
+   * The upstream rejects `max_tokens` outright, so it is rewritten to
+   * `max_completion_tokens`, or dropped when both are present.
+   */
+  requireMaxCompletionTokens?: boolean;
+  /**
+   * The upstream accepts `reasoning_effort` but defaults to reasoning, which it
+   * rejects next to function tools. Forward the caller's effort, and send
+   * `none`, the OpenAI Chat Completions default, when function tools come
+   * without one.
+   */
+  forwardReasoningEffort?: boolean;
 }
 
 /**
- * Strip OpenAI-specific fields and normalise `max_completion_tokens` -> `max_tokens`
- * for providers that use the OpenAI format but reject unknown fields.
+ * Normalize unconditional OpenAI-compatible wire differences. Provider- and
+ * model-specific parameter corrections are intentionally left to Autofix.
  */
 export function sanitizeOpenAiBody(
   body: Record<string, unknown>,
   endpointKey: string,
   model: string,
-  catalog?: ReasoningModelCatalog,
+  options: SanitizeOpenAiBodyOptions = {},
 ): Record<string, unknown> {
   const passthroughTopLevel = PASSTHROUGH_PROVIDERS.has(endpointKey);
 
   // Strip vendor prefix (e.g., "openai/gpt-5" → "gpt-5") before matching.
   const bareForRegex = model.includes('/') ? model.substring(model.indexOf('/') + 1) : model;
-  const needsMaxCompletionTokens = usesOpenAiMaxCompletionTokens(endpointKey, bareForRegex);
+  const needsMaxCompletionTokens =
+    options.requireMaxCompletionTokens === true ||
+    usesOpenAiMaxCompletionTokens(endpointKey, bareForRegex);
   const convertMaxTokens =
     needsMaxCompletionTokens && 'max_tokens' in body && !('max_completion_tokens' in body);
+  // NVIDIA Nemotron hosts (reached through the OpenRouter passthrough) reject the
+  // Anthropic-style top-level `thinking` param; scope the strip to that family so
+  // the general OpenRouter passthrough stays untouched (mnfst/llm-gateway#2464).
+  const isOpenRouterNemotron =
+    endpointKey === 'openrouter' && NVIDIA_NEMOTRON_FAMILY_RE.test(bareForRegex);
 
   const cleaned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
     if (key === 'messages') {
-      cleaned[key] = sanitizeOpenAiMessages(value, endpointKey, model, catalog);
+      cleaned[key] = normalizeOpenAiMessages(value, endpointKey);
       continue;
     }
     // Rewrite max_tokens → max_completion_tokens for OpenAI-backed endpoints that
@@ -366,15 +384,30 @@ export function sanitizeOpenAiBody(
       cleaned['max_completion_tokens'] = value;
       continue;
     }
+    // Both caps were sent: `max_completion_tokens` stays, and the rejected
+    // `max_tokens` goes.
+    if (options.requireMaxCompletionTokens && key === 'max_tokens') continue;
     if (passthroughTopLevel) {
+      // OpenRouter forwards the whole body for most models, but NVIDIA Nemotron
+      // hosts validate strictly and reject Anthropic-style `thinking`. Drop it
+      // only for that family (see NVIDIA_NEMOTRON_FAMILY_RE) — mirroring the
+      // Ollama exception below — so DeepSeek/Kimi/Gemma passthrough is unaffected.
+      if (key === 'thinking' && isOpenRouterNemotron) continue;
       cleaned[key] = value;
       continue;
     }
-    if (key === 'reasoning_effort' && (endpointKey === 'xai' || endpointKey === 'deepseek')) {
+    // xAI and DeepSeek implement `reasoning_effort`; keep it there. Every other
+    // non-passthrough provider gets the OpenAI-only field stripped below.
+    if (
+      key === 'reasoning_effort' &&
+      (endpointKey === 'xai' || endpointKey === 'deepseek' || options.forwardReasoningEffort)
+    ) {
       cleaned[key] = value;
       continue;
     }
     if (OPENAI_ONLY_FIELDS.has(key)) continue;
+    // Ollama's OpenAI-compatible endpoint does not accept the Anthropic-style
+    // `thinking` block; other non-passthrough providers are left to Autofix.
     if (key === 'thinking' && OLLAMA_ENDPOINTS.has(endpointKey.toLowerCase())) continue;
     if (key === 'max_completion_tokens') {
       // Preserve max_completion_tokens for endpoints that require it; otherwise
@@ -389,6 +422,13 @@ export function sanitizeOpenAiBody(
     }
     cleaned[key] = value;
   }
-  if (endpointKey === 'deepseek') normalizeDeepSeekMaxTokens(cleaned);
+  if (
+    options.forwardReasoningEffort &&
+    cleaned.reasoning_effort === undefined &&
+    Array.isArray(cleaned.tools) &&
+    cleaned.tools.some((tool) => (tool as { type?: unknown } | null)?.type === 'function')
+  ) {
+    cleaned.reasoning_effort = 'none';
+  }
   return cleaned;
 }

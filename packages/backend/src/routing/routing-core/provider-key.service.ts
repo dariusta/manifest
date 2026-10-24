@@ -10,6 +10,7 @@ import { CachedProviderKey, RoutingCacheService } from './routing-cache.service'
 import { ProviderService } from './provider.service';
 import { TenantCacheService } from '../../common/services/tenant-cache.service';
 import { decrypt, getEncryptionSecret } from '../../common/utils/crypto.util';
+import { decryptWithAny, getDecryptionSecrets } from '../../common/utils/crypto.util';
 import {
   expandProviderNames,
   inferProviderFromModelName,
@@ -431,7 +432,7 @@ export class ProviderKeyService {
           id: record.id,
           label: record.label,
           priority: record.priority,
-          apiKey: decrypt(record.api_key_encrypted, getEncryptionSecret()),
+          apiKey: decryptWithAny(record.api_key_encrypted, getDecryptionSecrets()).plaintext,
           region: record.region,
         },
       ];

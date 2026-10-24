@@ -5,8 +5,8 @@ import {
   readFallbackRoutes,
   readOverrideRoute,
   routeMatches,
-  unambiguousRoute,
   subscriptionPreferredRoute,
+  unambiguousRoute,
 } from '../route-helpers';
 import type { ModelRoute } from 'manifest-shared';
 import type { DiscoveredModel } from '../../../model-discovery/model-fetcher';

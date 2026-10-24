@@ -2,6 +2,8 @@ import {
   toGoogleRequest,
   fromGoogleResponse,
   transformGoogleStreamChunk as transformGoogleStreamChunkRaw,
+  createGoogleStreamState,
+  finishGoogleStream,
 } from '../google-adapter';
 
 /**
@@ -40,6 +42,22 @@ describe('Google Adapter', () => {
       expect(result.contents).toEqual([{ role: 'user', parts: [{ text: 'Hi' }] }]);
     });
 
+    it('extracts developer messages into the system instruction', () => {
+      const body = {
+        messages: [
+          { role: 'system', content: 'You are helpful.' },
+          { role: 'developer', content: 'Answer in French.' },
+          { role: 'user', content: 'Hi' },
+        ],
+      };
+      const result = toGoogleRequest(body, 'gemini-2.0-flash');
+
+      expect(result.systemInstruction).toEqual({
+        parts: [{ text: 'You are helpful.\nAnswer in French.' }],
+      });
+      expect(result.contents).toEqual([{ role: 'user', parts: [{ text: 'Hi' }] }]);
+    });
+
     it('maps assistant role to model', () => {
       const body = {
         messages: [
@@ -66,6 +84,102 @@ describe('Google Adapter', () => {
         temperature: 0.7,
         topP: 0.9,
       });
+    });
+
+    it('maps max_completion_tokens to maxOutputTokens', () => {
+      const body = {
+        messages: [{ role: 'user', content: 'Hi' }],
+        max_completion_tokens: 500,
+      };
+      const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+      expect(result.generationConfig).toEqual({ maxOutputTokens: 500 });
+    });
+
+    it('prefers max_tokens when max_completion_tokens is also sent', () => {
+      const body = {
+        messages: [{ role: 'user', content: 'Hi' }],
+        max_tokens: 1000,
+        max_completion_tokens: 500,
+      };
+      const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+      expect(result.generationConfig).toEqual({ maxOutputTokens: 1000 });
+    });
+
+    it('lets max_completion_tokens override a native generationConfig.maxOutputTokens', () => {
+      const body = {
+        messages: [{ role: 'user', content: 'Hi' }],
+        generationConfig: { maxOutputTokens: 2000 },
+        max_completion_tokens: 500,
+      };
+      const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+      expect(result.generationConfig).toEqual({ maxOutputTokens: 500 });
+    });
+
+    it('maps a stop array to stopSequences', () => {
+      const body = {
+        messages: [{ role: 'user', content: 'Hi' }],
+        stop: ['\n\n', 'END'],
+      };
+      const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+      expect(result.generationConfig).toEqual({ stopSequences: ['\n\n', 'END'] });
+    });
+
+    it('wraps a bare stop string in stopSequences', () => {
+      const body = {
+        messages: [{ role: 'user', content: 'Hi' }],
+        stop: 'END',
+      };
+      const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+      expect(result.generationConfig).toEqual({ stopSequences: ['END'] });
+    });
+
+    it('omits stopSequences for an empty or null stop', () => {
+      for (const stop of ['', [], null]) {
+        const body = { messages: [{ role: 'user', content: 'Hi' }], stop };
+        const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+        expect(result.generationConfig).toBeUndefined();
+      }
+    });
+
+    it('lets stop override a native generationConfig.stopSequences', () => {
+      const body = {
+        messages: [{ role: 'user', content: 'Hi' }],
+        generationConfig: { stopSequences: ['STOP'] },
+        stop: ['END'],
+      };
+      const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+      expect(result.generationConfig).toEqual({ stopSequences: ['END'] });
+    });
+
+    it('lets an explicit empty stop clear a native generationConfig.stopSequences', () => {
+      for (const stop of ['', []]) {
+        const body = {
+          messages: [{ role: 'user', content: 'Hi' }],
+          generationConfig: { topK: 40, stopSequences: ['STOP'] },
+          stop,
+        };
+        const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+        expect(result.generationConfig).toEqual({ topK: 40 });
+      }
+    });
+
+    it('keeps a native generationConfig.stopSequences when stop is null', () => {
+      const body = {
+        messages: [{ role: 'user', content: 'Hi' }],
+        generationConfig: { stopSequences: ['STOP'] },
+        stop: null,
+      };
+      const result = toGoogleRequest(body, 'gemini-2.5-flash');
+
+      expect(result.generationConfig).toEqual({ stopSequences: ['STOP'] });
     });
 
     it('preserves native Google generationConfig params', () => {
@@ -276,6 +390,52 @@ describe('Google Adapter', () => {
           ],
         },
       ]);
+    });
+
+    describe('tool_choice', () => {
+      const tools = [
+        {
+          type: 'function',
+          function: { name: 'web_search', parameters: { type: 'object' } },
+        },
+      ];
+      const messages = [{ role: 'user', content: 'Search for cats' }];
+
+      it.each([
+        ['auto', { mode: 'AUTO' }],
+        ['none', { mode: 'NONE' }],
+        ['required', { mode: 'ANY' }],
+        [
+          { type: 'function', function: { name: 'web_search' } },
+          { mode: 'ANY', allowedFunctionNames: ['web_search'] },
+        ],
+      ])('maps %j to toolConfig', (toolChoice, functionCallingConfig) => {
+        const result = toGoogleRequest(
+          { messages, tools, tool_choice: toolChoice },
+          'gemini-2.5-flash',
+        );
+
+        expect(result.toolConfig).toEqual({ functionCallingConfig });
+      });
+
+      it.each([
+        [{ type: 'allowed_tools' }],
+        [{ type: 'function' }],
+        [{ type: 'function', function: {} }],
+      ])('omits toolConfig for an unknown tool_choice %j', (toolChoice) => {
+        const result = toGoogleRequest(
+          { messages, tools, tool_choice: toolChoice },
+          'gemini-2.5-flash',
+        );
+
+        expect(result.toolConfig).toBeUndefined();
+      });
+
+      it('omits toolConfig when no tools are sent', () => {
+        const result = toGoogleRequest({ messages, tool_choice: 'required' }, 'gemini-2.5-flash');
+
+        expect(result.toolConfig).toBeUndefined();
+      });
     });
 
     it('strips unsupported JSON Schema fields from tool parameters', () => {
@@ -909,6 +1069,27 @@ describe('Google Adapter', () => {
       expect(result.systemInstruction).toBeUndefined();
     });
 
+    it('extracts system instruction from content-part arrays', () => {
+      const body = {
+        messages: [
+          {
+            role: 'system',
+            content: [
+              { type: 'text', text: 'You are helpful.' },
+              { type: 'input_text', text: 'Be concise.' },
+            ],
+          },
+          { role: 'user', content: 'Hi' },
+        ],
+      };
+      const result = toGoogleRequest(body, 'gemini-2.0-flash');
+
+      expect(result.systemInstruction).toEqual({
+        parts: [{ text: 'You are helpful.\nBe concise.' }],
+      });
+      expect(result.contents).toEqual([{ role: 'user', parts: [{ text: 'Hi' }] }]);
+    });
+
     it('joins multiple system messages into one instruction', () => {
       const body = {
         messages: [
@@ -1190,6 +1371,51 @@ describe('Google Adapter', () => {
         id: 'call_orphan',
         name: 'unknown',
         response: { result: '{"ok": true}' },
+      });
+    });
+
+    it('sends tool message content parts as a functionResponse', () => {
+      const body = {
+        messages: [
+          { role: 'user', content: 'Search for cats' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'web_search', arguments: '{"query":"cats"}' },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_1',
+            content: [
+              { type: 'text', text: 'cat1, ' },
+              { type: 'text', text: 'cat2' },
+            ],
+          },
+        ],
+      };
+      const result = toGoogleRequest(body, 'gemini-2.0-flash');
+
+      const contents = result.contents as Array<{
+        role: string;
+        parts: Array<Record<string, unknown>>;
+      }>;
+      expect(contents[2]).toEqual({
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'call_1',
+              name: 'web_search',
+              response: { result: 'cat1, cat2' },
+            },
+          },
+        ],
       });
     });
 
@@ -1530,6 +1756,30 @@ describe('Google Adapter', () => {
 
       const details = usage.prompt_tokens_details as { cached_tokens: number };
       expect(details.cached_tokens).toBe(45000);
+    });
+
+    it('counts thinking tokens as completion tokens', () => {
+      const google = {
+        candidates: [
+          {
+            content: { parts: [{ text: 'Hello!' }] },
+            finishReason: 'STOP',
+          },
+        ],
+        usageMetadata: {
+          promptTokenCount: 10,
+          candidatesTokenCount: 5,
+          thoughtsTokenCount: 120,
+          totalTokenCount: 135,
+        },
+      };
+
+      const result = fromGoogleResponse(google, 'gemini-2.5-flash');
+      const usage = result.usage as Record<string, unknown>;
+      expect(usage.prompt_tokens).toBe(10);
+      expect(usage.completion_tokens).toBe(125);
+      expect(usage.total_tokens).toBe(135);
+      expect(usage.completion_tokens_details).toEqual({ reasoning_tokens: 120 });
     });
 
     it('handles function call response', () => {
@@ -2069,6 +2319,22 @@ describe('Google Adapter', () => {
       expect(result).toContain('"cached_tokens":80');
     });
 
+    it('counts thinking tokens as completion tokens in stream usage', () => {
+      const chunk = JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'done' }] }, finishReason: 'STOP' }],
+        usageMetadata: {
+          promptTokenCount: 100,
+          candidatesTokenCount: 50,
+          thoughtsTokenCount: 300,
+          totalTokenCount: 450,
+        },
+      });
+      const result = transformGoogleStreamChunk(chunk, 'gemini-2.5-flash');
+      expect(result).toContain('"completion_tokens":350');
+      expect(result).toContain('"total_tokens":450');
+      expect(result).toContain('"reasoning_tokens":300');
+    });
+
     it('emits finish_reason stop for STOP without tool calls in stream with usage', () => {
       const chunk = JSON.stringify({
         candidates: [{ content: { parts: [{ text: 'done' }] }, finishReason: 'STOP' }],
@@ -2088,6 +2354,202 @@ describe('Google Adapter', () => {
       const result = transformGoogleStreamChunk(chunk, 'gemini-2.0-flash');
       expect(result).toContain('"prompt_tokens":10');
       expect(result).toContain('"finish_reason":"stop"');
+    });
+
+    describe('with per-stream state', () => {
+      const fnCallEvent = (id: string, name: string) =>
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ functionCall: { id, name, args: {} } }] } }],
+        });
+      const usageTrailer = JSON.stringify({
+        candidates: [{ content: { parts: [] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+      });
+      const sseEvents = (out: string | null) =>
+        (out ?? '')
+          .split('\n\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line.replace('data: ', '')));
+
+      function runStream(events: string[]) {
+        const state = createGoogleStreamState();
+        return events.flatMap((e) =>
+          sseEvents(transformGoogleStreamChunkRaw(e, 'gemini-2.5-flash', state).chunk),
+        );
+      }
+
+      it('gives tool calls from separate events distinct indices', () => {
+        const out = runStream([fnCallEvent('a', 'get_weather'), fnCallEvent('b', 'get_time')]);
+        expect(out[0].choices[0].delta.tool_calls[0]).toMatchObject({ index: 0, id: 'a' });
+        expect(out[1].choices[0].delta.tool_calls[0]).toMatchObject({ index: 1, id: 'b' });
+      });
+
+      it('keeps one completion id and created timestamp for the whole stream', () => {
+        const out = runStream([fnCallEvent('a', 'get_weather'), usageTrailer]);
+        expect(out).toHaveLength(3);
+        expect(new Set(out.map((e) => e.id)).size).toBe(1);
+        expect(new Set(out.map((e) => e.created)).size).toBe(1);
+      });
+
+      it('finishes with tool_calls when an earlier event emitted a tool call', () => {
+        const out = runStream([fnCallEvent('a', 'get_weather'), usageTrailer]);
+        expect(out[1].choices[0].finish_reason).toBe('tool_calls');
+      });
+
+      it('finishes with stop when no event emitted a tool call', () => {
+        const textEvent = JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'hi' }] } }],
+        });
+        const out = runStream([textEvent, usageTrailer]);
+        expect(out[1].choices[0].finish_reason).toBe('stop');
+      });
+
+      // Live gemini-flash-latest shape: usageMetadata (cumulative) on every
+      // event, one functionCall per event, finishReason only on the last one.
+      it('closes a stream that repeats usage on every event exactly once', () => {
+        const withUsage = (event: Record<string, unknown>, n: number) =>
+          JSON.stringify({
+            ...event,
+            usageMetadata: {
+              promptTokenCount: 50,
+              candidatesTokenCount: n,
+              totalTokenCount: 50 + n,
+            },
+          });
+        const part = (p: Record<string, unknown>, finishReason?: string) => ({
+          candidates: [
+            { content: { role: 'model', parts: [p] }, ...(finishReason ? { finishReason } : {}) },
+          ],
+        });
+        const events = [
+          ...Array.from({ length: 9 }, (_, i) => withUsage(part({ text: `t${i}` }), i + 1)),
+          withUsage(part({ functionCall: { id: 'a', name: 'get_weather', args: {} } }), 12),
+          withUsage(part({ functionCall: { id: 'b', name: 'get_time', args: {} } }), 14),
+          withUsage(part({ text: '' }, 'STOP'), 15),
+        ];
+
+        const out = runStream(events);
+        const finishes = out.filter((e) => e.choices[0]?.finish_reason);
+        const usages = out.filter((e) => e.usage);
+        const toolCalls = out.flatMap((e) => e.choices[0]?.delta?.tool_calls ?? []);
+
+        expect(finishes).toHaveLength(1);
+        expect(finishes[0].choices[0].finish_reason).toBe('tool_calls');
+        expect(usages).toHaveLength(1);
+        expect(usages[0].usage).toMatchObject({ prompt_tokens: 50, completion_tokens: 15 });
+        expect(out[out.length - 1]).toBe(usages[0]);
+        expect(new Set(out.map((e) => e.id)).size).toBe(1);
+        expect(toolCalls.map((c: { index: number }) => c.index)).toEqual([0, 1]);
+        expect(out.filter((e) => e.choices[0]?.delta?.content)).toHaveLength(9);
+      });
+
+      it('reports the last seen usage when the terminal event carries none', () => {
+        const textWithUsage = JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'hi' }] } }],
+          usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 3, totalTokenCount: 10 },
+        });
+        const stop = JSON.stringify({
+          candidates: [{ content: { parts: [] }, finishReason: 'STOP' }],
+        });
+        const out = runStream([textWithUsage, stop]);
+        expect(out.map((e) => e.choices[0]?.finish_reason ?? null)).toEqual([null, 'stop', null]);
+        expect(out[2].usage).toMatchObject({ prompt_tokens: 7, total_tokens: 10 });
+      });
+
+      it('sends a finish chunk without usage when no event had usage', () => {
+        const stop = JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }],
+        });
+        const out = runStream([stop]);
+        expect(out).toHaveLength(2);
+        expect(out[1].choices[0].finish_reason).toBe('stop');
+        expect(out.some((e) => e.usage)).toBe(false);
+      });
+
+      it('adds no second finish or usage chunk for a usage trailer after the finish', () => {
+        const stop = JSON.stringify({
+          candidates: [{ content: { parts: [] }, finishReason: 'STOP' }],
+          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+        });
+        const trailer = JSON.stringify({
+          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 2, totalTokenCount: 3 },
+        });
+        const out = runStream([stop, trailer]);
+        expect(out.filter((e) => e.choices[0]?.finish_reason)).toHaveLength(1);
+        const usages = out.filter((e) => e.usage);
+        expect(usages).toHaveLength(1);
+        expect(usages[0].usage).toMatchObject({ total_tokens: 2 });
+      });
+
+      it('lets a usage-only trailer supply the usage a finish event lacked', () => {
+        const stop = JSON.stringify({
+          candidates: [{ content: { parts: [] }, finishReason: 'STOP' }],
+        });
+        const trailer = JSON.stringify({
+          usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2, totalTokenCount: 6 },
+        });
+        const out = runStream([fnCallEvent('a', 'get_weather'), stop, trailer]);
+        const finishes = out.filter((e) => e.choices[0]?.finish_reason);
+        const usages = out.filter((e) => e.usage);
+        expect(finishes).toHaveLength(1);
+        expect(finishes[0].choices[0].finish_reason).toBe('tool_calls');
+        expect(usages).toHaveLength(1);
+        expect(usages[0].usage).toMatchObject({ total_tokens: 6 });
+      });
+
+      it('closes on a usage-only trailer with no candidates after a tool call', () => {
+        const trailer = JSON.stringify({
+          usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2, totalTokenCount: 6 },
+        });
+        const out = runStream([fnCallEvent('a', 'get_weather'), trailer]);
+        expect(out.map((e) => e.choices[0]?.finish_reason ?? null)).toEqual([
+          null,
+          'tool_calls',
+          null,
+        ]);
+        expect(out.filter((e) => e.usage)).toHaveLength(1);
+      });
+
+      describe('finishGoogleStream', () => {
+        const midStream = JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'partial' }] } }],
+          usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2, totalTokenCount: 7 },
+        });
+
+        it('returns the last usage once for a stream cut off before its finish', () => {
+          const state = createGoogleStreamState();
+          transformGoogleStreamChunkRaw(midStream, 'gemini-2.5-flash', state);
+
+          const [tail] = sseEvents(finishGoogleStream(state, 'gemini-2.5-flash'));
+          expect(tail).toMatchObject({ id: state.id, choices: [] });
+          expect(tail.usage).toMatchObject({ prompt_tokens: 5, completion_tokens: 2 });
+          expect(finishGoogleStream(state, 'gemini-2.5-flash')).toBeNull();
+        });
+
+        it('returns null for a finished stream or one that never reported usage', () => {
+          const finished = createGoogleStreamState();
+          transformGoogleStreamChunkRaw(
+            JSON.stringify({ candidates: [{ finishReason: 'STOP' }], usageMetadata: {} }),
+            'gemini-2.5-flash',
+            finished,
+          );
+          expect(finishGoogleStream(finished, 'gemini-2.5-flash')).toBeNull();
+          expect(finishGoogleStream(createGoogleStreamState(), 'gemini-2.5-flash')).toBeNull();
+        });
+      });
+
+      it('emits no finish or usage for a mid-stream event that only repeats usage', () => {
+        const midStream = JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'partial' }] } }],
+          usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 1, totalTokenCount: 6 },
+        });
+        const out = sseEvents(transformGoogleStreamChunkRaw(midStream, 'gemini-2.5-flash').chunk);
+        expect(out).toHaveLength(1);
+        expect(out[0].choices[0]).toMatchObject({
+          delta: { content: 'partial' },
+          finish_reason: null,
+        });
+      });
     });
   });
 

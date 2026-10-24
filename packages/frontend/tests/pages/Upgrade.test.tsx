@@ -39,6 +39,7 @@ vi.mock('../../src/services/toast-store.js', () => ({
 }));
 
 import Upgrade from '../../src/pages/Upgrade';
+import { FREE_PLAN_ENDS_NOTE } from '../../src/components/PlanPicker';
 
 const disabledStatus = {
   enabled: false,
@@ -114,6 +115,15 @@ describe('Upgrade', () => {
     );
   });
 
+  it('hides the request-limit entry message on the Pro plan', async () => {
+    mockSearchParams = { reason: 'requests' };
+    mockGetBillingStatus.mockResolvedValue(proStatus);
+    render(() => <Upgrade />);
+
+    await screen.findByText(/You're currently on the/);
+    expect(screen.queryByText(/You've used all/)).toBeNull();
+  });
+
   it('goes back when the referrer is from the same origin', async () => {
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
     Object.defineProperty(document, 'referrer', {
@@ -147,6 +157,7 @@ describe('Upgrade', () => {
     render(() => <Upgrade />);
 
     const button = await screen.findByText('Use Manifest for free');
+    expect(screen.getByText(FREE_PLAN_ENDS_NOTE)).toBeDefined();
     fireEvent.click(button);
 
     expect(mockNavigate).toHaveBeenCalledWith('/');

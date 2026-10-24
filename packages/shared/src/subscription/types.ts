@@ -13,6 +13,8 @@ export interface SubscriptionProviderConfig {
   subscriptionAuthMode?: 'popup_oauth' | 'device_code' | 'token';
   subscriptionTokenPrefix?: string;
   knownModels?: readonly string[];
+  /** Supported lightweight model for credential tests when catalog prices are not comparable. */
+  connectionTestModel?: string;
   /**
    * How a known model is considered covered by live subscription discovery:
    * `prefix` (default) accepts a more specific discovered variant, while

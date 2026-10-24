@@ -41,7 +41,7 @@ describe('sanitizeRequestHeaders', () => {
     expect(result).toEqual({ 'x-safe': 'keep' });
   });
 
-  it('drops Railway/proxy/transport noise headers regardless of casing', () => {
+  it('drops Railway/Google edge, proxy and transport noise headers regardless of casing', () => {
     const result = sanitizeRequestHeaders({
       'X-Railway-Edge': 'railway/europe-west4-drams3a',
       'X-Railway-Request-Id': 'm5e5d2NRQLKtNMov2JZdWA',
@@ -54,6 +54,10 @@ describe('sanitizeRequestHeaders', () => {
       'X-Real-Ip': '193.33.57.199',
       'X-Request-Start': '1779377596677',
       'X-Envoy-External-Address': '193.33.57.199',
+      Forwarded: 'for="193.33.57.199";proto=https',
+      Via: '1.1 google',
+      'X-Cloud-Trace-Context': '105445aa7843bc8bf206b12000100000/1;o=1',
+      Traceparent: '00-105445aa7843bc8bf206b12000100000-0000000000000001-01',
       Host: 'app.manifest.build',
       Connection: 'keep-alive',
       'Accept-Encoding': 'gzip',
@@ -140,7 +144,7 @@ describe('sanitizeProviderRequestHeaders', () => {
       sanitizeProviderRequestHeaders({
         Authorization: 'Bearer secret-token',
         'Content-Type': 'application/json',
-        'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
+        'user-agent': 'claude-cli/2.1.293 (external, sdk-cli)',
         'x-app': 'cli',
         'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fallback-credit-2026-06-01',
         'x-claude-code-session-id': '2d71ef06-94ba-4b7d-85c7-4cf4bb2af162',
@@ -149,7 +153,7 @@ describe('sanitizeProviderRequestHeaders', () => {
       }),
     ).toEqual({
       'content-type': 'application/json',
-      'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
+      'user-agent': 'claude-cli/2.1.293 (external, sdk-cli)',
       'x-app': 'cli',
       'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fallback-credit-2026-06-01',
       'x-claude-code-session-id': '2d71ef06-94ba-4b7d-85c7-4cf4bb2af162',

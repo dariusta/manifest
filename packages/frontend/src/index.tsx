@@ -5,7 +5,8 @@ import { Router, Route, Navigate } from '@solidjs/router';
 import { MetaProvider, Title } from '@solidjs/meta';
 import App from './App.jsx';
 import AuthLayout from './layouts/AuthLayout.jsx';
-import Workspace from './pages/Workspace.jsx';
+const Workspace = lazyReload(() => import('./pages/Workspace.jsx'));
+
 import RootRedirect from './components/RootRedirect.jsx';
 import AgentGuard from './components/AgentGuard.jsx';
 import AuthGuard from './components/AuthGuard.jsx';
@@ -32,6 +33,9 @@ const Playground = lazyReload(() => import('./pages/Playground.jsx'));
 const Limits = lazyReload(() => import('./pages/Limits.jsx'));
 const Account = lazyReload(() => import('./pages/Account.jsx'));
 const Upgrade = lazyReload(() => import('./pages/Upgrade.jsx'));
+const CliAuth = lazyReload(() => import('./pages/CliAuth.jsx'));
+const Consent = lazyReload(() => import('./pages/Consent.jsx'));
+const OauthError = lazyReload(() => import('./pages/OauthError.jsx'));
 const Login = lazyReload(() => import('./pages/Login.jsx'));
 const Register = lazyReload(() => import('./pages/Register.jsx'));
 const ResetPassword = lazyReload(() => import('./pages/ResetPassword.jsx'));
@@ -47,6 +51,13 @@ const Byok = lazyReload(() => import('./pages/providers/Byok.jsx'));
 const LocalProviders = lazyReload(() => import('./pages/providers/Local.jsx'));
 const ConnectionDetail = lazyReload(() => import('./pages/providers/ConnectionDetail.jsx'));
 const PlanUsage = lazyReload(() => import('./pages/providers/PlanUsage.jsx'));
+const McpServer = lazyReload(() => import('./pages/integrations/McpServer.jsx'));
+const Cli = lazyReload(() => import('./pages/integrations/Cli.jsx'));
+
+
+
+
+
 
 const GuestLayout: ParentComponent = (props) => (
   <GuestGuard>
@@ -99,6 +110,8 @@ render(
           <Route path="/providers/local" component={LocalProviders} />
           <Route path="/providers/plan-usage" component={PlanUsage} />
           <Route path="/providers/connections/:connectionId" component={ConnectionDetail} />
+          <Route path="/integrations/mcp" component={McpServer} />
+          <Route path="/integrations/cli" component={Cli} />
           <Route path="/harnesses/:agentName" component={AgentGuard}>
             {/* Redirects: /limits → /guardrails, /messages → global /messages */}
             <Route path="/limits" component={AgentLimitsRedirect} />
@@ -144,6 +157,15 @@ render(
         </Route>
         <Route path="/upgrade" component={AuthGuard}>
           <Route path="/" component={Upgrade} />
+        </Route>
+        <Route path="/cli/auth" component={AuthGuard}>
+          <Route path="/" component={CliAuth} />
+        </Route>
+        <Route path="/consent" component={AuthGuard}>
+          <Route path="/" component={Consent} />
+        </Route>
+        <Route path="/oauth-error" component={AuthLayout}>
+          <Route path="/" component={OauthError} />
         </Route>
         <Route path="/" component={GuestLayout}>
           <Route path="/login" component={Login} />

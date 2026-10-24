@@ -1,3 +1,12 @@
+function normalizeAnthropicThinking(thinking: unknown): unknown {
+  if (!isObjectRecord(thinking) || thinking.type !== 'adaptive' || !('budget_tokens' in thinking)) {
+    return thinking;
+  }
+  const normalized = { ...thinking };
+  delete normalized.budget_tokens;
+  return normalized;
+}
+
 /**
  * Converts between OpenAI chat completion format and Anthropic Messages format.
  * Auto-injects cache_control breakpoints on system prompts and tool definitions
@@ -36,38 +45,7 @@ interface AnthropicTool {
 
 const CACHE = { type: 'ephemeral' } as const;
 const MAX_CACHE_CONTROL_BLOCKS = 4;
-const ANTHROPIC_PREFIX = 'anthropic/';
 const DATA_IMAGE_URL_RE = /^data:([^;,]+)(?:;[^,]*)?;base64,(.*)$/is;
-
-function bareAnthropicModel(model: string): string {
-  return model.startsWith(ANTHROPIC_PREFIX) ? model.slice(ANTHROPIC_PREFIX.length) : model;
-}
-
-function isClaudeHaikuModel(model: string): boolean {
-  const bare = bareAnthropicModel(model).replace(/\./g, '-');
-  return bare.startsWith('claude-haiku-');
-}
-
-function shouldForwardAnthropicThinking(thinking: unknown, model: string): boolean {
-  if (
-    thinking &&
-    typeof thinking === 'object' &&
-    !Array.isArray(thinking) &&
-    (thinking as Record<string, unknown>).type === 'adaptive'
-  ) {
-    return !isClaudeHaikuModel(model);
-  }
-  return true;
-}
-
-function normalizeAnthropicThinking(thinking: unknown): unknown {
-  if (!isObjectRecord(thinking) || thinking.type !== 'adaptive' || !('budget_tokens' in thinking)) {
-    return thinking;
-  }
-  const normalized = { ...thinking };
-  delete normalized.budget_tokens;
-  return normalized;
-}
 
 /**
  * System prompt required by Anthropic's subscription OAuth API to unlock
@@ -251,6 +229,22 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * Whether a native Messages body already places a breakpoint on a message
+ * block, the placement the conversation breakpoint would compete with. Marks
+ * on system or tools alone leave the conversation uncached, and a tool schema
+ * property named `cache_control` is data, not a breakpoint.
+ */
+export function hasMessageCacheControl(body: Record<string, unknown>): boolean {
+  if (!Array.isArray(body.messages)) return false;
+  return body.messages.some(
+    (message) =>
+      isObjectRecord(message) &&
+      Array.isArray(message.content) &&
+      message.content.some((block) => isObjectRecord(block) && block.cache_control !== undefined),
+  );
+}
+
 function countCacheControlBlocks(value: unknown): number {
   if (!value || typeof value !== 'object') return 0;
 
@@ -314,15 +308,45 @@ export function applyAnthropicAutomaticCacheControl(body: Record<string, unknown
   body.cache_control = CACHE;
 }
 
-function isClaudeSonnetModel(model: string | undefined): boolean {
-  if (!model) return false;
-  return bareAnthropicModel(model).replace(/\./g, '-').startsWith('claude-sonnet-');
+// Anthropic refuses `cache_control` on thinking blocks and on empty text.
+function isCacheableBlock(block: unknown): block is ContentBlock {
+  if (!isObjectRecord(block)) return false;
+  if (block.type === 'thinking' || block.type === 'redacted_thinking') return false;
+  return block.type !== 'text' || (typeof block.text === 'string' && block.text.length > 0);
 }
 
-function normalizeOutputConfigForModel(outputConfig: unknown, model: string | undefined): unknown {
-  if (!isObjectRecord(outputConfig)) return outputConfig;
-  if (outputConfig.effort !== 'xhigh' || !isClaudeSonnetModel(model)) return outputConfig;
-  return { ...outputConfig, effort: 'high' };
+/**
+ * Explicit counterpart of `applyAnthropicAutomaticCacheControl` for
+ * Anthropic-format upstreams that cache only where a block carries
+ * `cache_control` (Bedrock, custom Anthropic endpoints). Without it only the
+ * system prompt and tools are cached, so the cached prefix stops growing with
+ * the conversation (#3023). Copies the message it marks so the inbound body
+ * stays untouched.
+ */
+export function applyAnthropicLastMessageCacheControl(body: Record<string, unknown>): void {
+  if (body.cache_control !== undefined || hasOneHourCacheControl(body)) return;
+  const budget = { remaining: MAX_CACHE_CONTROL_BLOCKS - countCacheControlBlocks(body) };
+  const messages = body.messages;
+  if (budget.remaining <= 0 || !Array.isArray(messages) || messages.length === 0) return;
+
+  const last: unknown = messages[messages.length - 1];
+  if (!isObjectRecord(last)) return;
+  let content: unknown[];
+  if (typeof last.content === 'string') {
+    content = [{ type: 'text', text: last.content }];
+  } else if (Array.isArray(last.content)) {
+    content = [...last.content];
+  } else {
+    return;
+  }
+
+  let index = content.length - 1;
+  while (index >= 0 && !isCacheableBlock(content[index])) index -= 1;
+  if (index < 0) return;
+  const block = { ...(content[index] as ContentBlock) };
+  tryAddCacheControl(block, budget);
+  content[index] = block;
+  body.messages = [...messages.slice(0, -1), { ...last, content }];
 }
 
 function hasReplayableThinkingSignature(block: ContentBlock): boolean {
@@ -439,14 +463,22 @@ function convertMessage(
   if (msg.role === 'system' || msg.role === 'developer') return null;
 
   if (msg.role === 'tool') {
-    const text = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content ?? '');
+    // Content parts map onto tool_result content blocks. Stringifying them
+    // would hand the model the JSON wrapper instead of the tool output.
+    const blocks = Array.isArray(msg.content) ? toContentBlocks(msg.content, true) : [];
+    const content =
+      blocks.length > 0
+        ? blocks
+        : typeof msg.content === 'string'
+          ? msg.content
+          : JSON.stringify(msg.content ?? '');
     return {
       role: 'user',
       content: [
         {
           type: 'tool_result',
           tool_use_id: (msg.tool_call_id as string) || 'unknown',
-          content: text,
+          content,
         },
       ],
     };
@@ -500,31 +532,136 @@ function convertTools(tools?: Array<Record<string, unknown>>): AnthropicTool[] |
   return out.length > 0 ? out : undefined;
 }
 
+/**
+ * chat_completions `tool_choice` + `parallel_tool_calls` → Anthropic
+ * `tool_choice`. Anthropic has no top-level parallel flag: it rides on the
+ * choice as `disable_parallel_tool_use`, which `none` does not take.
+ */
+function toAnthropicToolChoice(
+  choice: unknown,
+  parallelToolCalls: unknown,
+): Record<string, unknown> | undefined {
+  if (choice === 'none') return { type: 'none' };
+  let out: Record<string, unknown> | undefined;
+  if (choice === 'auto') out = { type: 'auto' };
+  else if (choice === 'required') out = { type: 'any' };
+  else if (
+    isObjectRecord(choice) &&
+    choice.type === 'function' &&
+    isObjectRecord(choice.function) &&
+    typeof choice.function.name === 'string'
+  ) {
+    out = { type: 'tool', name: choice.function.name };
+  }
+  if (parallelToolCalls === false) {
+    out = { ...(out ?? { type: 'auto' }), disable_parallel_tool_use: true };
+  }
+  return out;
+}
+
+/**
+ * JSON Schema keywords whose value is a subschema, an array of subschemas, or a
+ * map of subschemas. Only these recurse: `enum`/`default`/`examples`/`const` hold
+ * data values that can look like schemas and must pass through untouched.
+ */
+const ANTHROPIC_SCHEMA_KEYWORDS = new Set([
+  'items',
+  'contains',
+  'additionalProperties',
+  'additionalItems',
+  'unevaluatedProperties',
+  'unevaluatedItems',
+  'propertyNames',
+  'not',
+  'if',
+  'then',
+  'else',
+  'contentSchema',
+]);
+const ANTHROPIC_SCHEMA_LIST_KEYWORDS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems']);
+const ANTHROPIC_SCHEMA_MAP_KEYWORDS = new Set([
+  'properties',
+  'patternProperties',
+  '$defs',
+  'definitions',
+  'dependentSchemas',
+  'dependencies',
+]);
+
+/**
+ * Anthropic structured outputs reject any object schema that omits
+ * `additionalProperties` ("For 'object' type, 'additionalProperties' must be
+ * explicitly set to false"). Clients and our own `json_object` fallback routinely
+ * emit a bare `{ type: 'object' }`, so close every object node while leaving an
+ * author's explicit value untouched. Only schema-valued keywords recurse, so data
+ * in `enum`/`default`/`examples` is never rewritten, and entries are copied with
+ * `Object.fromEntries` so a property literally named `__proto__` survives.
+ */
+export function closeAnthropicObjectSchemas(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(closeAnthropicObjectSchemas);
+  if (!isObjectRecord(schema)) return schema;
+
+  const entries: Array<[string, unknown]> = [];
+  for (const [key, value] of Object.entries(schema)) {
+    if (ANTHROPIC_SCHEMA_KEYWORDS.has(key)) {
+      entries.push([key, closeAnthropicObjectSchemas(value)]);
+    } else if (ANTHROPIC_SCHEMA_LIST_KEYWORDS.has(key) && Array.isArray(value)) {
+      entries.push([key, value.map(closeAnthropicObjectSchemas)]);
+    } else if (ANTHROPIC_SCHEMA_MAP_KEYWORDS.has(key) && isObjectRecord(value)) {
+      entries.push([
+        key,
+        Object.fromEntries(
+          Object.entries(value).map(([name, sub]) => [name, closeAnthropicObjectSchemas(sub)]),
+        ),
+      ]);
+    } else {
+      entries.push([key, value]);
+    }
+  }
+
+  const result = Object.fromEntries(entries) as Record<string, unknown>;
+  const type = result.type;
+  const isObjectType =
+    type === 'object' || (Array.isArray(type) && type.some((entry) => entry === 'object'));
+  // `properties` without an explicit `type` still describes an object.
+  const isObject = isObjectType || (result.properties !== undefined && type === undefined);
+  if (isObject && result.additionalProperties === undefined) {
+    result.additionalProperties = false;
+  }
+  return result;
+}
+
+/** Close object schemas on an Anthropic `output_config` (returns a new object). */
+function closeOutputConfigObjectSchemas(
+  outputConfig: Record<string, unknown>,
+): Record<string, unknown> {
+  const format = outputConfig.format;
+  if (!isObjectRecord(format) || !('schema' in format)) return outputConfig;
+  return {
+    ...outputConfig,
+    format: { ...format, schema: closeAnthropicObjectSchemas(format.schema) },
+  };
+}
+
 function toAnthropicOutputConfig(
   responseFormat: unknown,
   outputConfig: unknown,
 ): Record<string, unknown> | undefined {
   const out: Record<string, unknown> = isObjectRecord(outputConfig) ? { ...outputConfig } : {};
-  if (!isObjectRecord(responseFormat)) return Object.keys(out).length > 0 ? out : undefined;
-
-  if (responseFormat.type === 'json_object') {
-    // Anthropic has no `json_object` shorthand; use native JSON output with
-    // an unconstrained object schema instead of forcing tool use.
-    out.format = {
-      type: 'json_schema',
-      schema: { type: 'object' },
-    };
-    return out;
-  } else if (responseFormat.type === 'json_schema') {
-    const jsonSchema = isObjectRecord(responseFormat.json_schema) ? responseFormat.json_schema : {};
-    out.format = {
-      type: 'json_schema',
-      schema: jsonSchema.schema ?? { type: 'object' },
-    };
-    return out;
-  } else {
-    return Object.keys(out).length > 0 ? out : undefined;
+  if (isObjectRecord(responseFormat)) {
+    if (responseFormat.type === 'json_object') {
+      // Anthropic has no `json_object` shorthand; use native JSON output with
+      // an unconstrained object schema instead of forcing tool use.
+      out.format = { type: 'json_schema', schema: { type: 'object' } };
+    } else if (responseFormat.type === 'json_schema') {
+      const jsonSchema = isObjectRecord(responseFormat.json_schema)
+        ? responseFormat.json_schema
+        : {};
+      out.format = { type: 'json_schema', schema: jsonSchema.schema ?? { type: 'object' } };
+    }
   }
+  // Also closes an `output_config` that arrived already shaped on the inbound body.
+  return Object.keys(out).length > 0 ? closeOutputConfigObjectSchemas(out) : undefined;
 }
 
 /* ── Request conversion ── */
@@ -536,8 +673,6 @@ export interface AnthropicRequestOptions {
   thinkingLookup?: ThinkingBlockLookup;
   /** Route context for replaying only compatible cached thinking blocks. */
   thinkingRouteContext?: ThinkingBlockRouteContext;
-  /** Resolved Anthropic upstream model, used for model-specific body normalization. */
-  targetModel?: string;
 }
 
 export function toAnthropicRequest(
@@ -584,15 +719,14 @@ export function toAnthropicRequest(
   if (tools.length > 0) {
     tools[tools.length - 1].cache_control = CACHE;
     result.tools = tools;
+    const toolChoice = toAnthropicToolChoice(body.tool_choice, body.parallel_tool_calls);
+    if (toolChoice) result.tool_choice = toolChoice;
   }
   if (remapper) attachClaudeCodeToolAliases(result, remapper.aliases);
 
   const outputConfig = toAnthropicOutputConfig(body.response_format, body.output_config);
   if (outputConfig) {
-    result.output_config = normalizeOutputConfigForModel(
-      outputConfig,
-      options?.targetModel ?? _model,
-    );
+    result.output_config = outputConfig;
   }
 
   if (body.temperature !== undefined) result.temperature = body.temperature;
@@ -600,9 +734,10 @@ export function toAnthropicRequest(
   if (body.top_k !== undefined) result.top_k = body.top_k;
   // Anthropic-native fields forwarded when the inbound request originated as
   // Anthropic Messages (POST /v1/messages). Chat-completions clients won't
-  // set these, so this is a no-op for the OpenAI-compat path.
-  if (body.thinking !== undefined && shouldForwardAnthropicThinking(body.thinking, _model)) {
-    result.thinking = normalizeAnthropicThinking(body.thinking);
+  // set these, so this is a no-op for the OpenAI-compat path. Model-specific
+  // rejection fixes belong in Autofix, not in this protocol adapter.
+  if (body.thinking !== undefined) {
+    result.thinking = body.thinking;
   }
   // chat_completions `stop` accepts string OR string[]; Anthropic
   // `stop_sequences` is always an array. Wrap a bare string so a single
@@ -674,8 +809,20 @@ export function applyAnthropicMessagesMutations(
   if (body.thinking !== undefined) {
     result.thinking = normalizeAnthropicThinking(body.thinking);
   }
+  // Anthropic rejects structured-output schemas whose object nodes omit
+  // `additionalProperties`; native Messages clients pass `output_config` straight
+  // through, so close those schemas here too (not just on the translated path).
+  if (isObjectRecord(result.output_config)) {
+    result.output_config = closeOutputConfigObjectSchemas(result.output_config);
+  }
+  // Anthropic processes breakpoints in tools → system → messages order and
+  // rejects a one-hour breakpoint that follows a five-minute one. A caller that
+  // uses one-hour TTLs (Claude Code does, on system) has planned its own cache,
+  // so adding our default five-minute breakpoints would only produce a 400.
   const cacheBudget = {
-    remaining: Math.max(0, MAX_CACHE_CONTROL_BLOCKS - countCacheControlBlocks(body)),
+    remaining: hasOneHourCacheControl(body)
+      ? 0
+      : Math.max(0, MAX_CACHE_CONTROL_BLOCKS - countCacheControlBlocks(body)),
   };
 
   // Normalize `system` to a content-block array so cache_control + identity
@@ -718,13 +865,6 @@ export function applyAnthropicMessagesMutations(
     result.tools = tools;
   }
   if (remapper) attachClaudeCodeToolAliases(result, remapper.aliases);
-
-  if (result.output_config !== undefined) {
-    result.output_config = normalizeOutputConfigForModel(
-      result.output_config,
-      options?.targetModel,
-    );
-  }
 
   const thinkingLookup = options?.thinkingLookup;
   const thinkingRouteContext = options?.thinkingRouteContext;
@@ -803,8 +943,14 @@ function mapStopReason(reason: string | undefined): string {
   const map: Record<string, string> = {
     end_turn: 'stop',
     max_tokens: 'length',
+    // The reply hit the model's context window rather than max_tokens; it is
+    // still cut short, so chat clients should see it as truncated.
+    model_context_window_exceeded: 'length',
     tool_use: 'tool_calls',
     stop_sequence: 'stop',
+    // Claude's safety classifiers ended the reply; chat_completions reports a
+    // policy stop as content_filter, not as a finished turn.
+    refusal: 'content_filter',
   };
   return map[reason] ?? 'stop';
 }
@@ -825,11 +971,15 @@ export function fromAnthropicResponse(
 ): Record<string, unknown> & { _extractedThinkingBlocks?: ExtractedThinkingBlocks } {
   const content = (resp.content as Array<Record<string, unknown>>) || [];
   let textContent = '';
+  let reasoningContent = '';
   const toolCalls: Record<string, unknown>[] = [];
   const thinkingBlocks: ThinkingBlock[] = [];
 
   for (const block of content) {
     if (block.type === 'text' && typeof block.text === 'string') textContent += block.text;
+    if (block.type === 'thinking' && typeof block.thinking === 'string') {
+      reasoningContent += block.thinking;
+    }
     if (block.type === 'thinking' || block.type === 'redacted_thinking') {
       // Pass blocks through unmodified — Anthropic signs them and the
       // signature becomes invalid if any field is altered or dropped.
@@ -848,6 +998,7 @@ export function fromAnthropicResponse(
   }
 
   const message: Record<string, unknown> = { role: 'assistant', content: textContent || null };
+  if (reasoningContent) message.reasoning_content = reasoningContent;
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
 
   const usage = resp.usage as Record<string, number> | undefined;
@@ -1040,7 +1191,9 @@ function handleContentBlockDelta(state: StreamState, data: Record<string, unknow
     if (existing) {
       existing.thinking = ((existing.thinking as string) || '') + delta.thinking;
     }
-    return null;
+    return delta.thinking
+      ? makeChunkSse(state.model, { reasoning_content: delta.thinking }, null)
+      : null;
   }
   if (delta.type === 'signature_delta' && typeof delta.signature === 'string') {
     const existing = state.thinkingBlocksByIndex.get(blockIndex);

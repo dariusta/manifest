@@ -62,6 +62,7 @@ import type {
 import { ResponsesSseError } from './chatgpt-adapter';
 import { redactInlineImageDataUrls } from './inline-image-redaction';
 import { isGenerateContentPath, parseModelAction } from './google-generate-content-adapter';
+import { scrubSecrets } from '../../common/utils/secret-scrub';
 import { openAiModelId, subscriptionOpenAiModelId } from './openai-model-id';
 import { openAiModelCapabilities, type OpenAiModelCapabilities } from './openai-model-capabilities';
 import { PlanService } from '../../billing/plan.service';
@@ -220,7 +221,9 @@ export class ProxyController {
         id,
         object: 'model',
         created: MODEL_CREATED_UNKNOWN,
-        owned_by: model.provider,
+        // Custom providers own their models under the name the user gave
+        // them, not the internal `custom:<uuid>` key.
+        owned_by: model.providerName ?? model.provider,
       };
       if (includeRouteMetadata) {
         entry.provider_model_id = model.id;
@@ -370,6 +373,9 @@ export class ProxyController {
     }
 
     let attemptSequence = 0;
+    // Every attempt that inserted a pending row, so a caller disconnect can
+    // finish the ones no terminal writer will reach.
+    const startedAttempts: ProviderAttemptRef[] = [];
     const startProviderAttempt: StartProviderAttempt = (start) => {
       const startedAtMs = Date.now();
       const attempt: ProviderAttemptRef = {
@@ -429,6 +435,7 @@ export class ProxyController {
           this.logger.warn(`Failed to record pending Provider Attempt: ${e}`);
           return false;
         });
+      startedAttempts.push(attempt);
       attempt.completeFailure = ({ status, errorBody, superseded }) =>
         this.recorder
           .completePendingProviderFailure(attempt, status, errorBody, superseded)
@@ -487,24 +494,25 @@ export class ProxyController {
       slotAcquired = true;
       routingBody = redactInlineImageDataUrls(this.routingBody(body, req));
       const specificityOverride = req.headers['x-manifest-specificity'] as string | undefined;
-      const { forward, meta, failedFallbacks, autofix } = await this.proxyService.proxyRequest({
-        agentId: req.ingestionContext.agentId,
-        tenantId,
-        // Attribution only — the recorder writes it to agent_messages.user_id.
-        userId: req.ingestionContext.userId,
-        body,
-        routingBody,
-        sessionKey,
-        sessionCacheKey: sessionScope.cacheKey,
-        providerCacheKey: sessionScope.providerCacheKey,
-        sessionMomentumKey: sessionScope.momentumKey,
-        agentName: req.ingestionContext.agentName,
-        signal: clientAbort.signal,
-        specificityOverride,
-        headers: req.headers,
-        apiMode,
-        startProviderAttempt,
-      });
+      const { forward, meta, failedFallbacks, autofix, fallbackAutofix } =
+        await this.proxyService.proxyRequest({
+          agentId: req.ingestionContext.agentId,
+          tenantId,
+          // Attribution only — the recorder writes it to agent_messages.user_id.
+          userId: req.ingestionContext.userId,
+          body,
+          routingBody,
+          sessionKey,
+          sessionCacheKey: sessionScope.cacheKey,
+          providerCacheKey: sessionScope.providerCacheKey,
+          sessionMomentumKey: sessionScope.momentumKey,
+          agentName: req.ingestionContext.agentName,
+          signal: clientAbort.signal,
+          specificityOverride,
+          headers: req.headers,
+          apiMode,
+          startProviderAttempt,
+        });
       currentMeta = meta;
 
       this.trackFirstProxyRequest(tenantId);
@@ -657,6 +665,7 @@ export class ProxyController {
           currentPrimaryAttemptNumber(autofix) +
             (meta.fallbackFromModel ? (failedFallbacks?.length ?? 0) + 1 : 0),
           apiMode,
+          fallbackAutofix,
         );
       }
     } catch (err: unknown) {
@@ -677,6 +686,14 @@ export class ProxyController {
         currentAttemptStart,
       );
       await (currentMeta?.attempt ?? currentAttempt)?.finishRecording?.();
+      if (clientAbort.signal.aborted) {
+        // recordCancelledRequest completes only the last attempt. Earlier ones
+        // (a failed primary, failed fallback hops, an Autofix retry) were
+        // carried in the chain's local state, which the abort threw away. The
+        // last one is included too: the pending guard makes it a no-op unless
+        // recordCancelledRequest failed to write it.
+        await this.recorder.cancelPendingProviderAttempts(startedAttempts);
+      }
     } finally {
       if (slotAcquired) this.rateLimiter.releaseSlot(tenantId);
     }
@@ -782,7 +799,9 @@ export class ProxyController {
             ? err.getStatus()
             : 500;
     const providerErrorBody = err instanceof ResponsesSseError ? err.body : message;
-    this.logger.error(`Proxy error: ${message}`);
+    // `message` is the raw upstream body for a ResponsesSseError, so scrub it
+    // before it reaches stdout (the recorded/returned copies already are).
+    this.logger.error(`Proxy error: ${scrubSecrets(message)}`);
 
     // Who failed? A ManifestError says so explicitly. Pre-response dead sockets
     // and timeouts become synthetic 503/504 responses in proxy-transport. A
@@ -806,6 +825,7 @@ export class ProxyController {
           status,
           err.code,
           startTime == null ? undefined : Date.now() - startTime,
+          meta,
         );
       }
     } else if (
@@ -826,6 +846,7 @@ export class ProxyController {
         status,
         'M500',
         startTime == null ? undefined : Date.now() - startTime,
+        meta,
       );
     } else {
       this.recorder
@@ -1031,6 +1052,7 @@ export class ProxyController {
     httpStatus?: number,
     errorCode?: ManifestErrorCode,
     durationMs?: number,
+    meta?: RoutingMeta,
   ): void {
     const body = req.body as Record<string, unknown> | undefined;
     this.recorder
@@ -1049,6 +1071,19 @@ export class ProxyController {
         requestHeaders,
         durationMs,
         apiMode,
+        // A friendly stub's meta is a placeholder (provider 'manifest', tier
+        // 'simple'), not a routing decision, so only a real route stamps tiers.
+        ...(meta && meta.provider !== 'manifest'
+          ? {
+              routing: {
+                tier: meta.tier,
+                specificityCategory: meta.specificity_category,
+                headerTierId: meta.header_tier_id,
+                headerTierName: meta.header_tier_name,
+                headerTierColor: meta.header_tier_color,
+              },
+            }
+          : {}),
       })
       .catch((e) => this.logger.warn(`Failed to record Manifest-blocked request: ${e}`));
   }

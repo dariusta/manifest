@@ -1,3 +1,4 @@
+import type { AgentScope } from './analytics-scope.service';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
@@ -21,7 +22,7 @@ import {
   sqlIsFailedStatus,
   sqlIsSuccessStatus,
 } from './query-helpers';
-import { RequestVolumeService } from './request-volume.service';
+import { RequestVolumeService, type DispositionTotals } from './request-volume.service';
 
 export interface AutofixStatusResponse {
   /** At least one agent is effectively enabled after deployment-mode defaults. */
@@ -194,17 +195,24 @@ export class AutofixStatsService {
   async getStats(params: {
     tenantId: string | null;
     range?: string;
-    agentName?: string;
+    agentScope?: AgentScope;
   }): Promise<AutofixStatsResponse> {
     const range = params.range ?? '7d';
     const cutoff = computeCutoff(rangeToInterval(range));
     const prevCutoff = computeCutoff(rangeToPreviousInterval(range));
 
-    const [current, previous, attention] = await Promise.all([
-      this.queryWindow(cutoff, computeCutoff('0 hours'), params.tenantId, params.agentName),
-      this.queryWindow(prevCutoff, cutoff, params.tenantId, params.agentName),
-      this.queryNeedsAttention(cutoff, params.tenantId, params.agentName),
+    const [windows, attention] = await Promise.all([
+      this.requestVolume.getDispositionTotalsForWindows({
+        tenantId: params.tenantId,
+        from: prevCutoff,
+        splitAt: cutoff,
+        to: computeCutoff('0 hours'),
+        agentScope: params.agentScope,
+      }),
+      this.queryNeedsAttention(cutoff, params.tenantId, params.agentScope),
     ]);
+    const current = this.windowCounts(windows.current);
+    const previous = this.windowCounts(windows.previous);
 
     const rate = (c: WindowCounts) => (c.total > 0 ? c.successes / c.total : 0);
     const afxTotal = (c: WindowCounts) => c.healed + c.no_fix_found + c.resolving + c.ineffective;
@@ -240,7 +248,7 @@ export class AutofixStatsService {
   async getPerProviderStats(params: {
     tenantId: string | null;
     range?: string;
-    agentName?: string;
+    agentScope?: AgentScope;
   }): Promise<
     Array<{
       provider: string;
@@ -269,7 +277,7 @@ export class AutofixStatsService {
       .groupBy(providerExpr)
       .addGroupBy(authExpr)
       .addGroupBy(labelExpr);
-    addTenantFilter(qb, params.tenantId, params.agentName);
+    addTenantFilter(qb, params.tenantId, params.agentScope);
     excludePlaygroundAgents(qb);
 
     const rows = await qb.getRawMany<{
@@ -318,7 +326,7 @@ export class AutofixStatsService {
   async getPerModelStats(params: {
     tenantId: string | null;
     range?: string;
-    agentName?: string;
+    agentScope?: AgentScope;
   }): Promise<
     Array<{
       model: string;
@@ -339,7 +347,7 @@ export class AutofixStatsService {
       .andWhere(sqlIsCompletedStatus('at.status'))
       .andWhere('at.model IS NOT NULL')
       .groupBy('at.model');
-    addTenantFilter(qb, params.tenantId, params.agentName);
+    addTenantFilter(qb, params.tenantId, params.agentScope);
     excludePlaygroundAgents(qb);
 
     const rows = await qb.getRawMany<{
@@ -360,7 +368,7 @@ export class AutofixStatsService {
     tenantId: string | null;
     range?: string;
     by?: string;
-    agentName?: string;
+    agentScope?: AgentScope;
     failedOnly?: boolean;
   }): Promise<AutofixTimeseriesResponse> {
     const range = params.range ?? '7d';
@@ -379,7 +387,7 @@ export class AutofixStatsService {
         tenantId: params.tenantId,
         range,
         hourly,
-        agentName: params.agentName,
+        agentScope: params.agentScope,
         failedOnly: params.failedOnly,
       });
       return this.pivotTimeseries(range, by, rows);
@@ -402,7 +410,7 @@ export class AutofixStatsService {
     }
 
     qb.groupBy(bucketExpr).addGroupBy(dimExpr).orderBy(bucketExpr, 'ASC');
-    addTenantFilter(qb, params.tenantId, params.agentName);
+    addTenantFilter(qb, params.tenantId, params.agentScope);
     excludePlaygroundAgents(qb);
 
     const rows = await qb.getRawMany<{ bucket: string; dim: string | null; count: string }>();
@@ -470,20 +478,11 @@ export class AutofixStatsService {
    * KPI window counts, read from the SAME request-level reducer as the
    * By request status chart (one request, one disposition; Recovered by
    * Autofix = requests.autofix_status = 'retry_succeeded'). One definition,
-   * every surface.
+   * every surface. Pure — the window totals come from a single
+   * `getDispositionTotalsForWindows` scan for both the current and previous
+   * window, so the KPI no longer scans the request/attempt window twice.
    */
-  private async queryWindow(
-    from: string,
-    to: string,
-    tenantId: string | null,
-    agentName?: string,
-  ): Promise<WindowCounts> {
-    const t = await this.requestVolume.getDispositionTotals({
-      tenantId,
-      from,
-      to,
-      agentName,
-    });
+  private windowCounts(t: DispositionTotals): WindowCounts {
     return {
       total: t.total,
       successes: t.success + t.healed + t.fallback,
@@ -500,7 +499,7 @@ export class AutofixStatsService {
   private async queryNeedsAttention(
     cutoff: string,
     tenantId: string | null,
-    agentName?: string,
+    agentScope?: AgentScope,
   ): Promise<AutofixStatsResponse['needs_attention']> {
     const qb = this.messageRepo
       .createQueryBuilder('at')
@@ -529,7 +528,7 @@ export class AutofixStatsService {
       .addGroupBy("(at.autofix_phoenix->>'issueId')::text")
       .orderBy('count', 'DESC')
       .limit(5);
-    addTenantFilter(qb, tenantId, agentName);
+    addTenantFilter(qb, tenantId, agentScope);
     excludePlaygroundAgents(qb);
 
     const rows = await qb.getRawMany<{

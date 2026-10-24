@@ -11,6 +11,7 @@ import { Title, Meta } from '@solidjs/meta';
 import { authClient } from '../services/auth-client.js';
 import { getBillingStatus, updateBillingEmailPreferences } from '../services/api/billing.js';
 import { toast } from '../services/toast-store.js';
+import { FREE_PLAN_ENDS_NOTE } from '../components/PlanPicker.jsx';
 import {
   FREE_REQUEST_LIMIT_LABEL,
   formatBillingPriceWithInterval,
@@ -391,6 +392,9 @@ const Account: Component = () => {
                     ? ` · ${proPriceWithInterval()}`
                     : ''}
                 </span>
+                <Show when={billing()!.plan === 'free'}>
+                  <span class="billing-stat__cancel">{FREE_PLAN_ENDS_NOTE}</span>
+                </Show>
                 <Show when={billing()!.cancelAtPeriodEnd && billing()!.subscriptionPeriodEnd}>
                   <span class="billing-stat__cancel">
                     You'll keep Pro access until{' '}

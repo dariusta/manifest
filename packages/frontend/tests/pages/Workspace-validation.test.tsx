@@ -114,9 +114,10 @@ vi.mock('manifest-shared', () => ({
 
 import Workspace from '../../src/pages/Workspace';
 
-const openModal = () => {
+const openModal = async () => {
   const result = render(() => <Workspace />);
   fireEvent.click(screen.getAllByText('Connect Harness')[0]);
+  await vi.waitFor(() => expect(result.container.querySelector('.modal-card__input')).not.toBeNull());
   const input = result.container.querySelector('.modal-card__input') as HTMLInputElement;
   const createBtn = Array.from(
     result.container.querySelectorAll<HTMLButtonElement>('.modal-card button.btn--primary'),
@@ -134,47 +135,47 @@ describe('Workspace AddAgentModal - name validation', () => {
     mockGetWorkspaceAutofixStatus.mockResolvedValue({ consented: true });
   });
 
-  it('keeps Create disabled while the name is the empty string', () => {
-    const { input, createBtn } = openModal();
+  it('keeps Create disabled while the name is the empty string', async () => {
+    const { input, createBtn } = await openModal();
     expect(input.value).toBe('');
     expect(createBtn.disabled).toBe(true);
   });
 
-  it('keeps Create disabled when the name is only spaces', () => {
-    const { input, createBtn } = openModal();
+  it('keeps Create disabled when the name is only spaces', async () => {
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: '     ' } });
     expect(createBtn.disabled).toBe(true);
   });
 
-  it('keeps Create disabled when the name is only tabs and newlines', () => {
-    const { input, createBtn } = openModal();
+  it('keeps Create disabled when the name is only tabs and newlines', async () => {
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: '\t\n\t  ' } });
     expect(createBtn.disabled).toBe(true);
   });
 
-  it('does not call createAgent when the user clicks Create with whitespace only', () => {
-    const { input, createBtn } = openModal();
+  it('does not call createAgent when the user clicks Create with whitespace only', async () => {
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: '   ' } });
     fireEvent.click(createBtn);
     expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
-  it('does not call createAgent when Enter is pressed with whitespace only', () => {
-    const { input } = openModal();
+  it('does not call createAgent when Enter is pressed with whitespace only', async () => {
+    const { input } = await openModal();
     fireEvent.input(input, { target: { value: '   ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
-  it('enables Create as soon as a single non-space character is typed', () => {
-    const { input, createBtn } = openModal();
+  it('enables Create as soon as a single non-space character is typed', async () => {
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: 'a' } });
     expect(createBtn.disabled).toBe(false);
   });
 
   it('accepts a name with a URL-reserved slash and routes through encodeURIComponent', async () => {
     mockCreateAgent.mockResolvedValue({ agent: { name: 'weird/name' }, apiKey: 'k' });
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: 'weird/name' } });
     expect(createBtn.disabled).toBe(false);
     fireEvent.click(createBtn);
@@ -188,7 +189,7 @@ describe('Workspace AddAgentModal - name validation', () => {
 
   it('accepts a name with a percent sign without double-encoding', async () => {
     mockCreateAgent.mockResolvedValue({ agent: { name: '100%cool' }, apiKey: 'k' });
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: '100%cool' } });
     fireEvent.click(createBtn);
     await vi.waitFor(() => {
@@ -198,7 +199,7 @@ describe('Workspace AddAgentModal - name validation', () => {
 
   it('accepts a unicode emoji name and url-encodes the navigation target', async () => {
     mockCreateAgent.mockResolvedValue({ agent: { name: 'bot-🚀' }, apiKey: 'k' });
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: 'bot-🚀' } });
     fireEvent.click(createBtn);
     await vi.waitFor(() => {
@@ -210,7 +211,7 @@ describe('Workspace AddAgentModal - name validation', () => {
   });
 
   it('trims surrounding whitespace before submitting the name', async () => {
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: '  spaced-out  ' } });
     fireEvent.click(createBtn);
     await vi.waitFor(() => {
@@ -227,7 +228,7 @@ describe('Workspace AddAgentModal - name validation', () => {
   it('accepts a very long name (256 chars) without truncating client-side', async () => {
     const longName = 'a'.repeat(256);
     mockCreateAgent.mockResolvedValue({ agent: { name: longName }, apiKey: 'k' });
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: longName } });
     expect(createBtn.disabled).toBe(false);
     fireEvent.click(createBtn);
@@ -254,7 +255,7 @@ describe('Workspace AddAgentModal - exact createAgent payload', () => {
   });
 
   it('submits the default category and platform when the user only types a name', async () => {
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: 'Demo Agent' } });
     fireEvent.click(createBtn);
     await vi.waitFor(() => {
@@ -278,7 +279,7 @@ describe('Workspace AddAgentModal - exact createAgent payload', () => {
   });
 
   it('includes the user-selected category and platform in the payload', async () => {
-    const { container, input, createBtn } = openModal();
+    const { container, input, createBtn } = await openModal();
     fireEvent.click(container.querySelector('[data-testid="pick-app"]')!);
     fireEvent.click(container.querySelector('[data-testid="pick-langchain"]')!);
     fireEvent.input(input, { target: { value: 'my-langchain-agent' } });
@@ -296,7 +297,7 @@ describe('Workspace AddAgentModal - exact createAgent payload', () => {
 
   it('navigates to the slug returned by the server, not the typed name', async () => {
     mockCreateAgent.mockResolvedValue({ agent: { name: 'demo-agent-1' }, apiKey: 'key-xyz' });
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: 'Demo Agent' } });
     fireEvent.click(createBtn);
     await vi.waitFor(() => {
@@ -309,7 +310,7 @@ describe('Workspace AddAgentModal - exact createAgent payload', () => {
 
   it('falls back to the typed name when the server omits the slug', async () => {
     mockCreateAgent.mockResolvedValue({ apiKey: 'k' });
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: 'Fallback Agent' } });
     fireEvent.click(createBtn);
     await vi.waitFor(() => {
@@ -323,7 +324,7 @@ describe('Workspace AddAgentModal - exact createAgent payload', () => {
 
   it('does not call markAgentCreated or navigate when createAgent rejects', async () => {
     mockCreateAgent.mockRejectedValue(new Error('boom'));
-    const { input, createBtn } = openModal();
+    const { input, createBtn } = await openModal();
     fireEvent.input(input, { target: { value: 'Demo Agent' } });
     fireEvent.click(createBtn);
     await vi.waitFor(() => {

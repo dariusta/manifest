@@ -1,6 +1,7 @@
 import { ManifestError } from '../../../common/errors/manifest-error';
 import { ConfigService } from '@nestjs/config';
 import {
+  deriveAutofixStatus,
   getProviderParamSpecs,
   type AuthType,
   type ModelRoute,
@@ -22,7 +23,8 @@ import type { ThoughtSignatureCache } from '../thought-signature-cache';
 import type { ThinkingBlockCache } from '../thinking-block-cache';
 import { AgentModelParamsService } from '../../routing-core/agent-model-params.service';
 import type { ProviderParamSpecService } from '../../routing-core/provider-param-spec.service';
-import type { AutofixService } from '../../autofix/autofix.service';
+import { AutofixService } from '../../autofix/autofix.service';
+import type { HealingClient } from '../../autofix/healing-client';
 import type { ModelDiscoveryService } from '../../../model-discovery/model-discovery.service';
 import type { DiscoveredModel } from '../../../model-discovery/model-fetcher';
 
@@ -329,6 +331,34 @@ describe('ProxyService — orchestration', () => {
       await expect(svc.proxyRequest(baseOpts({ body } as never))).resolves.toBeDefined();
       expect(body.messages).toHaveLength(1001);
       expect(fallbackService.tryForwardToProvider.mock.calls[0][0].body).toBe(body);
+    });
+
+    it("hands the caller's anthropic-beta header to the forward", async () => {
+      // Manifest builds upstream headers from scratch, so without this the
+      // caller's beta flags never reach Anthropic and every beta-gated body
+      // field comes back as `Extra inputs are not permitted`.
+      resolveService.resolve.mockResolvedValue({
+        tier: 'standard',
+        route: route('anthropic', 'subscription', 'claude-sonnet-4-20250514'),
+        fallback_routes: null,
+        confidence: 0.9,
+        score: 5,
+        reason: 'scored',
+      });
+      fallbackService.tryForwardToProvider.mockResolvedValue({
+        response: okResponse(200),
+        isGoogle: false,
+        isAnthropic: true,
+        isChatGpt: false,
+      });
+
+      await svc.proxyRequest(
+        baseOpts({ headers: { 'anthropic-beta': 'structured-outputs-2025-11-13' } } as never),
+      );
+
+      expect(fallbackService.tryForwardToProvider.mock.calls[0][0].clientAnthropicBeta).toBe(
+        'structured-outputs-2025-11-13',
+      );
     });
 
     it('replaces null content with empty string', async () => {
@@ -961,6 +991,139 @@ describe('ProxyService — orchestration', () => {
     });
   });
 
+  describe('autofix healed streaming retry', () => {
+    // The real AutofixService, so the request verdict and the Phoenix outcome
+    // report are the ones production derives from the retry.
+    let healingClient: { heal: jest.Mock; reportOutcome: jest.Mock };
+
+    beforeEach(() => {
+      // clearAllMocks keeps implementations; start each test from a clean peek.
+      mockedPeek.mockReset();
+      healingClient = {
+        heal: jest.fn().mockResolvedValue({
+          status: 'patched',
+          issueId: 'issue-1',
+          patchId: 'patch-1',
+          healAttemptId: 'heal-1',
+          healedBody: { model: 'gpt-4o', max_tokens: 5 },
+        }),
+        reportOutcome: jest.fn().mockResolvedValue({ healAttemptId: 'heal-1' }),
+      };
+      const realAutofix = new AutofixService(
+        healingClient as unknown as HealingClient,
+        { findOne: jest.fn().mockResolvedValue({ id: 'agent-1', autofix_enabled: true }) } as never,
+        { get: jest.fn().mockReturnValue(undefined) } as unknown as ConfigService,
+      );
+      (svc as unknown as { autofixService: AutofixService }).autofixService = realAutofix;
+      resolveService.resolve.mockResolvedValue({
+        tier: 'standard',
+        route: route('openai', 'api_key', 'gpt-4o'),
+        fallback_routes: [route('anthropic', 'api_key', 'claude')],
+        confidence: 0.9,
+        score: 5,
+        reason: 'scored',
+      });
+      fallbackService.tryForwardToProvider.mockImplementation(
+        async () =>
+          ({
+            response: new Response('{"error":{"message":"bad param"}}', { status: 400 }),
+            wireRequestBody: { model: 'gpt-4o', max_tokens: 7 },
+            wireApiMode: 'chat_completions',
+            retryWireBody: jest.fn(),
+            isGoogle: false,
+            isAnthropic: false,
+            isChatGpt: false,
+          }) as never,
+      );
+      fallbackService.retryWireBody.mockResolvedValue({
+        response: new Response(new ReadableStream(), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+        isGoogle: false,
+        isAnthropic: false,
+        isChatGpt: false,
+      } as never);
+      fallbackService.tryFallbacks.mockResolvedValue({
+        success: {
+          forward: { response: okResponse(), isGoogle: false, isAnthropic: true, isChatGpt: false },
+          model: 'claude',
+          provider: 'anthropic',
+          fallbackIndex: 0,
+        },
+        failures: [],
+      } as never);
+    });
+
+    const streamOpts = () =>
+      baseOpts({ body: { messages: [{ role: 'user', content: 'hi' }], stream: true } });
+
+    it('does not credit Autofix when the healed stream fails warm-up and a fallback serves', async () => {
+      mockedPeek.mockResolvedValue({
+        ok: false,
+        reason: 'timeout',
+        message: 'No data within 15000ms',
+      } as never);
+
+      const result = await svc.proxyRequest(streamOpts());
+
+      expect(result.meta.fallbackFromModel).toBe('gpt-4o');
+      expect(deriveAutofixStatus(result.autofix)).toBe('retry_failed');
+      const retry = result.autofix?.chain.find((entry) => entry.origin === 'autofix');
+      expect(retry?.http_status).toBe(502);
+      expect(healingClient.reportOutcome).toHaveBeenCalledWith(
+        'heal-1',
+        expect.objectContaining({
+          retryStatusCode: 502,
+          error: expect.objectContaining({
+            message: expect.stringContaining('No data within 15000ms'),
+          }),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('still credits Autofix when the healed stream delivers data', async () => {
+      mockedPeek.mockImplementation(async () => ({ ok: true, stream: new ReadableStream() }));
+
+      const result = await svc.proxyRequest(streamOpts());
+
+      expect(result.meta.fallbackFromModel).toBeUndefined();
+      expect(result.forward.response.status).toBe(200);
+      expect(deriveAutofixStatus(result.autofix)).toBe('retry_succeeded');
+      expect(healingClient.reportOutcome).toHaveBeenCalledWith(
+        'heal-1',
+        { retryStatusCode: 200 },
+        expect.anything(),
+      );
+      expect(fallbackService.tryFallbacks).not.toHaveBeenCalled();
+    });
+
+    it('only warms up a healed retry that returned a streaming body', async () => {
+      fallbackService.retryWireBody
+        .mockResolvedValueOnce({
+          response: new Response('{"error":{"message":"still bad"}}', { status: 400 }),
+          isGoogle: false,
+          isAnthropic: false,
+          isChatGpt: false,
+        } as never)
+        .mockResolvedValueOnce({
+          response: new Response(null, { status: 200 }),
+          isGoogle: false,
+          isAnthropic: false,
+          isChatGpt: false,
+        } as never);
+
+      const failed = await svc.proxyRequest(streamOpts());
+      expect(deriveAutofixStatus(failed.autofix)).toBe('retry_failed');
+      expect(failed.meta.fallbackFromModel).toBe('gpt-4o');
+
+      const bodiless = await svc.proxyRequest(streamOpts());
+      expect(deriveAutofixStatus(bodiless.autofix)).toBe('retry_succeeded');
+      expect(mockedPeek).not.toHaveBeenCalled();
+    });
+  });
+
   describe('limit enforcement', () => {
     it('returns a friendly limit response when checkLimits flags an excess', async () => {
       limitCheck.checkLimits.mockResolvedValue({
@@ -1014,6 +1177,27 @@ describe('ProxyService — orchestration', () => {
       const result = await svc.proxyRequest(baseOpts());
       const body = await result.forward.response.text();
       expect(body).toContain('M101');
+    });
+
+    it('returns M302 when a pinned override names an unavailable model', async () => {
+      resolveService.resolve.mockResolvedValue({
+        tier: 'standard',
+        route: null,
+        fallback_routes: null,
+        confidence: 0,
+        score: 0,
+        reason: 'scored',
+        override_model_unavailable: 'gpt-6-astra',
+      });
+      const result = await svc.proxyRequest(baseOpts());
+      const body = await result.forward.response.text();
+      expect(body).toContain('M302');
+      expect(body).toContain('gpt-6-astra');
+      expect(body).not.toContain('M101');
+      expect(result.meta).toMatchObject({
+        reason: 'model_not_available',
+        manifest_error_code: 'M302',
+      });
     });
   });
 
@@ -1511,12 +1695,54 @@ describe('ProxyService — orchestration', () => {
           body: { model: 'claude-sonnet-4', messages: [{ role: 'user', content: 'hi' }] },
         }),
       );
+
+      expect(resolveService.resolve).not.toHaveBeenCalled();
+      expect(fallbackService.tryForwardToProvider).not.toHaveBeenCalled();
+      expect(result.meta.manifest_error_code).toBe('M302');
+    });
+
+    it('surfaces a subscription failure to the caller without falling back to the api_key', async () => {
+      modelDiscovery.getModelsForAgent.mockResolvedValue([
+        discoveredModel({ id: 'gpt-4o', provider: 'openai', authType: 'api_key' }),
+        discoveredModel({ id: 'gpt-4o', provider: 'openai', authType: 'subscription' }),
+      ]);
+      // Break the subscription credentials: the caller pinned the model, so
+      // the error is theirs to see — Manifest must not meter the key instead.
+      providerKeyService.selectProviderKey.mockResolvedValue({
+        apiKey: JSON.stringify({ t: 'access', r: 'refresh', e: 0 }),
+        id: 'up-oai',
+        region: null,
+        label: 'Default',
+        priority: 0,
+      });
+      openaiOauth.unwrapToken.mockResolvedValue(null);
+
+      const result = await svc.proxyRequest(
+        baseOpts({ body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] } }),
+      );
+      const body = await result.forward.response.text();
+
+      expect(fallbackService.tryForwardToProvider).not.toHaveBeenCalled();
+      expect(fallbackService.tryFallbacks).not.toHaveBeenCalled();
+      expect(body).toContain('M102');
+      expect(body).toContain('subscription credentials could not be refreshed');
+    });
+
+    it('returns model-not-available when two providers carry the same bare name', async () => {
+      modelDiscovery.getModelsForAgent.mockResolvedValue([
+        discoveredModel({ id: 'gpt-4o', provider: 'openai', authType: 'subscription' }),
+        discoveredModel({ id: 'gpt-4o', provider: 'azure', authType: 'api_key' }),
+      ]);
+
+      const result = await svc.proxyRequest(
+        baseOpts({ body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] } }),
+      );
       const body = await result.forward.response.text();
 
       expect(resolveService.resolve).not.toHaveBeenCalled();
       expect(fallbackService.tryForwardToProvider).not.toHaveBeenCalled();
       expect(body).toContain('M302');
-      expect(body).toContain('claude-sonnet-4');
+      expect(body).toContain('gpt-4o');
     });
 
     it('forwards an uncatalogued provider-qualified model through a connected provider', async () => {

@@ -163,6 +163,15 @@ describe("Settings", () => {
     expect(screen.getByText("Harness type")).toBeDefined();
   });
 
+  it("applies the platform-icon theming class to the harness type icon", async () => {
+    const { container } = render(() => <Settings />);
+    await vi.waitFor(() => {
+      expect(container.querySelector("img.settings-type__icon")).not.toBeNull();
+    });
+    const icon = container.querySelector("img.settings-type__icon");
+    expect(icon?.classList.contains("platform-icon")).toBe(true);
+  });
+
   it("renders Change button for agent type", async () => {
     const { container } = render(() => <Settings />);
     await vi.waitFor(() => {
@@ -623,7 +632,7 @@ describe("Settings", () => {
     });
   });
 
-  it("uses app.manifest.build URL when hostname matches", async () => {
+  it("uses app.manifest.build in setup on the gateway host", async () => {
     const originalLocation = window.location;
     Object.defineProperty(window, "location", {
       value: { ...originalLocation, hostname: "app.manifest.build", origin: "https://app.manifest.build" },

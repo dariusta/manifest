@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@solidjs/testing-library';
 import { FREE_REQUEST_LIMIT_LABEL } from '../../src/services/billing-display';
+import { FREE_PLAN_ENDS_NOTE } from '../../src/components/PlanPicker';
 import { FREE_PLAN_REQUESTS_PER_MONTH } from 'manifest-shared';
 
 const searchParamsState: Record<string, string | undefined> = {};
@@ -340,6 +341,7 @@ describe('Account', () => {
       expect(container.querySelector('#billing')).not.toBeNull();
       expect(screen.getByText('Current plan')).toBeDefined();
       expect(screen.getByText('Free')).toBeDefined();
+      expect(screen.getByText(FREE_PLAN_ENDS_NOTE)).toBeDefined();
       expect(screen.getByText(`120 / ${FREE_REQUEST_LIMIT_LABEL}`)).toBeDefined();
       expect(screen.getByText(/Resets/)).toBeDefined();
       expect(

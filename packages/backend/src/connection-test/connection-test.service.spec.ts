@@ -198,6 +198,61 @@ describe('ConnectionTestService', () => {
     expect(result.message).toMatch(/^Replied in \d+ms\.$/);
   });
 
+  it.each([
+    { cachedModels: null },
+    { cachedModels: [] },
+    { cachedModels: [model({ id: 'claude-opus-4', qualityScore: 1 })] },
+  ])(
+    'tests Claude with the current lightweight model even with an old or empty cache ($cachedModels)',
+    async ({ cachedModels: cached }) => {
+      const snapshot = cached ? [...cached] : null;
+      const { service, forward } = harness({
+        connections: [
+          connection({
+            provider: 'anthropic',
+            auth_type: 'subscription',
+            cached_models: cached,
+          }),
+        ],
+        credential: jest
+          .fn()
+          .mockResolvedValue(JSON.stringify({ t: 'access', r: 'refresh', e: 0 })),
+        unwrapToken: jest.fn().mockResolvedValue('fresh-claude-token'),
+      });
+
+      const result = await service.test('tenant-1', 'tp-1');
+
+      expect(forward).toHaveBeenCalledTimes(1);
+      expect(forward).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'anthropic',
+          apiKey: 'fresh-claude-token',
+          authType: 'subscription',
+          model: 'claude-haiku-5-5',
+        }),
+      );
+      expect(result).toMatchObject({ status: 'ok', model: 'claude-haiku-5-5' });
+      expect(cached).toEqual(snapshot);
+    },
+  );
+
+  it('keeps API-key tests within the connection catalog', async () => {
+    const { service, forward } = harness({
+      connections: [
+        connection({
+          provider: 'anthropic',
+          cached_models: [model({ id: 'account-model', provider: 'anthropic' })],
+        }),
+      ],
+    });
+
+    await expect(service.test('tenant-1', 'tp-1')).resolves.toMatchObject({
+      status: 'ok',
+      model: 'account-model',
+    });
+    expect(forward.mock.calls[0][0].model).toBe('account-model');
+  });
+
   it.each([401, 403])(
     'treats a %i as a credential problem, not a request problem',
     async (status) => {
@@ -395,6 +450,54 @@ describe('pickTestModel', () => {
     ]);
 
     expect(picked?.id).toBe('cheapest');
+  });
+
+  it('prefers a supported diagnostic model over obsolete zero-priced entries', () => {
+    const picked = pickTestModel(
+      [
+        model({
+          id: 'claude-opus-4',
+          inputPricePerToken: 0,
+          outputPricePerToken: 0,
+          qualityScore: 1,
+        }),
+        model({ id: 'claude-haiku-5-5', qualityScore: 3 }),
+      ],
+      'claude-haiku-5-5',
+    );
+
+    expect(picked?.id).toBe('claude-haiku-5-5');
+  });
+
+  it('uses a discovered versioned variant of the diagnostic model', () => {
+    expect(
+      pickTestModel(
+        [model({ id: 'old', inputPricePerToken: 0 }), model({ id: 'current-20261001' })],
+        'current',
+      )?.id,
+    ).toBe('current-20261001');
+  });
+
+  it.each(['missing', 'image'])('falls back when the preferred model is %s', (preferred) => {
+    expect(
+      pickTestModel(
+        [model({ id: 'image', outputModalities: ['image'] }), model({ id: 'text' })],
+        preferred,
+      )?.id,
+    ).toBe('text');
+  });
+
+  it.each([
+    { inputPricePerToken: null, outputPricePerToken: null },
+    { inputPricePerToken: null, outputPricePerToken: 0 },
+    { inputPricePerToken: 0, outputPricePerToken: null },
+  ])('does not treat missing prices as free (%j)', (unknownPrices) => {
+    const picked = pickTestModel([
+      model({ id: 'unknown', ...unknownPrices, qualityScore: 1 }),
+      model({ id: 'priced' }),
+    ]);
+
+    expect(picked?.id).toBe('priced');
   });
 
   it('breaks an all-zero price tie on quality score so subscriptions pick deterministically', () => {

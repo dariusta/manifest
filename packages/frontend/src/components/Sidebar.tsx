@@ -1,23 +1,16 @@
+import { lazy, Suspense } from 'solid-js';
 import { A, useLocation } from '@solidjs/router';
-import { Show, For, createSignal, createResource, type Component } from 'solid-js';
-import { useAgentName } from '../services/routing.js';
-import { getAgents } from '../services/api.js';
+import { Show, createSignal, createResource, type Component } from 'solid-js';
 import { getBillingStatus } from '../services/api/billing.js';
 import { FREE_REQUEST_LIMIT_LABEL } from '../services/billing-display.js';
-import { checkIsSelfHosted } from '../services/setup-status.js';
-import { agentPing } from '../services/sse.js';
-import { platformIcon } from 'manifest-shared';
-import AddAgentModal from './AddAgentModal.jsx';
+import { checkIsSelfHosted, checkMcpEnabled } from '../services/setup-status.js';
+const AddAgentModal = lazy(() => import('./AddAgentModal.jsx'));
+const ServicesContactModal = lazy(() => import('./ServicesContactModal.jsx'));
+import { authClient } from '../services/auth-client.js';
+
 interface SidebarProps {
   mobileOpen?: boolean;
   onNavigate?: () => void;
-}
-
-interface HarnessItem {
-  agent_name: string;
-  display_name?: string;
-  agent_platform?: string | null;
-  agent_category?: string | null;
 }
 
 /**
@@ -34,12 +27,17 @@ function makeIsGlobalActive(pathname: () => string) {
 const Sidebar: Component<SidebarProps> = (props) => {
   const location = useLocation();
   const isGlobalActive = makeIsGlobalActive(() => location.pathname);
-  const getAgentName = useAgentName();
-  const [agentsCollapsed, setAgentsCollapsed] = createSignal(false);
   const [addModalOpen, setAddModalOpen] = createSignal(false);
+  const [servicesOpen, setServicesOpen] = createSignal(false);
+  const session = authClient.useSession();
   // Local providers only exist on self-hosted installs — a cloud backend
   // can't reach the user's localhost, so the Local entry is hidden there.
   const [selfHosted] = createResource(checkIsSelfHosted);
+  // An install served over plain HTTP cannot host the MCP OAuth resource, so
+  // the backend runs without the endpoint entirely. The entry waits for the
+  // status like the Local one does, rather than appearing and then vanishing
+  // on the installs that don't have it.
+  const [mcpEnabled] = createResource(checkMcpEnabled);
   const [billing] = createResource(async () => {
     try {
       return await getBillingStatus();
@@ -50,24 +48,6 @@ const Sidebar: Component<SidebarProps> = (props) => {
   const showUpgrade = () => billing()?.enabled && billing()?.plan === 'free';
   const requestLimitLabel = () =>
     billing()?.requests.limit?.toLocaleString('en-US') ?? FREE_REQUEST_LIMIT_LABEL;
-
-  // Harness list for the in-nav switcher. Refetches whenever the agent SSE ping
-  // fires (create/delete/rename). Uses the DEFAULT getAgents() — playground agents
-  // (the reserved Playground) are excluded so they never leak into the switcher.
-  const [agents] = createResource(
-    () => agentPing(),
-    async (): Promise<HarnessItem[]> => {
-      try {
-        const data = (await getAgents()) as { agents?: HarnessItem[] } | HarnessItem[] | null;
-        if (Array.isArray(data)) return data;
-        return data?.agents ?? [];
-      } catch {
-        return [];
-      }
-    },
-  );
-
-  const currentAgent = () => getAgentName();
 
   const handleNav = () => {
     props.onNavigate?.();
@@ -102,6 +82,36 @@ const Sidebar: Component<SidebarProps> = (props) => {
       >
         Requests
       </A>
+      {/* Harnesses is a plain nav entry to the /harnesses page; the + keeps
+          the one-click create from the nav. */}
+      <div class="sidebar__link-row">
+        <A
+          href="/harnesses"
+          class="sidebar__link"
+          classList={{ active: isGlobalActive('/harnesses') }}
+          aria-current={isGlobalActive('/harnesses') ? 'page' : undefined}
+        >
+          Harnesses
+        </A>
+        <button
+          type="button"
+          class="sidebar__section-add"
+          title="Create new harness"
+          aria-label="Create new harness"
+          onClick={() => setAddModalOpen(true)}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            fill="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path d="M19 12.998h-6v6h-2v-6H5v-2h6v-6h2v6h6z" />
+          </svg>
+        </button>
+      </div>
       <div class="sidebar__section-label">PROVIDERS</div>
       <Show when={selfHosted()}>
         <A
@@ -129,6 +139,10 @@ const Sidebar: Component<SidebarProps> = (props) => {
       >
         Subscriptions
       </A>
+
+      {/* Integrations: surfaces that drive Manifest from outside the dashboard.
+          The "New" pills are a showcase device, not structure — delete the two
+          spans once these stop being new. n8n joins here when it gets a page. */}
       <A
         href="/providers/plan-usage"
         class="sidebar__link"
@@ -137,86 +151,27 @@ const Sidebar: Component<SidebarProps> = (props) => {
       >
         Plan Usage
       </A>
-
-      {/* Harnesses — collapsible section with a + create button.
-          The collapse toggle and the create button are sibling buttons (never
-          nested) so both are independently keyboard-operable. */}
-      <div class="sidebar__section-header">
-        <button
-          type="button"
-          class="sidebar__section-caret"
-          onClick={() => setAgentsCollapsed(!agentsCollapsed())}
-          aria-expanded={!agentsCollapsed()}
+      <div class="sidebar__section-label">INTEGRATIONS</div>
+      <Show when={mcpEnabled()}>
+        <A
+          href="/integrations/mcp"
+          class="sidebar__link"
+          classList={{ active: isGlobalActive('/integrations/mcp') }}
+          aria-current={isGlobalActive('/integrations/mcp') ? 'page' : undefined}
         >
-          <span>HARNESSES</span>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="12"
-            height="12"
-            fill="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            style={{
-              transition: 'transform 150ms',
-              transform: agentsCollapsed() ? 'rotate(-90deg)' : 'rotate(0deg)',
-            }}
-          >
-            <path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          class="sidebar__section-add"
-          title="Create new harness"
-          aria-label="Create new harness"
-          onClick={() => setAddModalOpen(true)}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            fill="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path d="M19 12.998h-6v6h-2v-6H5v-2h6v-6h2v6h6z" />
-          </svg>
-        </button>
-      </div>
-
-      <Show when={!agentsCollapsed()}>
-        <div class="sidebar__agents-list">
-          <For
-            each={agents() ?? []}
-            fallback={
-              <Show when={!agents.loading}>
-                <div class="sidebar__agents-empty">No harnesses yet</div>
-              </Show>
-            }
-          >
-            {(agent) => {
-              const name = () => agent.agent_name;
-              const display = () => agent.display_name || agent.agent_name;
-              const icon = () => platformIcon(agent.agent_platform, agent.agent_category);
-              const isSelected = () => currentAgent() === name();
-              return (
-                <A
-                  href={`/harnesses/${encodeURIComponent(name())}`}
-                  class="sidebar__agent-item"
-                  classList={{ 'sidebar__agent-item--active': isSelected() }}
-                  aria-current={isSelected() ? 'page' : undefined}
-                  onClick={handleNav}
-                >
-                  <Show when={icon()}>
-                    <img src={icon()} alt="" class="sidebar__agent-icon" />
-                  </Show>
-                  <span class="sidebar__agent-item-name">{display()}</span>
-                </A>
-              );
-            }}
-          </For>
-        </div>
+          MCP server
+          <span class="sidebar__badge">New</span>
+        </A>
       </Show>
+      <A
+        href="/integrations/cli"
+        class="sidebar__link"
+        classList={{ active: isGlobalActive('/integrations/cli') }}
+        aria-current={isGlobalActive('/integrations/cli') ? 'page' : undefined}
+      >
+        CLI
+        <span class="sidebar__badge">New</span>
+      </A>
 
       <div class="sidebar__section-label">TOOLS</div>
       <A
@@ -229,6 +184,20 @@ const Sidebar: Component<SidebarProps> = (props) => {
       </A>
 
       <div class="sidebar__spacer" />
+
+      <button type="button" class="sidebar-services" onClick={() => setServicesOpen(true)}>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="18"
+          height="18"
+          fill="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path d="m19.46,5.52c-2.06-2.03-5.29-2.03-7.34,0l-.08.08s-.03.02-.04.03h0s-.11-.11-.11-.11c-2.05-2.03-5.28-2.03-7.34,0-.99.99-1.54,2.29-1.53,3.65,0,1.36.55,2.65,1.54,3.63l6.06,6c.39.38.9.58,1.41.58s1.02-.19,1.41-.58l6.06-6c.99-.98,1.53-2.27,1.54-3.63,0-1.37-.54-2.67-1.53-3.65,0,0,0,0,0,0Zm-8.17,12.58l-6.06-6c-.8-.79-1.24-1.83-1.24-2.92,0-1.1.44-2.15,1.24-2.94.83-.82,1.9-1.23,2.97-1.23s2.13.41,2.96,1.23l.12.11-2.3,2.32c-.74.75-.74,1.96,0,2.71.37.37.86.56,1.36.56s.98-.19,1.36-.56l1.98-1.98,3.89,3.89-1.05,1.04-2.17-2.17c-.2-.2-.51-.2-.71,0s-.2.51,0,.71l2.17,2.17-.8.79-2.16-2.16c-.2-.2-.51-.2-.71,0s-.2.51,0,.71l2.16,2.16-.8.79-2.15-2.15c-.2-.2-.51-.2-.71,0s-.2.51,0,.71l2.15,2.15-.09.09c-.39.38-1.02.38-1.41,0Zm7.46-6l-.48.48-3.89-3.89,1.31-1.31c.2-.2.2-.51,0-.71s-.51-.2-.71,0l-4,4c-.36.36-.94.36-1.3,0s-.36-.94,0-1.29l2.63-2.65s.01,0,.02-.01l.47-.47c1.66-1.64,4.27-1.64,5.94,0,.8.8,1.24,1.84,1.24,2.94,0,1.1-.44,2.13-1.24,2.92Z" />
+        </svg>
+        Custom development
+      </button>
 
       <Show when={!selfHosted() && showUpgrade()}>
         <div class="sidebar-usage">
@@ -290,8 +259,23 @@ const Sidebar: Component<SidebarProps> = (props) => {
         </A>
       </Show>
 
-      {/* Create-harness modal, opened by the HARNESSES section + button */}
-      <AddAgentModal open={addModalOpen()} onClose={() => setAddModalOpen(false)} />
+      {/* Create-harness modal, opened by the + button next to the Harnesses nav link */}
+      <Show when={addModalOpen()}>
+        <Suspense fallback={<span role="status">Loading harness setup…</span>}>
+          <AddAgentModal open={true} onClose={() => setAddModalOpen(false)} />
+        </Suspense>
+      </Show>
+      <Show when={servicesOpen()}>
+        <Suspense fallback={null}>
+          {' '}
+          <ServicesContactModal
+            open={servicesOpen()}
+            defaultName={session()?.data?.user?.name ?? ''}
+            defaultEmail={session()?.data?.user?.email ?? ''}
+            onClose={() => setServicesOpen(false)}
+          />
+        </Suspense>
+      </Show>
     </nav>
   );
 };

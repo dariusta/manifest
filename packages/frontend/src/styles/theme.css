@@ -7,6 +7,7 @@
 @import './custom-select.css';
 @import './data.css';
 @import './agents.css';
+@import './platform-icons.css';
 @import './modals.css';
 @import './tokens.css';
 @import './wizard.css';
@@ -20,7 +21,6 @@
 @import './action-menu.css';
 @import './feedback.css';
 @import './params-card.css';
-@import './pivot.css';
 
 /*
  * Route-scoped stylesheets are intentionally NOT imported here. They are
@@ -859,9 +859,7 @@ textarea.input {
   letter-spacing: 0.05em;
 }
 
-/* Base styling shared by global nav links and harness switcher items. */
-.sidebar__link,
-.sidebar__agent-item {
+.sidebar__link {
   display: flex;
   align-items: center;
   gap: var(--gap-xs);
@@ -874,8 +872,7 @@ textarea.input {
   transition: all var(--transition-fast);
 }
 
-.sidebar__link:hover,
-.sidebar__agent-item:hover {
+.sidebar__link:hover {
   background: hsl(var(--sidebar-accent));
   color: hsl(var(--sidebar-accent-foreground));
 }
@@ -886,49 +883,30 @@ textarea.input {
   font-weight: 500;
 }
 
-/* HARNESSES section header — a row holding the collapse toggle and + button. */
-.sidebar__section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: var(--gap-md) 0.5rem 1px;
-  border-radius: var(--radius);
-  transition: background var(--transition-fast);
+/* "New" pill on a nav entry. A showcase device with a short life: delete this
+   rule and the matching spans in Sidebar.tsx once the entries stop being new.
+   Same token pair as .setup-method__badge, so it follows the theme. */
+.sidebar__badge {
+  margin-left: auto;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-3xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: hsl(var(--chart-1) / 0.15);
+  color: hsl(var(--chart-1));
 }
 
-.sidebar__section-header:hover {
-  background: hsl(var(--sidebar-accent));
-}
-
-/* Collapse toggle: carries the uppercased section label styling so it reads as
-   a section heading, with the caret icon trailing the text. */
-.sidebar__section-caret {
+/* Nav row pairing a link with the create button (Harnesses). */
+.sidebar__link-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+}
+
+.sidebar__link-row .sidebar__link {
   flex: 1;
   min-width: 0;
-  padding: 6px var(--gap-md);
-  background: none;
-  border: none;
-  border-radius: var(--radius);
-  font-size: var(--font-size-xs);
-  font-weight: 500;
-  color: hsl(var(--muted-foreground));
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.sidebar__section-caret:focus-visible {
-  background: hsl(var(--sidebar-accent));
-  color: hsl(var(--sidebar-foreground));
-}
-
-.sidebar__section-header:hover .sidebar__section-caret {
-  color: hsl(var(--sidebar-foreground));
 }
 
 .sidebar__section-add {
@@ -941,7 +919,7 @@ textarea.input {
   border: none;
   border-radius: var(--radius-sm);
   padding: 0;
-  margin-right: 2px;
+  margin-right: var(--gap-md);
   color: hsl(var(--muted-foreground));
   cursor: pointer;
   transition:
@@ -953,42 +931,6 @@ textarea.input {
 .sidebar__section-add:focus-visible {
   color: hsl(var(--sidebar-foreground));
   background: hsl(var(--border));
-}
-
-/* Harness list items reuse the shared link base (above); these are the only
-   harness-specific overrides — a wider icon gap and a bolder label. */
-.sidebar__agents-list {
-  padding: 0;
-}
-
-.sidebar__agent-item {
-  gap: 8px;
-  font-weight: 500;
-}
-
-.sidebar__agent-item--active {
-  background: hsl(var(--sidebar-accent));
-  color: hsl(var(--sidebar-primary));
-  font-weight: 600;
-}
-
-.sidebar__agent-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.sidebar__agent-item-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar__agents-empty {
-  padding: 6px var(--gap-lg);
-  margin: 1px 0.5rem;
-  font-size: var(--font-size-sm);
-  color: hsl(var(--muted-foreground));
 }
 
 .sidebar__spacer {
@@ -1348,14 +1290,43 @@ textarea.input {
 @media (max-width: 768px) {
   .header {
     padding: 0 var(--gap-md);
+    /* The left group grows to fill the row here, so without a gap the
+       truncated breadcrumb would butt against the nav toggle. */
+    gap: var(--gap-md);
   }
   .header__left {
     flex: 1;
-    overflow: hidden;
+    min-width: 0;
   }
-  .header__logo-img {
-    width: 124px;
-    margin-bottom: 7px;
+  .chart-card__subtitle {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .chart-card__filters {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .chart-card__filters > button {
+    flex: 1 1 140px;
+  }
+  .chart-card__filters > div {
+    flex: 1 1 100%;
+  }
+  .chart-card__filters .agent-filter-select__trigger {
+    width: 100%;
+  }
+  .header__gear .header__dropdown {
+    /* Anchor to the viewport so short harness names cannot push the menu off-screen. */
+    position: fixed;
+    top: var(--header-height);
+    left: auto !important;
+    right: var(--gap-md) !important;
+  }
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
   }
   .header__separator,
   .header__breadcrumb-link,
@@ -1366,12 +1337,34 @@ textarea.input {
   }
   .header__breadcrumb-current {
     max-width: min(38vw, 180px);
+    /* Also shrink below the natural width when the logo + badge leave less
+       room than that cap, so the name ellipsizes instead of being clipped
+       by the left group's overflow. */
+    min-width: 0;
+    flex: 0 1 auto;
   }
   .header__breadcrumb-current > span {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .header__breadcrumb-current > .header__breadcrumb-provider-icon,
+  .header__breadcrumb-current > .header__breadcrumb-label {
+    display: none;
+  }
+  /* Tab bars (harness detail, routing layers, …) are inline-flex pills that
+     never shrink: when the tabs outgrow a phone screen the bar scrolls
+     sideways inside its own box instead of widening the whole page. The
+     pill is only 2.25rem tall, so the scrollbar is hidden rather than
+     squeezed in. */
+  .panel__tabs {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .panel__tabs::-webkit-scrollbar {
+    display: none;
   }
   .header__gear {
     flex-shrink: 0;
@@ -1592,9 +1585,6 @@ textarea.input {
 }
 
 @media (max-width: 480px) {
-  .header__logo-img {
-    width: 112px;
-  }
   .header__mode-badge {
     display: none;
   }
@@ -1619,11 +1609,6 @@ textarea.input {
   }
 }
 
-/* ── Dark-mode icon overrides ─────────────────────── */
-.dark img[src$='/icons/hermes.svg'] {
-  filter: brightness(0) invert(1);
-}
-
 /* ── Requests tables: pinned lead-column widths ──
    Status is binary now (Success / Failed; the failure cause lives in the
    drawer), Date is sized for the short timestamp, Attempts for its own
@@ -1643,4 +1628,82 @@ textarea.input {
 }
 .data-table th[data-col] {
   white-space: nowrap;
+}
+
+/* "New" pill on a nav entry. A showcase device with a short life: delete this
+   rule and the matching spans in Sidebar.tsx once the entries stop being new.
+   Same token pair as .setup-method__badge, so it follows the theme. */
+.sidebar__badge {
+  margin-left: auto;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-3xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: hsl(var(--chart-1) / 0.15);
+  color: hsl(var(--chart-1));
+}
+
+.sidebar__link-row { display: flex; align-items: center; gap: 4px; }
+.sidebar__link-row > .sidebar__link { flex: 1; }
+
+.integration-panel__header {
+  display: flex;
+  /* Design system: a section header with a control on the right is always
+     centre-aligned, never flex-start/end. */
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: var(--gap-md);
+}
+
+.integration-panel__header .panel__title {
+  margin-bottom: 0;
+}
+
+.integration-panel__desc {
+  font-size: var(--font-size-sm);
+  color: hsl(var(--muted-foreground));
+  margin: 0 0 var(--gap-md);
+  max-width: 70ch;
+}
+
+.integration-panel__tabs {
+  margin-bottom: var(--gap-md);
+}
+
+/* The tabs don't shrink, so three client names exceed a 320px viewport. Scroll
+   the row rather than letting the last tab sit past the panel edge — same
+   treatment as .setup-method-tabs. */
+.integration-panel__tabs .panel__tabs {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.integration-panel__tabs .panel__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Short steps sit side by side on a wide viewport and stack on a narrow one.
+   No manual breakpoints, same approach as .routing-cards. */
+.integration-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--gap-lg);
+}
+
+.integration-grid .panel {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+/* auto-fit keeps the 340px minimum even when the viewport is narrower than
+   that, which overflows on a small phone. Collapse to one column first, the
+   same breakpoint .routing-cards uses for its 320px minimum. */
+@media (max-width: 600px) {
+  .integration-grid {
+    grid-template-columns: 1fr;
+  }
 }

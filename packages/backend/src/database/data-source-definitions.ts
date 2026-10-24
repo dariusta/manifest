@@ -1,3 +1,11 @@
+import { RoutingPresetEntity } from '../entities/routing-preset.entity';
+import { AddRoutingPresets1803200000000 } from './migrations/1803200000000-AddRoutingPresets';
+import { AddCustomProviderAlias1802100000000 } from './migrations/1802100000000-AddCustomProviderAlias';
+import { CliAuthCode } from '../entities/cli-auth-code.entity';
+import { AddApiKeyAbsoluteExpiresAt1801740000000 } from './migrations/1801740000000-AddApiKeyAbsoluteExpiresAt';
+import { AddCliAuthCodeChallenge1801730000000 } from './migrations/1801730000000-AddCliAuthCodeChallenge';
+import { CreateCliAuthCodes1801710000000 } from './migrations/1801710000000-CreateCliAuthCodes';
+import { AddApiKeyExpiresAt1801700000000 } from './migrations/1801700000000-AddApiKeyExpiresAt';
 // Single source of truth for the TypeORM entity and migration registries.
 // Both the app DataSource (database.module) and the migration CLI/pre-deploy
 // runner (datasource.ts -> migrate.ts) import these, so boot and deploy apply
@@ -28,6 +36,7 @@ import { AgentEnabledProvider } from '../entities/agent-enabled-provider.entity'
 import { PublicErrorPage } from '../entities/public-error-page.entity';
 import { WaitlistClaim } from '../entities/waitlist-claim.entity';
 import { TenantRequestUsage } from '../entities/tenant-request-usage.entity';
+import { AgentUsageDaily } from '../entities/agent-usage-daily.entity';
 import { RenameWaitlistClaimsTable1800000000000 } from './migrations/1800000000000-RenameWaitlistClaimsTable';
 import { ReclassifyPlanRequestLimitMessages1800100000000 } from './migrations/1800100000000-ReclassifyPlanRequestLimitMessages';
 import { AddMessageErrorCode1800200000000 } from './migrations/1800200000000-AddMessageErrorCode';
@@ -42,6 +51,15 @@ import { AddRequestApiMode1801720000000 } from './migrations/1801720000000-AddRe
 import { AddAutofixConsentToInstallMetadata1801900000000 } from './migrations/1801900000000-AddAutofixConsentToInstallMetadata';
 import { SlimTenantAgentModelIndex1802000000000 } from './migrations/1802000000000-SlimTenantAgentModelIndex';
 import { AddTenantMembers1802100000000 } from './migrations/1802100000000-AddTenantMembers';
+import { AddRequestsAutofixHealedIndex1802200000000 } from './migrations/1802200000000-AddRequestsAutofixHealedIndex';
+import { TuneFactTableAutovacuum1802400000000 } from './migrations/1802400000000-TuneFactTableAutovacuum';
+import { AddAgentMessagesUnlinkedIndex1802500000000 } from './migrations/1802500000000-AddAgentMessagesUnlinkedIndex';
+import { AddAgentMessagesRecordingIndex1802600000000 } from './migrations/1802600000000-AddAgentMessagesRecordingIndex';
+import { AddAgentMessagesAutofixAttemptIndex1802700000000 } from './migrations/1802700000000-AddAgentMessagesAutofixAttemptIndex';
+import { AddAgentUsageDaily1802800000000 } from './migrations/1802800000000-AddAgentUsageDaily';
+import { AddAgentMessagesDirectUsageIndex1802900000000 } from './migrations/1802900000000-AddAgentMessagesDirectUsageIndex';
+import { CoverRequestsLogFilters1803000000000 } from './migrations/1803000000000-CoverRequestsLogFilters';
+import { CoverHarnessRequestsIndex1803100000000 } from './migrations/1803100000000-CoverHarnessRequestsIndex';
 import { InitialSchema1771464895790 } from './migrations/1771464895790-InitialSchema';
 import { HashApiKeys1771500000000 } from './migrations/1771500000000-HashApiKeys';
 import { ModelPricingImprovements1771600000000 } from './migrations/1771600000000-ModelPricingImprovements';
@@ -167,6 +185,8 @@ import { AddOAuthPendingFlowReconnectLabel1802600000000 } from './migrations/180
 import { RelaxAccountIssuerNullable1802400000000 } from './migrations/1802400000000-RelaxAccountIssuerNullable';
 
 export const entities = [
+  RoutingPresetEntity,
+  CliAuthCode,
   AgentMessage,
   ManifestRequest,
   ApiKey,
@@ -192,9 +212,16 @@ export const entities = [
   PublicErrorPage,
   WaitlistClaim,
   TenantRequestUsage,
+  AgentUsageDaily,
 ];
 
 export const migrations = [
+  AddRoutingPresets1803200000000,
+  AddCustomProviderAlias1802100000000,
+  AddApiKeyExpiresAt1801700000000,
+  CreateCliAuthCodes1801710000000,
+  AddCliAuthCodeChallenge1801730000000,
+  AddApiKeyAbsoluteExpiresAt1801740000000,
   InitialSchema1771464895790,
   HashApiKeys1771500000000,
   ModelPricingImprovements1771600000000,
@@ -332,4 +359,13 @@ export const migrations = [
   RelaxAccountIssuerNullable1802400000000,
   AddCachedQuotaReport1802500000000,
   AddOAuthPendingFlowReconnectLabel1802600000000,
+  AddRequestsAutofixHealedIndex1802200000000,
+  TuneFactTableAutovacuum1802400000000,
+  AddAgentMessagesUnlinkedIndex1802500000000,
+  AddAgentMessagesRecordingIndex1802600000000,
+  AddAgentMessagesAutofixAttemptIndex1802700000000,
+  AddAgentUsageDaily1802800000000,
+  AddAgentMessagesDirectUsageIndex1802900000000,
+  CoverRequestsLogFilters1803000000000,
+  CoverHarnessRequestsIndex1803100000000,
 ];

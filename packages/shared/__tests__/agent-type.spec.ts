@@ -11,15 +11,17 @@ import {
 
 describe('agent-type', () => {
   it('exposes the full set of categories and platforms', () => {
-    expect(AGENT_CATEGORIES).toEqual(['personal', 'app', 'coding']);
+    expect(AGENT_CATEGORIES).toEqual(['personal', 'automation', 'app', 'coding']);
     expect(AGENT_PLATFORMS).toEqual([
       'openclaw',
       'hermes',
       'nanobot',
       'craft',
+      'n8n',
       'claude-code',
       'cursor',
       'opencode',
+      'codex',
       'openai-sdk',
       'anthropic-sdk',
       'google-genai-sdk',
@@ -30,7 +32,7 @@ describe('agent-type', () => {
     ]);
   });
 
-  it('places coding as the last category so the picker reads personal → app → coding', () => {
+  it('places coding as the last category so the picker reads personal → automation → app → coding', () => {
     expect(AGENT_CATEGORIES[AGENT_CATEGORIES.length - 1]).toBe('coding');
   });
 
@@ -49,6 +51,10 @@ describe('agent-type', () => {
     expect(CATEGORY_LABELS.coding).toBe('Coding Assistant');
   });
 
+  it('labels the automation category as "Automation"', () => {
+    expect(CATEGORY_LABELS.automation).toBe('Automation');
+  });
+
   it('maps every category to a non-empty list of platforms that are all registered', () => {
     for (const category of AGENT_CATEGORIES) {
       const platforms = PLATFORMS_BY_CATEGORY[category];
@@ -63,12 +69,22 @@ describe('agent-type', () => {
     expect(PLATFORMS_BY_CATEGORY.coding).toContain('claude-code');
     expect(PLATFORMS_BY_CATEGORY.coding).toContain('cursor');
     expect(PLATFORMS_BY_CATEGORY.coding).toContain('opencode');
+    expect(PLATFORMS_BY_CATEGORY.coding).toContain('codex');
     expect(PLATFORMS_BY_CATEGORY.personal).not.toContain('claude-code');
     expect(PLATFORMS_BY_CATEGORY.personal).not.toContain('cursor');
     expect(PLATFORMS_BY_CATEGORY.personal).not.toContain('opencode');
+    expect(PLATFORMS_BY_CATEGORY.personal).not.toContain('codex');
     expect(PLATFORMS_BY_CATEGORY.app).not.toContain('claude-code');
     expect(PLATFORMS_BY_CATEGORY.app).not.toContain('cursor');
     expect(PLATFORMS_BY_CATEGORY.app).not.toContain('opencode');
+    expect(PLATFORMS_BY_CATEGORY.app).not.toContain('codex');
+  });
+
+  it('places n8n under automation only', () => {
+    expect(PLATFORMS_BY_CATEGORY.automation).toContain('n8n');
+    expect(PLATFORMS_BY_CATEGORY.personal).not.toContain('n8n');
+    expect(PLATFORMS_BY_CATEGORY.app).not.toContain('n8n');
+    expect(PLATFORMS_BY_CATEGORY.coding).not.toContain('n8n');
   });
 
   it('keeps "other" available in every category for the unknown-platform fallback', () => {
@@ -116,7 +132,7 @@ describe('agent-type', () => {
     });
 
     it('treats every falsy platform value the same regardless of category', () => {
-      for (const cat of [null, undefined, 'personal', 'app', 'coding', 'unknown']) {
+      for (const cat of [null, undefined, 'personal', 'automation', 'app', 'coding', 'unknown']) {
         expect(platformIcon(null, cat)).toBeUndefined();
         expect(platformIcon(undefined, cat)).toBeUndefined();
         expect(platformIcon('', cat)).toBeUndefined();
@@ -128,6 +144,7 @@ describe('agent-type', () => {
     });
 
     it('returns the generic "other" icon for "other" in any non-personal category', () => {
+      expect(platformIcon('other', 'automation')).toBe('/icons/other.svg');
       expect(platformIcon('other', 'app')).toBe('/icons/other.svg');
       expect(platformIcon('other', 'coding')).toBe('/icons/other.svg');
       expect(platformIcon('other', null)).toBe('/icons/other.svg');
@@ -139,8 +156,10 @@ describe('agent-type', () => {
       expect(platformIcon('openclaw', 'personal')).toBe(PLATFORM_ICONS.openclaw);
       expect(platformIcon('hermes', 'personal')).toBe(PLATFORM_ICONS.hermes);
       expect(platformIcon('nanobot', 'personal')).toBe(PLATFORM_ICONS.nanobot);
+      expect(platformIcon('n8n', 'automation')).toBe(PLATFORM_ICONS.n8n);
       expect(platformIcon('claude-code', 'coding')).toBe(PLATFORM_ICONS['claude-code']);
       expect(platformIcon('opencode', 'coding')).toBe(PLATFORM_ICONS.opencode);
+      expect(platformIcon('codex', 'coding')).toBe(PLATFORM_ICONS.codex);
       expect(platformIcon('openai-sdk', 'app')).toBe(PLATFORM_ICONS['openai-sdk']);
       expect(platformIcon('anthropic-sdk', 'app')).toBe(PLATFORM_ICONS['anthropic-sdk']);
       expect(platformIcon('vercel-ai-sdk', 'app')).toBe(PLATFORM_ICONS['vercel-ai-sdk']);

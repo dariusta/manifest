@@ -2,7 +2,7 @@ import { CACHE_TTL_METADATA } from '@nestjs/cache-manager';
 import { INTERCEPTORS_METADATA } from '@nestjs/common/constants';
 import { ProviderUsageController } from './provider-usage.controller';
 import type { TenantContext } from '../../common/decorators/tenant-context.decorator';
-import { UserCacheInterceptor } from '../../common/interceptors/user-cache.interceptor';
+import { StaleAnalyticsCacheInterceptor } from '../../common/interceptors/stale-analytics-cache.interceptor';
 import { DASHBOARD_CACHE_TTL_MS } from '../../common/constants/cache.constants';
 import type { ProviderUsageSummary } from '../services/provider-usage.service';
 
@@ -23,7 +23,7 @@ describe('ProviderUsageController', () => {
       DASHBOARD_CACHE_TTL_MS,
     );
     expect(Reflect.getMetadata(INTERCEPTORS_METADATA, ProviderUsageController)).toContain(
-      UserCacheInterceptor,
+      StaleAnalyticsCacheInterceptor,
     );
   });
 

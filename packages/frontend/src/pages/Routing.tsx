@@ -1,12 +1,6 @@
-import {
-  createSignal,
-  createResource,
-  createMemo,
-  createEffect,
-  For,
-  Show,
-  type Component,
-} from 'solid-js';
+import RoutingPresets from '../components/RoutingPresets.jsx';
+import { createCachedResource as createResource } from '../services/cached-resource.js';
+import { createSignal, createMemo, createEffect, For, Show, type Component } from 'solid-js';
 import { useLocation, useParams, useSearchParams } from '@solidjs/router';
 import { Title, Meta } from '@solidjs/meta';
 import RoutingModals from '../components/RoutingModals.js';
@@ -64,11 +58,11 @@ import { DEFAULT_STAGE, STAGES } from '../services/providers.js';
 import NoConnectionsPrompt from '../components/NoConnectionsPrompt.jsx';
 import '../styles/routing.css';
 
-const Routing: Component = () => {
+const RoutingPage: Component<{ agentName: string }> = (props) => {
   const params = useParams<{ agentName: string }>();
   const location = useLocation<{ openProviders?: boolean }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const agentName = () => decodeURIComponent(params.agentName);
+  const agentName = () => decodeURIComponent(props.agentName);
 
   // Newly created agents land on this tab; show the setup modal here too (it
   // used to live only on Overview). The open gate keys off a persistent
@@ -111,10 +105,8 @@ const Routing: Component = () => {
     () => agentName(),
     (name) => listHeaderTiers(name).catch(() => [] as HeaderTier[]),
   );
-  const [complexityStatus, { mutate: mutateComplexityStatus }] = createResource(
-    () => agentName(),
-    getComplexityStatus,
-  );
+  const [complexityStatus, { refetch: refetchComplexityStatus, mutate: mutateComplexityStatus }] =
+    createResource(() => agentName(), getComplexityStatus);
   const [togglingComplexity, setTogglingComplexity] = createSignal(false);
   const [changingDefaultResponseMode, setChangingDefaultResponseMode] = createSignal(false);
   const [changingSpecificityResponseMode, setChangingSpecificityResponseMode] = createSignal(false);
@@ -156,7 +148,7 @@ const Routing: Component = () => {
   // Per-route model params, fetched once and threaded down. Scope separates
   // default/complexity tiers, task-specific tiers, and custom header tiers so
   // the same model can have different values in different routing surfaces.
-  const [modelParams, { mutate: mutateModelParams }] = createResource(
+  const [modelParams, { refetch: refetchModelParams, mutate: mutateModelParams }] = createResource(
     () => agentName(),
     (name) => listModelParams(name).catch(() => [] as AgentModelParamsRow[]),
   );
@@ -506,6 +498,23 @@ const Routing: Component = () => {
         content={`Configure model routing for ${agentDisplayName() ?? agentName()}.`}
       />
 
+      <RoutingPresets
+        agentName={agentName()}
+        models={models() ?? []}
+        providers={connectedProviders() ?? []}
+        onApplied={async () => {
+          await Promise.all([
+            refetchTiers(),
+            refetchSpecificity(),
+            refetchHeaderTiers(),
+            refetchModels(),
+            refetchProviders(),
+            refetchEnabledProviders(),
+            refetchComplexityStatus(),
+            refetchModelParams(),
+          ]);
+        }}
+      />
       <Show
         when={connectedProviders() !== undefined && enabledProviders() !== undefined}
         fallback={<RoutingLoadingSkeleton />}
@@ -949,6 +958,17 @@ const Routing: Component = () => {
         }}
       />
     </div>
+  );
+};
+
+const Routing: Component = () => {
+  const params = useParams<{ agentName: string }>();
+  // Route components can survive a parameter change. Remount local editing and
+  // onboarding state for a different harness; its cached GETs still load fast.
+  return (
+    <Show when={params.agentName} keyed>
+      {(name) => <RoutingPage agentName={name} />}
+    </Show>
   );
 };
 

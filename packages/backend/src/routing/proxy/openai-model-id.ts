@@ -1,39 +1,19 @@
 import { inferProviderFromModel, type ModelRoute } from 'manifest-shared';
 import type { DiscoveredModel } from '../../model-discovery/model-fetcher';
 import { unambiguousRoute } from '../routing-core/route-helpers';
+import { openAiModelId } from '../routing-core/public-model-id';
 
-export const OPENAI_MODEL_ID_AUTO = 'auto';
-export const SUBSCRIPTION_MODEL_SUFFIX = '-subscription';
+export {
+  OPENAI_MODEL_ID_AUTO,
+  SUBSCRIPTION_MODEL_SUFFIX,
+  openAiModelId,
+  subscriptionOpenAiModelId,
+} from '../routing-core/public-model-id';
 
 export interface ExplicitModelRouteCandidate {
   provider: string;
   model: string;
   providerQualified: boolean;
-}
-
-/** Encode a provider-native model for Manifest's public subscription route. */
-export function subscriptionOpenAiModelId(provider: string, modelId: string): string {
-  const normalizedProvider = provider.toLowerCase();
-  if (modelId === OPENAI_MODEL_ID_AUTO || normalizedProvider.startsWith('custom:')) return modelId;
-
-  const prefix = `${normalizedProvider}/`;
-  const routeId = modelId.toLowerCase().startsWith(prefix)
-    ? modelId
-    : `${normalizedProvider}/${modelId}`;
-  return routeId.endsWith(SUBSCRIPTION_MODEL_SUFFIX)
-    ? routeId
-    : `${routeId}${SUBSCRIPTION_MODEL_SUFFIX}`;
-}
-
-export function openAiModelId(model: DiscoveredModel): string {
-  const provider = model.provider.toLowerCase();
-  if (provider.startsWith('custom:')) return model.id;
-
-  const prefix = `${provider}/`;
-  const routeId = model.id.toLowerCase().startsWith(prefix) ? model.id : `${provider}/${model.id}`;
-  return model.authType === 'subscription'
-    ? subscriptionOpenAiModelId(provider, model.id)
-    : routeId;
 }
 
 /**

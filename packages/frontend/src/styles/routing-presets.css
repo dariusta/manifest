@@ -1,0 +1,90 @@
+.routing-presets {
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+}
+.routing-presets__toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.routing-presets__toolbar > select {
+  width: min(240px, 100%);
+}
+.routing-presets__hint {
+  color: hsl(var(--muted-foreground));
+  margin: 10px 0 0;
+  font-size: var(--font-size-sm);
+}
+.routing-preset-modal {
+  width: min(720px, calc(100vw - 32px));
+  max-height: 90dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.routing-preset-modal h2 {
+  margin: 0;
+}
+.preset-name {
+  display: grid;
+  gap: 8px;
+}
+.routing-preset-modal__chains {
+  overflow-y: auto;
+  min-height: 0;
+  display: grid;
+  gap: 16px;
+}
+.preset-chain {
+  margin: 0;
+  padding: 12px;
+  min-width: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+}
+.preset-chain legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.preset-chain label {
+  display: grid;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+}
+.preset-chain__fallback {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.preset-chain__fallback select {
+  flex: 1;
+  min-width: 0;
+}
+.preset-chain > button {
+  justify-self: start;
+}
+.preset-error {
+  color: hsl(var(--destructive));
+}
+.preset-chain__mode {
+  grid-template-columns: auto minmax(100px, 160px);
+  align-items: center;
+  justify-content: start;
+}
+@media (max-width: 600px) {
+  .routing-presets__toolbar > select {
+    width: 100%;
+  }
+  .preset-chain__fallback {
+    flex-wrap: wrap;
+  }
+  .preset-chain__fallback select {
+    flex-basis: calc(100% - 24px);
+  }
+}

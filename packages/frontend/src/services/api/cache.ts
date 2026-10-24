@@ -28,6 +28,25 @@
 
 /** Default freshness window, in milliseconds. */
 export const DEFAULT_TTL_MS = 30_000;
+export const STALE_RETENTION_MS = 5 * 60_000;
+const MAX_CACHE_ENTRIES = 500;
+const updateListeners = new Set<(url: string) => void>();
+let readObserver: ((url: string) => void) | undefined;
+
+export function observeCacheUpdates(listener: (url: string) => void): () => void {
+  updateListeners.add(listener);
+  return () => updateListeners.delete(listener);
+}
+
+export function trackCacheReads<T>(observer: (url: string) => void, read: () => T): T {
+  const previous = readObserver;
+  readObserver = observer;
+  try {
+    return read();
+  } finally {
+    readObserver = previous;
+  }
+}
 
 interface CacheEntry<T> {
   /** Last successfully-fetched payload, or undefined while the first fetch is in flight. */
@@ -62,7 +81,11 @@ let generation = 0;
  */
 function pruneExpired(now: number): void {
   for (const [key, entry] of cache) {
-    if (!entry.inflight && now >= entry.expiresAt) cache.delete(key);
+    if (!entry.inflight && now >= entry.expiresAt + STALE_RETENTION_MS) cache.delete(key);
+  }
+  for (const [key, entry] of cache) {
+    if (cache.size <= MAX_CACHE_ENTRIES) break;
+    if (!entry.inflight) cache.delete(key);
   }
 }
 
@@ -96,12 +119,17 @@ export function cachedFetch<T>(
   fetcher: () => Promise<T>,
   ttlMs = DEFAULT_TTL_MS,
 ): Promise<T> {
+  readObserver?.(url);
   const now = Date.now();
   // Generation snapshot for this call. If an invalidation bumps `generation`
   // before the fetch resolves, the resolved payload is stale and must not be
   // written back (see the success handler below).
   const startGeneration = generation;
-  const entry = cache.get(url) as CacheEntry<T> | undefined;
+  let entry = cache.get(url) as CacheEntry<T> | undefined;
+  if (entry && !entry.inflight && now >= entry.expiresAt + STALE_RETENTION_MS) {
+    cache.delete(url);
+    entry = undefined;
+  }
 
   // Fresh hit — serve cached data without touching the network.
   if (entry && entry.data !== undefined && now < entry.expiresAt) {
@@ -138,6 +166,7 @@ export function cachedFetch<T>(
       const settledAt = Date.now();
       cache.set(url, { data, expiresAt: settledAt + ttlMs });
       pruneExpired(settledAt);
+      for (const listener of updateListeners) listener(url);
       return data;
     })
     .catch((err) => {
@@ -218,5 +247,14 @@ export const INVALIDATION_GROUPS = {
 /** Invalidate every cached key belonging to one of the {@link INVALIDATION_GROUPS}. */
 export function invalidateGroup(group: keyof typeof INVALIDATION_GROUPS): void {
   const fragments = INVALIDATION_GROUPS[group];
-  invalidatePredicate((url) => fragments.some((fragment) => url.includes(fragment)));
+  if (group === 'analytics' || group === 'message') {
+    generation++;
+    for (const [key, entry] of cache) {
+      if (!fragments.some((fragment) => key.includes(fragment))) continue;
+      if (entry.data !== undefined) entry.expiresAt = Date.now() - 1;
+      else cache.delete(key);
+    }
+  } else {
+    invalidatePredicate((url) => fragments.some((fragment) => url.includes(fragment)));
+  }
 }

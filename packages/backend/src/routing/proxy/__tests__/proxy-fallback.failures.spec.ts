@@ -15,6 +15,7 @@ import { CopilotTokenService } from '../copilot-token.service';
 import { ModelPricingCacheService } from '../../../model-prices/model-pricing-cache.service';
 import { AgentModelParamsService } from '../../routing-core/agent-model-params.service';
 import { ProviderParamSpecService } from '../../routing-core/provider-param-spec.service';
+import { AutofixService } from '../../autofix/autofix.service';
 import type { StartProviderAttempt } from '../proxy-types';
 
 /**
@@ -148,6 +149,10 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
         list: jest.fn().mockResolvedValue([]),
       } as unknown as ProviderParamSpecService,
       new ReasoningContentCache(),
+      {
+        isRepairable: jest.fn().mockReturnValue(false),
+        maybeHeal: jest.fn(),
+      } as unknown as AutofixService,
     );
   });
 
@@ -268,7 +273,7 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
     }
   });
 
-  it('forwards every request upstream even after a 429 — no cooldown (current contract)', async () => {
+  it('respects an upstream rate-limit cooldown before calling the same route again', async () => {
     // The rate-limit cooldown was removed deliberately: Manifest always dials
     // the provider and surfaces the provider's own 429 verbatim instead of
     // synthesizing a local "temporarily cooling down" response.
@@ -300,13 +305,13 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
     expect(first.response.status).toBe(429);
     expect(second.response.status).toBe(429);
     expect(first.providerCallStarted).toBe(true);
-    expect(second.providerCallStarted).toBe(true);
+    expect(second.providerCallStarted).toBe(false);
     const secondBody = await second.response.text();
-    expect(secondBody).not.toContain('temporarily cooling down');
-    expect(providerClient.forward).toHaveBeenCalledTimes(2);
+    expect(secondBody).toContain('temporarily cooling down');
+    expect(providerClient.forward).toHaveBeenCalledTimes(1);
   });
 
-  it('assigns sequential attempt numbers across consecutive forwarded routes', async () => {
+  it('assigns sequential attempt numbers across a skipped primary and a forwarded fallback', async () => {
     providerClient.forward
       .mockResolvedValueOnce({
         response: new Response('rate limit', {
@@ -359,11 +364,11 @@ describe('ProxyFallbackService.tryFallbacks — failure chain by status code', (
       startProviderAttempt,
     });
 
-    expect(primary.providerCallStarted).toBe(true);
+    expect(primary.providerCallStarted).toBe(false);
     expect(primary.attempt?.attemptNumber).toBe(1);
     expect(fallback.providerCallStarted).toBe(true);
     expect(fallback.attempt?.attemptNumber).toBe(2);
-    expect(providerClient.forward).toHaveBeenCalledTimes(3);
+    expect(providerClient.forward).toHaveBeenCalledTimes(2);
   });
   it('does NOT short-circuit on 401 auth errors — continues to next route (current contract)', async () => {
     // shouldTriggerFallback(401) === true, so an auth failure on the first

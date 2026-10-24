@@ -84,7 +84,8 @@ export async function refreshCodexCliVersion(): Promise<string | null> {
   }
 }
 
-export const CLAUDE_CODE_VERSION = '2.1.287';
+// Haiku 5.5 requires Claude Code 2.1.293 or later.
+export const CLAUDE_CODE_VERSION = '2.1.293';
 const CLAUDE_CODE_PACKAGE_URL = 'https://registry.npmjs.org/@anthropic-ai%2fclaude-code/latest';
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const VERSION_FETCH_TIMEOUT_MS = 10_000;

@@ -326,6 +326,56 @@ describe('ProviderDetailView', () => {
     });
   });
 
+  describe('Google Antigravity subscriptions', () => {
+    const googleSub = (overrides: Partial<RoutingProvider> = {}): RoutingProvider => ({
+      id: 'p1',
+      provider: 'gemini',
+      auth_type: 'subscription',
+      is_active: true,
+      has_api_key: true,
+      connected_at: '2025-01-01',
+      ...overrides,
+    });
+
+    it('offers OAuth when there is no connection', () => {
+      const props = createTestProps({ provId: 'gemini', selectedAuthType: 'subscription' });
+      render(() => <ProviderDetailView {...props} />);
+      expect(screen.queryByRole('note')).toBeNull();
+      expect(screen.getByTestId('oauth-detail-view')).toBeDefined();
+      expect(screen.queryByTestId('provider-key-form')).toBeNull();
+    });
+
+    it('keeps an existing connection manageable and offers another connection', () => {
+      const props = createTestProps({
+        provId: 'gemini',
+        providers: [googleSub()],
+        selectedAuthType: 'subscription',
+      });
+      render(() => <ProviderDetailView {...props} />);
+      expect(screen.getByTestId('oauth-detail-view')).toBeDefined();
+      expect(screen.queryByRole('note')).toBeNull();
+      expect(screen.getByText('Add connection')).toBeDefined();
+    });
+
+    it('still offers another connection for open providers', () => {
+      const props = createTestProps({
+        provId: 'openai',
+        providers: [googleSub({ provider: 'openai' })],
+        selectedAuthType: 'subscription',
+      });
+      render(() => <ProviderDetailView {...props} />);
+      expect(screen.getByText('Add connection')).toBeDefined();
+      expect(screen.queryByRole('note')).toBeNull();
+    });
+
+    it('leaves the Google API key flow untouched', () => {
+      const props = createTestProps({ provId: 'gemini', selectedAuthType: 'api_key' });
+      render(() => <ProviderDetailView {...props} />);
+      expect(screen.getByTestId('provider-key-form')).toBeDefined();
+      expect(screen.queryByRole('note')).toBeNull();
+    });
+  });
+
   describe('Anthropic subscription renders paste-code OAuth flow', () => {
     it('renders AnthropicOAuthDetailView for popup_paste subscription flow', () => {
       const connectedAnthropicSub: RoutingProvider[] = [

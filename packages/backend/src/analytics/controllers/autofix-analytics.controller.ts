@@ -1,3 +1,4 @@
+import { AnalyticsScopeService } from '../services/analytics-scope.service';
 import {
   BadRequestException,
   Controller,
@@ -33,6 +34,7 @@ class AutofixTimeseriesQueryDto extends RangeQueryDto {
 @CacheTTL(DASHBOARD_CACHE_TTL_MS)
 export class AutofixAnalyticsController {
   constructor(
+    private readonly analyticsScope: AnalyticsScopeService,
     private readonly autofixStats: AutofixStatsService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
@@ -61,7 +63,7 @@ export class AutofixAnalyticsController {
     return this.autofixStats.getStats({
       tenantId: ctx.tenantId,
       range: query.range,
-      agentName: query.agent_name,
+      agentScope: await this.analyticsScope.resolve(ctx.tenantId, query.agent_name),
     });
   }
 
@@ -71,7 +73,7 @@ export class AutofixAnalyticsController {
       tenantId: ctx.tenantId,
       range: query.range,
       by: query.by,
-      agentName: query.agent_name,
+      agentScope: await this.analyticsScope.resolve(ctx.tenantId, query.agent_name),
       failedOnly: query.failed_only === 'true',
     });
   }
@@ -89,7 +91,7 @@ export class AutofixAnalyticsController {
     return this.autofixStats.getPerProviderStats({
       tenantId: ctx.tenantId,
       range: query.range,
-      agentName: query.agent_name,
+      agentScope: await this.analyticsScope.resolve(ctx.tenantId, query.agent_name),
     });
   }
 
@@ -98,7 +100,7 @@ export class AutofixAnalyticsController {
     return this.autofixStats.getPerModelStats({
       tenantId: ctx.tenantId,
       range: query.range,
-      agentName: query.agent_name,
+      agentScope: await this.analyticsScope.resolve(ctx.tenantId, query.agent_name),
     });
   }
 }

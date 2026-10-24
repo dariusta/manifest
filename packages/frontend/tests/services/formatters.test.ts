@@ -46,6 +46,12 @@ describe('formatCost', () => {
     expect(formatCost(-0.01)).toBeNull();
     expect(formatCost(-9909)).toBeNull();
   });
+  it('returns null for non-finite input instead of "$NaN"', () => {
+    expect(formatCost(NaN)).toBeNull();
+    expect(formatCost(undefined as unknown as number)).toBeNull();
+    expect(formatCost(null as unknown as number)).toBe('$0.00');
+    expect(formatCost(Infinity)).toBeNull();
+  });
   it("returns '< $0.01' for sub-cent positive costs", () => {
     expect(formatCost(0.002836)).toBe('< $0.01');
     expect(formatCost(0.009)).toBe('< $0.01');

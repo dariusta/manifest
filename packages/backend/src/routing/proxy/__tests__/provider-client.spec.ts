@@ -1,12 +1,44 @@
+import { Buffer } from 'node:buffer';
 import { ProviderClient } from '../provider-client';
+import { messagesToChatCompletionsRequest } from '../anthropic-messages-adapter';
 import { ManifestError } from '../../../common/errors/manifest-error';
 import { buildCustomEndpoint, buildEndpointOverride } from '../provider-endpoints';
 import { toChatCompletionsRequest } from '../responses-adapter';
 import { ThinkingBlockCache, type ThinkingBlockRouteContext } from '../thinking-block-cache';
+import { ModelsDevReasoningCatalog } from '../reasoning-model-catalog';
 import type { ProviderModelRegistryService } from '../../../model-discovery/provider-model-registry.service';
 
 const mockFetch = jest.fn();
 (globalThis as unknown as { fetch: typeof fetch }).fetch = mockFetch;
+
+function kiroStringHeader(name: string, value: string): Buffer {
+  const nameBytes = Buffer.from(name);
+  const valueBytes = Buffer.from(value);
+  const valueLength = Buffer.alloc(2);
+  valueLength.writeUInt16BE(valueBytes.length, 0);
+  return Buffer.concat([
+    Buffer.from([nameBytes.length]),
+    nameBytes,
+    Buffer.from([7]),
+    valueLength,
+    valueBytes,
+  ]);
+}
+
+function kiroEventFrame(eventType: string, payload: unknown, messageType = 'event'): Uint8Array {
+  const headers = Buffer.concat([
+    kiroStringHeader(':message-type', messageType),
+    kiroStringHeader(':event-type', eventType),
+  ]);
+  const payloadBytes = Buffer.from(JSON.stringify(payload));
+  const totalLength = 12 + headers.length + payloadBytes.length + 4;
+  const frame = Buffer.alloc(totalLength);
+  frame.writeUInt32BE(totalLength, 0);
+  frame.writeUInt32BE(headers.length, 4);
+  headers.copy(frame, 12);
+  payloadBytes.copy(frame, 12 + headers.length);
+  return frame;
+}
 
 describe('ProviderClient', () => {
   const previousMode = process.env['MANIFEST_MODE'];
@@ -673,6 +705,8 @@ describe('ProviderClient', () => {
       'openai.gpt-5.6-sol',
       'openai.gpt-5.6-terra',
       'openai.gpt-5.6-luna',
+      'openai.gpt-6-sol',
+      'openai.gpt-6-luna',
     ])('routes Bedrock %s through the namespaced Responses API', async (model) => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
@@ -730,6 +764,190 @@ describe('ProviderClient', () => {
       expect(sentBody.stream).toBe(false);
     });
 
+    it('sends catalogued CRIS profiles to Bedrock Runtime Chat Completions with max_completion_tokens', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      const result = await client.forward({
+        provider: 'bedrock',
+        apiKey: 'bedrock-api-key-test',
+        model: 'us.openai.gpt-6-sol',
+        body: { ...body, max_tokens: 1024 },
+        stream: false,
+        apiMode: 'chat_completions',
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/chat/completions',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer bedrock-api-key-test',
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.model).toBe('us.openai.gpt-6-sol');
+      expect(sentBody.max_completion_tokens).toBe(1024);
+      expect(sentBody.max_tokens).toBeUndefined();
+      expect(sentBody.prompt_cache_key).toBeUndefined();
+      expect(result.isChatGpt).toBe(false);
+    });
+
+    it('drops max_tokens when a Bedrock Runtime GPT request sends both caps', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await client.forward({
+        provider: 'bedrock',
+        apiKey: 'bedrock-api-key-test',
+        model: 'global.openai.gpt-6-luna',
+        body: { ...body, max_tokens: 1024, max_completion_tokens: 512 },
+        stream: false,
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.max_completion_tokens).toBe(512);
+      expect(sentBody.max_tokens).toBeUndefined();
+    });
+
+    describe('reasoning_effort on Bedrock Runtime GPT Chat Completions', () => {
+      // Runtime applies a default reasoning effort and then rejects it next to
+      // function tools (mnfst/llm-gateway#3065).
+      const tools = [
+        {
+          type: 'function',
+          function: { name: 'get_weather', parameters: { type: 'object', properties: {} } },
+        },
+      ];
+      const sentBodyFor = async (model: string, extra: Record<string, unknown>) => {
+        mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+        await client.forward({
+          provider: 'bedrock',
+          apiKey: 'bedrock-api-key-test',
+          model,
+          body: { ...body, ...extra },
+          stream: false,
+          apiMode: 'chat_completions',
+        });
+        return JSON.parse(mockFetch.mock.calls[0][1].body);
+      };
+
+      it('sends reasoning_effort none when the caller sent none', async () => {
+        const sent = await sentBodyFor('us.openai.gpt-6-luna', { tools });
+
+        expect(sent.reasoning_effort).toBe('none');
+        expect(sent.tools).toEqual(tools);
+      });
+
+      it('sends reasoning_effort none for an Anthropic Messages request with tools', async () => {
+        mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+        const messagesBody = {
+          max_tokens: 1024,
+          messages: [{ role: 'user', content: 'Hello' }],
+          tools: [{ name: 'get_weather', input_schema: { type: 'object', properties: {} } }],
+        };
+        await client.forward({
+          provider: 'bedrock',
+          apiKey: 'bedrock-api-key-test',
+          model: 'us.openai.gpt-6-luna',
+          body: messagesBody,
+          resolveChatBody: async () => messagesToChatCompletionsRequest(messagesBody),
+          stream: false,
+          apiMode: 'messages',
+        });
+
+        expect(mockFetch.mock.calls[0][0]).toBe(
+          'https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/chat/completions',
+        );
+        const sent = JSON.parse(mockFetch.mock.calls[0][1].body);
+        expect(sent.tools[0].type).toBe('function');
+        expect(sent.reasoning_effort).toBe('none');
+      });
+
+      it.each([{ tools }, {}])('forwards the caller reasoning_effort (%o)', async (extra) => {
+        const sent = await sentBodyFor('us.openai.gpt-6-luna', {
+          ...extra,
+          reasoning_effort: 'high',
+        });
+
+        expect(sent.reasoning_effort).toBe('high');
+      });
+
+      it('leaves reasoning_effort out when neither tools nor an effort are sent', async () => {
+        const sent = await sentBodyFor('us.openai.gpt-6-luna', {});
+
+        expect(sent.reasoning_effort).toBeUndefined();
+      });
+
+      it('leaves reasoning_effort out for Runtime models outside the GPT family', async () => {
+        const sent = await sentBodyFor('global.moonshotai.kimi-k3', { tools });
+
+        expect(sent.reasoning_effort).toBeUndefined();
+      });
+    });
+
+    it('keeps max_tokens for Bedrock Runtime models that accept it', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await client.forward({
+        provider: 'bedrock',
+        apiKey: 'bedrock-api-key-test',
+        model: 'global.moonshotai.kimi-k3',
+        body: { ...body, max_tokens: 1024 },
+        stream: false,
+      });
+
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        'https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/chat/completions',
+      );
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.max_tokens).toBe(1024);
+      expect(sentBody.max_completion_tokens).toBeUndefined();
+    });
+
+    it('adds a stable prompt_cache_key and stream usage on Bedrock Runtime Chat Completions', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await client.forward({
+        provider: 'bedrock',
+        apiKey: 'bedrock-api-key-test',
+        model: 'us.openai.gpt-6-luna',
+        body,
+        providerCacheKey: 'v1:tenant-agent-session-digest',
+        stream: true,
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.prompt_cache_key).toMatch(/^manifest-[a-f0-9]{32}$/);
+      expect(sentBody.prompt_cache_key).not.toContain('tenant-agent-session');
+      expect(sentBody.stream_options).toEqual({ include_usage: true });
+    });
+
+    it('forwards Responses requests to Bedrock Runtime natively with a stable prompt_cache_key', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      const result = await client.forward({
+        provider: 'bedrock',
+        apiKey: 'bedrock-api-key-test',
+        model: 'global.moonshotai.kimi-k3',
+        body: { input: 'Hello', max_output_tokens: 64 },
+        providerCacheKey: 'v1:tenant-agent-session-digest',
+        stream: false,
+        apiMode: 'responses',
+      });
+
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        'https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/responses',
+      );
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.model).toBe('global.moonshotai.kimi-k3');
+      expect(sentBody.input).toBe('Hello');
+      expect(sentBody.max_output_tokens).toBe(64);
+      expect(sentBody.prompt_cache_key).toMatch(/^manifest-[a-f0-9]{32}$/);
+      expect(result.isResponses).toBe(true);
+      expect(result.isChatGpt).toBe(false);
+    });
+
     it('routes Bedrock Anthropic models through the Messages API', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
@@ -760,6 +978,249 @@ describe('ProviderClient', () => {
       ]);
       expect(result.isAnthropic).toBe(true);
       expect(result.wireApiMode).toBe('messages');
+    });
+
+    it.each(['us.anthropic.claude-sonnet-5-5', 'bedrock/us.anthropic.claude-sonnet-5-5'])(
+      'sends the Claude CRIS profile %s to Bedrock Runtime Messages with the scope kept in the model',
+      async (model) => {
+        mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+        const result = await client.forward({
+          provider: 'bedrock',
+          apiKey: 'bedrock-api-key-test',
+          model,
+          body,
+          stream: false,
+        });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          'https://bedrock-runtime.us-east-1.amazonaws.com/anthropic/v1/messages',
+          expect.objectContaining({
+            method: 'POST',
+            headers: {
+              'x-api-key': 'bedrock-api-key-test',
+              'Content-Type': 'application/json',
+              'anthropic-version': '2023-06-01',
+            },
+          }),
+        );
+        const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+        expect(sentBody.model).toBe('us.anthropic.claude-sonnet-5-5');
+        expect(result.isAnthropic).toBe(true);
+        expect(result.wireApiMode).toBe('messages');
+      },
+    );
+
+    it('keeps the plain Claude id on Bedrock Mantle next to the CRIS profile route', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await client.forward({
+        provider: 'bedrock',
+        apiKey: 'bedrock-api-key-test',
+        model: 'anthropic.claude-sonnet-5',
+        body,
+        stream: false,
+      });
+
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        'https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages',
+      );
+    });
+
+    describe('conversation cache breakpoint on Anthropic-format upstreams (#3023)', () => {
+      const conversation = {
+        messages: [
+          { role: 'system', content: 'Be concise.' },
+          { role: 'user', content: 'turn 1' },
+          { role: 'assistant', content: 'answer 1' },
+          { role: 'user', content: 'turn 2' },
+        ],
+      };
+      const nativeConversation = {
+        max_tokens: 1024,
+        system: 'Be concise.',
+        messages: conversation.messages.slice(1),
+      };
+      const cache = { type: 'ephemeral' };
+
+      async function sentBodyFor(opts: Partial<Parameters<ProviderClient['forward']>[0]>) {
+        mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+        await client.forward({
+          provider: 'bedrock',
+          apiKey: 'test-key',
+          model: 'anthropic.claude-sonnet-5',
+          body: structuredClone(conversation),
+          stream: false,
+          ...opts,
+        });
+        return JSON.parse(mockFetch.mock.calls[0][1].body);
+      }
+
+      it.each([
+        ['translated Chat Completions', {}],
+        [
+          'native Messages',
+          { apiMode: 'messages' as const, body: structuredClone(nativeConversation) },
+        ],
+      ])('marks the last message for Bedrock Claude from %s', async (_label, opts) => {
+        const sent = await sentBodyFor(opts);
+
+        expect(sent.cache_control).toBeUndefined();
+        expect(sent.messages.at(-1)).toEqual({
+          role: 'user',
+          content: [{ type: 'text', text: 'turn 2', cache_control: cache }],
+        });
+        expect(sent.system).toEqual([{ type: 'text', text: 'Be concise.', cache_control: cache }]);
+      });
+
+      it('marks the last message for Bedrock Claude in a configured region', async () => {
+        const sent = await sentBodyFor({
+          customEndpoint: buildEndpointOverride(
+            'https://bedrock-mantle.eu-west-1.api.aws',
+            'bedrock-anthropic',
+          ),
+        });
+
+        expect(mockFetch.mock.calls[0][0]).toBe(
+          'https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1/messages',
+        );
+        expect(sent.messages.at(-1).content).toEqual([
+          { type: 'text', text: 'turn 2', cache_control: cache },
+        ]);
+      });
+
+      it('marks the last message for a custom Anthropic-kind provider', async () => {
+        const sent = await sentBodyFor({
+          provider: 'custom:11111111-1111-1111-1111-111111111111',
+          model: 'claude-sonnet-5',
+          customEndpoint: buildCustomEndpoint('https://claude-proxy.example.com', 'anthropic'),
+        });
+
+        expect(sent.cache_control).toBeUndefined();
+        expect(sent.messages.at(-1).content).toEqual([
+          { type: 'text', text: 'turn 2', cache_control: cache },
+        ]);
+      });
+
+      it('keeps top-level automatic caching, not a message breakpoint, for native Anthropic', async () => {
+        const sent = await sentBodyFor({ provider: 'anthropic', model: 'claude-sonnet-5' });
+
+        expect(sent.cache_control).toEqual(cache);
+        expect(sent.messages.at(-1).content).toEqual([{ type: 'text', text: 'turn 2' }]);
+      });
+
+      it('does not mark the conversation for a non-Claude model on an Anthropic-format upstream', async () => {
+        const sent = await sentBodyFor({
+          provider: 'custom:11111111-1111-1111-1111-111111111111',
+          model: 'MiniMax-M3',
+          customEndpoint: buildCustomEndpoint('https://minimax-proxy.example.com', 'anthropic'),
+        });
+
+        expect(sent.messages.at(-1).content).toEqual([{ type: 'text', text: 'turn 2' }]);
+      });
+
+      it('leaves a native Messages caller that planned its own cache as it is', async () => {
+        const planned = {
+          ...nativeConversation,
+          messages: [
+            { role: 'user', content: [{ type: 'text', text: 'turn 1', cache_control: cache }] },
+            ...nativeConversation.messages.slice(1),
+          ],
+        };
+
+        const sent = await sentBodyFor({ apiMode: 'messages', body: planned });
+
+        expect(sent.messages[0].content).toEqual([
+          { type: 'text', text: 'turn 1', cache_control: cache },
+        ]);
+        expect(sent.messages.at(-1).content).toBe('turn 2');
+      });
+
+      it('still marks a native Messages caller that only cached its system prompt', async () => {
+        const sent = await sentBodyFor({
+          apiMode: 'messages',
+          body: {
+            ...nativeConversation,
+            system: [{ type: 'text', text: 'Be concise.', cache_control: cache }],
+          },
+        });
+
+        expect(sent.messages.at(-1).content).toEqual([
+          { type: 'text', text: 'turn 2', cache_control: cache },
+        ]);
+      });
+
+      it('does not read a tool schema property named cache_control as a breakpoint', async () => {
+        const sent = await sentBodyFor({
+          apiMode: 'messages',
+          body: {
+            ...nativeConversation,
+            tools: [
+              {
+                name: 'set_cache',
+                input_schema: {
+                  type: 'object',
+                  properties: { cache_control: { type: 'string' } },
+                },
+              },
+            ],
+          },
+        });
+
+        expect(sent.messages.at(-1).content).toEqual([
+          { type: 'text', text: 'turn 2', cache_control: cache },
+        ]);
+      });
+
+      it('still marks a Chat Completions caller whose cache_control translation drops', async () => {
+        const marked = {
+          messages: [
+            conversation.messages[0],
+            { role: 'user', content: [{ type: 'text', text: 'turn 1', cache_control: cache }] },
+            ...conversation.messages.slice(2),
+          ],
+        };
+
+        const sent = await sentBodyFor({ body: marked });
+
+        expect(sent.messages.at(-1).content).toEqual([
+          { type: 'text', text: 'turn 2', cache_control: cache },
+        ]);
+      });
+
+      it('does not mark a lone message without tools, which is usually a one-shot call', async () => {
+        const sent = await sentBodyFor({
+          body: { messages: [{ role: 'user', content: 'Name this chat.' }] },
+        });
+
+        expect(sent.messages).toEqual([
+          { role: 'user', content: [{ type: 'text', text: 'Name this chat.' }] },
+        ]);
+      });
+
+      it('marks a lone message when the request carries tools', async () => {
+        const sent = await sentBodyFor({
+          body: {
+            messages: [{ role: 'user', content: 'List the files.' }],
+            tools: [
+              {
+                type: 'function',
+                function: { name: 'ls', parameters: { type: 'object', properties: {} } },
+              },
+            ],
+          },
+        });
+
+        expect(sent.messages[0].content).toEqual([
+          { type: 'text', text: 'List the files.', cache_control: cache },
+        ]);
+      });
+
+      it('does not mark messages for OpenAI-format upstreams', async () => {
+        const sent = await sentBodyFor({ provider: 'deepseek', model: 'deepseek-chat' });
+
+        expect(sent.messages.at(-1)).toEqual({ role: 'user', content: 'turn 2' });
+      });
     });
 
     it('builds correct URL for moonshot', async () => {
@@ -1203,6 +1664,94 @@ describe('ProviderClient', () => {
       expect(sentBody.safety_identifier).toBeUndefined();
     });
 
+    it('translates adaptive Anthropic thinking to the OpenAI default reasoning effort', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+      const chatBody = {
+        messages: [{ role: 'user', content: 'hi' }],
+        thinking: { type: 'adaptive' },
+      };
+
+      await client.forward({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'gpt-5.6-sol',
+        body: { model: 'gpt-5.6-sol', ...chatBody },
+        resolveChatBody: async () => chatBody,
+        stream: false,
+        apiMode: 'messages',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody).not.toHaveProperty('thinking');
+      expect(sentBody).not.toHaveProperty('reasoning_effort');
+    });
+
+    it('translates disabled Anthropic thinking to reasoning_effort none for a reasoning model', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+      const reasoningClient = new ProviderClient(undefined, undefined, undefined, {
+        isReasoningModel: () => true,
+      } as unknown as ModelsDevReasoningCatalog);
+      const chatBody = {
+        messages: [{ role: 'user', content: 'hi' }],
+        thinking: { type: 'disabled' },
+      };
+
+      await reasoningClient.forward({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'gpt-5.6-sol',
+        body: { model: 'gpt-5.6-sol', ...chatBody },
+        resolveChatBody: async () => chatBody,
+        stream: false,
+        apiMode: 'messages',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody).not.toHaveProperty('thinking');
+      expect(sentBody.reasoning_effort).toBe('none');
+    });
+
+    it('drops disabled Anthropic thinking without an effort tier for a non-reasoning model', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+      const chatBody = {
+        messages: [{ role: 'user', content: 'hi' }],
+        thinking: { type: 'disabled' },
+      };
+
+      await client.forward({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+        body: { model: 'gpt-4o', ...chatBody },
+        resolveChatBody: async () => chatBody,
+        stream: false,
+        apiMode: 'messages',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody).not.toHaveProperty('thinking');
+      expect(sentBody).not.toHaveProperty('reasoning_effort');
+    });
+
+    it('leaves a caller-sent thinking param alone outside messages mode', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await client.forward({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'gpt-5.6-sol',
+        body: {
+          model: 'gpt-5.6-sol',
+          messages: [{ role: 'user', content: 'hi' }],
+          thinking: { type: 'adaptive' },
+        },
+        stream: false,
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.thinking).toEqual({ type: 'adaptive' });
+    });
+
     it('forwards Anthropic-Messages inbound to an Anthropic upstream without OpenAI translation (issue #1886)', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
@@ -1339,9 +1888,15 @@ describe('ProviderClient', () => {
       const sent = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(sent.tool_choice).toBeUndefined();
       expect(sent.output_config).toEqual({
-        format: { type: 'json_schema', schema },
+        format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            properties: { title: { type: 'string' } },
+            additionalProperties: false,
+          },
+        },
       });
-      expect(result.structuredOutputToolName).toBeUndefined();
       expect(result.responsesTextFormat).toEqual({
         type: 'json_schema',
         name: 'patient_summary',
@@ -1375,10 +1930,9 @@ describe('ProviderClient', () => {
       expect(sent.output_config).toEqual({
         format: {
           type: 'json_schema',
-          schema: { type: 'object' },
+          schema: { type: 'object', additionalProperties: false },
         },
       });
-      expect(result.structuredOutputToolName).toBeUndefined();
       expect(result.responsesTextFormat).toEqual({ type: 'json_object' });
     });
 
@@ -1403,8 +1957,32 @@ describe('ProviderClient', () => {
 
       const sent = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(sent.tool_choice).toBeUndefined();
-      expect(result.structuredOutputToolName).toBeUndefined();
       expect(result.responsesTextFormat).toBeUndefined();
+    });
+
+    it('forwards a forced client tool on structured Responses routed to Anthropic', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await client.forward({
+        provider: 'anthropic',
+        apiKey: 'sk-ant-test',
+        model: 'claude-sonnet-4-5-20250929',
+        body: {
+          input: 'Look up the patient.',
+          text: { format: { type: 'json_object' } },
+        },
+        resolveChatBody: async () => ({
+          messages: [{ role: 'user', content: 'Look up the patient.' }],
+          tools: [{ type: 'function', function: { name: 'lookup_patient', parameters: {} } }],
+          tool_choice: { type: 'function', function: { name: 'lookup_patient' } },
+          response_format: { type: 'json_object' },
+        }),
+        stream: false,
+        apiMode: 'responses',
+      });
+
+      const sent = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sent.tool_choice).toEqual({ type: 'tool', name: 'lookup_patient' });
     });
 
     it('forwards Responses image inputs to Anthropic image content blocks', async () => {
@@ -1827,7 +2405,7 @@ describe('ProviderClient', () => {
       expect(result.wireRequestBody).toEqual(JSON.parse(mockFetch.mock.calls[0][1].body));
     });
 
-    it('adds alt=sse for streaming', async () => {
+    it('streams through streamGenerateContent with alt=sse', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
       await client.forward({
@@ -1839,7 +2417,9 @@ describe('ProviderClient', () => {
       });
 
       const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain('alt=sse');
+      expect(url).toBe(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse',
+      );
     });
 
     it('converts request body to Gemini format', async () => {
@@ -2032,6 +2612,60 @@ describe('ProviderClient', () => {
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(sentBody.reasoning).toEqual({ effort: 'xhigh', summary: 'auto' });
+    });
+
+    it('translates disabled Anthropic thinking to Responses reasoning none', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+      const reasoningClient = new ProviderClient(undefined, undefined, undefined, {
+        isReasoningModel: () => true,
+      } as unknown as ModelsDevReasoningCatalog);
+      const chatBody = {
+        messages: [{ role: 'user', content: 'hi' }],
+        thinking: { type: 'disabled' },
+      };
+
+      await reasoningClient.forward({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'o1-pro',
+        body: {
+          model: 'o1-pro',
+          messages: [{ role: 'user', content: 'hi' }],
+          thinking: { type: 'disabled' },
+        },
+        resolveChatBody: async () => chatBody,
+        stream: false,
+        apiMode: 'messages',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.reasoning).toEqual({ effort: 'none' });
+      expect(sentBody).not.toHaveProperty('thinking');
+    });
+
+    it('does not translate disabled Anthropic thinking to Responses for a non-reasoning model', async () => {
+      mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await client.forward({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'o1-pro',
+        body: {
+          model: 'o1-pro',
+          messages: [{ role: 'user', content: 'hi' }],
+          thinking: { type: 'disabled' },
+        },
+        resolveChatBody: async () => ({
+          messages: [{ role: 'user', content: 'hi' }],
+          thinking: { type: 'disabled' },
+        }),
+        stream: false,
+        apiMode: 'messages',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody).not.toHaveProperty('reasoning');
+      expect(sentBody).not.toHaveProperty('thinking');
     });
 
     it('sets isChatGpt=false for regular OpenAI api_key auth', async () => {
@@ -2329,7 +2963,7 @@ describe('ProviderClient', () => {
     });
   });
 
-  describe('resolveEndpoint - Copilot Responses-only routing (mnfst/manifest#1849)', () => {
+  describe('resolveEndpoint - Copilot Responses-only routing (mnfst/llm-gateway#1849)', () => {
     // GitHub Copilot serves Codex variants only at /responses; /chat/completions
     // returns "Unsupported API for model". Mirrors the OpenAI Responses-only swap.
     const copilotResponsesOnlyModels = [
@@ -2549,7 +3183,7 @@ describe('ProviderClient', () => {
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
       // Forced upstream so handleNonStreamResponse's SSE collector remains
-      // the single source of truth — see mnfst/manifest#1849.
+      // the single source of truth — see mnfst/llm-gateway#1849.
       expect(sentBody.stream).toBe(true);
     });
 
@@ -2938,6 +3572,99 @@ describe('ProviderClient', () => {
         'Hello from Responses',
       );
       expect(resolveChatBody).toHaveBeenCalledTimes(1);
+    });
+
+    it('forwards tools and returns Kiro tool calls end to end', async () => {
+      mockFetch.mockResolvedValue(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                kiroEventFrame('toolUseEvent', {
+                  toolUseId: 'call_1',
+                  name: 'bash',
+                  input: '{"command":"ls"}',
+                  stop: true,
+                }),
+              );
+              controller.close();
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+      const result = await client.forward({
+        provider: 'kiro',
+        apiKey: 'ksk_test',
+        model: 'kiro/auto',
+        body: {
+          messages: [
+            { role: 'user', content: 'List files' },
+            {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_1',
+                  type: 'function',
+                  function: { name: 'bash', arguments: '{"command":"ls"}' },
+                },
+              ],
+            },
+            { role: 'tool', tool_call_id: 'call_1', content: 'a.txt' },
+          ],
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'bash',
+                parameters: {
+                  type: 'object',
+                  properties: { command: { type: 'string' } },
+                  additionalProperties: false,
+                },
+              },
+            },
+          ],
+        },
+        stream: true,
+        authType: 'subscription',
+      });
+
+      const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(sentBody.conversationState.history).toEqual([
+        { userInputMessage: { content: 'List files', origin: 'KIRO_CLI' } },
+        {
+          assistantResponseMessage: {
+            content: '...',
+            toolUses: [{ toolUseId: 'call_1', name: 'bash', input: { command: 'ls' } }],
+          },
+        },
+      ]);
+      const current = sentBody.conversationState.currentMessage.userInputMessage;
+      expect(current.userInputMessageContext.tools).toEqual([
+        {
+          toolSpecification: {
+            name: 'bash',
+            description: 'Tool: bash',
+            inputSchema: {
+              json: {
+                type: 'object',
+                properties: { command: { type: 'string' } },
+              },
+            },
+          },
+        },
+      ]);
+      expect(current.userInputMessageContext.toolResults).toEqual([
+        { toolUseId: 'call_1', status: 'success', content: [{ text: 'a.txt' }] },
+      ]);
+
+      const text = await result.response.text();
+      expect(text).toContain('"id":"call_1"');
+      expect(text).toContain('"name":"bash"');
+      expect(text).toContain('"finish_reason":"tool_calls"');
     });
   });
 
@@ -4226,7 +4953,7 @@ describe('ProviderClient', () => {
     });
   });
 
-  describe('Body sanitization for non-OpenAI providers', () => {
+  describe('Body wire normalization for non-OpenAI providers', () => {
     const bodyWithOpenAiFields = {
       messages: [{ role: 'user', content: 'Hello' }],
       temperature: 0.7,
@@ -4348,7 +5075,7 @@ describe('ProviderClient', () => {
       expect(result.wireRequestBody).toEqual(sentBody);
     });
 
-    it('caps DeepSeek max_tokens at the provider limit', async () => {
+    it('preserves DeepSeek max_tokens above a possible provider limit', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
       await client.forward({
@@ -4360,10 +5087,10 @@ describe('ProviderClient', () => {
       });
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(sentBody.max_tokens).toBe(8192);
+      expect(sentBody.max_tokens).toBe(12000);
     });
 
-    it('drops non-positive DeepSeek max_tokens values', async () => {
+    it('preserves non-positive DeepSeek max_tokens values for Autofix', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
       await client.forward({
@@ -4375,10 +5102,10 @@ describe('ProviderClient', () => {
       });
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(sentBody.max_tokens).toBeUndefined();
+      expect(sentBody.max_tokens).toBe(0);
     });
 
-    it('normalizes string DeepSeek max_tokens values', async () => {
+    it('preserves string DeepSeek max_tokens values for Autofix', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
       await client.forward({
@@ -4390,10 +5117,10 @@ describe('ProviderClient', () => {
       });
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(sentBody.max_tokens).toBe(8192);
+      expect(sentBody.max_tokens).toBe('9000');
     });
 
-    it('strips reasoning_content for Mistral assistant messages without mutating the input', async () => {
+    it('preserves reasoning_content for Mistral Autofix without mutating the input', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
       const bodyWithReasoningContent = makeBodyWithReasoningContent();
 
@@ -4406,7 +5133,7 @@ describe('ProviderClient', () => {
       });
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(sentBody.messages[1].reasoning_content).toBeUndefined();
+      expect(sentBody.messages[1].reasoning_content).toBe('Detailed internal reasoning');
       expect(bodyWithReasoningContent.messages[1].reasoning_content).toBe(
         'Detailed internal reasoning',
       );
@@ -4428,7 +5155,7 @@ describe('ProviderClient', () => {
       expect(sentBody.messages[1].reasoning_content).toBe('Detailed internal reasoning');
     });
 
-    it('strips reasoning_content for native OpenAI targets', async () => {
+    it('preserves reasoning_content for native OpenAI Autofix', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
       const bodyWithReasoningContent = makeBodyWithReasoningContent();
 
@@ -4441,10 +5168,10 @@ describe('ProviderClient', () => {
       });
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(sentBody.messages[1].reasoning_content).toBeUndefined();
+      expect(sentBody.messages[1].reasoning_content).toBe('Detailed internal reasoning');
     });
 
-    it('strips reasoning_content for non-DeepSeek OpenRouter targets', async () => {
+    it('preserves reasoning_content for non-DeepSeek OpenRouter targets', async () => {
       mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
       const bodyWithReasoningContent = makeBodyWithReasoningContent();
 
@@ -4457,7 +5184,7 @@ describe('ProviderClient', () => {
       });
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(sentBody.messages[1].reasoning_content).toBeUndefined();
+      expect(sentBody.messages[1].reasoning_content).toBe('Detailed internal reasoning');
     });
 
     it('preserves reasoning_content for DeepSeek models on OpenRouter', async () => {
@@ -4584,7 +5311,7 @@ describe('ProviderClient', () => {
 
       const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(sentBody.messages[0]).toBe('unexpected-entry');
-      expect(sentBody.messages[1].reasoning_content).toBeUndefined();
+      expect(sentBody.messages[1].reasoning_content).toBe('Detailed internal reasoning');
     });
 
     it('normalizes non-compliant tool call ids for Mistral while preserving references', async () => {
@@ -5465,7 +6192,7 @@ describe('ProviderClient', () => {
   });
 });
 
-describe('ProviderClient reasoning catalog', () => {
+describe('ProviderClient provider-specific message fields', () => {
   const previousMode = process.env['MANIFEST_MODE'];
 
   beforeEach(() => {
@@ -5490,24 +6217,7 @@ describe('ProviderClient reasoning catalog', () => {
     ],
   };
 
-  it('forwards reasoning_content to Zen when the injected catalog vouches for the model', async () => {
-    const catalogClient = new ProviderClient(undefined, undefined, undefined, {
-      isReasoningModel: () => true,
-    });
-
-    await catalogClient.forward({
-      provider: 'opencode-zen',
-      apiKey: 'zen-token',
-      model: 'opencode-zen/big-pickle',
-      body: reasoningBody,
-      stream: false,
-    });
-
-    const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(sentBody.messages[0].reasoning_content).toBe('upstream thinking');
-  });
-
-  it('strips reasoning_content for Zen when no catalog is wired', async () => {
+  it('preserves reasoning_content for Zen without consulting model capabilities', async () => {
     const bareClient = new ProviderClient();
 
     await bareClient.forward({
@@ -5519,6 +6229,6 @@ describe('ProviderClient reasoning catalog', () => {
     });
 
     const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(sentBody.messages[0].reasoning_content).toBeUndefined();
+    expect(sentBody.messages[0].reasoning_content).toBe('upstream thinking');
   });
 });

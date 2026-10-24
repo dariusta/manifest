@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@solidjs/testing-library';
-import PlanPicker from '../../src/components/PlanPicker';
+import PlanPicker, { FREE_PLAN_ENDS_NOTE } from '../../src/components/PlanPicker';
 import { FREE_REQUEST_LIMIT_LABEL } from '../../src/services/billing-display';
 
 describe('PlanPicker', () => {
@@ -28,6 +28,7 @@ describe('PlanPicker', () => {
     fireEvent.click(cards[0]);
 
     expect(screen.getByText('1,234 used this month')).toBeDefined();
+    expect(screen.getByText(FREE_PLAN_ENDS_NOTE)).toBeDefined();
     expect(screen.getByText(`${FREE_REQUEST_LIMIT_LABEL} routed requests / month`)).toBeDefined();
     expect(screen.getByText('Community support via Discord')).toBeDefined();
 

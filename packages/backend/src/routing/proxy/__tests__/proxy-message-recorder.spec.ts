@@ -231,6 +231,72 @@ describe('ProxyMessageRecorder', () => {
       expect(emitMock).toHaveBeenCalledWith('tenant-1', 'message', 'user-1');
     });
 
+    it('cancels only still-pending Attempts whose pending row was written', async () => {
+      const written: ProviderAttemptRef = {
+        id: 'attempt-left-pending',
+        attemptNumber: 1,
+        startedAtMs: 1_000,
+        startedAt: '1970-01-01T00:00:01.000Z',
+        completedAtMs: 1_250,
+        pendingWrite: Promise.resolve(true),
+      };
+      const inFlight: ProviderAttemptRef = {
+        id: 'attempt-in-flight',
+        attemptNumber: 2,
+        startedAtMs: Date.now(),
+        startedAt: new Date().toISOString(),
+        pendingWrite: Promise.resolve(true),
+      };
+      const neverInserted: ProviderAttemptRef = {
+        id: 'attempt-insert-failed',
+        attemptNumber: 3,
+        startedAtMs: 1_000,
+        startedAt: '1970-01-01T00:00:01.000Z',
+        pendingWrite: Promise.reject(new Error('insert failed')),
+      };
+
+      updateMock.mockResolvedValue({});
+
+      await recorder.cancelPendingProviderAttempts([written, inFlight, neverInserted]);
+
+      expect(updateMock).toHaveBeenCalledTimes(2);
+      expect(updateMock).toHaveBeenCalledWith(
+        { id: 'attempt-left-pending', status: 'pending' },
+        {
+          status: 'cancelled',
+          error_message: null,
+          error_code: null,
+          error_http_status: null,
+          duration_ms: 250,
+        },
+      );
+      expect(updateMock).toHaveBeenCalledWith(
+        { id: 'attempt-in-flight', status: 'pending' },
+        expect.objectContaining({ status: 'cancelled', duration_ms: expect.any(Number) }),
+      );
+    });
+
+    it('keeps cancelling the other Attempts when one update fails', async () => {
+      const attempt = (id: string): ProviderAttemptRef => ({
+        id,
+        attemptNumber: 1,
+        startedAtMs: 1_000,
+        startedAt: '1970-01-01T00:00:01.000Z',
+        completedAtMs: 1_100,
+        pendingWrite: Promise.resolve(true),
+      });
+      updateMock.mockRejectedValueOnce(new Error('db down')).mockResolvedValueOnce({});
+
+      await expect(
+        recorder.cancelPendingProviderAttempts([attempt('first'), attempt('second')]),
+      ).resolves.toBeUndefined();
+
+      expect(updateMock).toHaveBeenCalledWith(
+        { id: 'second', status: 'pending' },
+        expect.objectContaining({ status: 'cancelled' }),
+      );
+    });
+
     it('updates the same pending row with terminal status and measured duration', async () => {
       const attempt: ProviderAttemptRef = {
         id: 'attempt-1',
@@ -319,6 +385,63 @@ describe('ProxyMessageRecorder', () => {
         input_tokens: 0,
         output_tokens: 0,
       });
+    });
+
+    it('stamps the Autofix retry columns when the fallback hop was healed', async () => {
+      await recorder.recordFallbackSuccess(ctx, 'deepseek-flash', 'standard', {
+        fallbackFromModel: 'gpt-4o',
+        fallbackIndex: 0,
+        timestamp: new Date().toISOString(),
+        authType: 'api_key',
+        fallbackAutofix: {
+          groupId: 'group-1',
+          outcome: 'healed',
+          original_http_status: 400,
+          chain: [
+            {
+              attempt: 0,
+              origin: 'original',
+              request: {},
+              http_status: 400,
+              issue_id: 'issue-1',
+              patch_id: 'patch-1',
+              operations: [{ type: 'drop_param' }],
+            },
+            { attempt: 1, origin: 'autofix', request: {}, http_status: 200 },
+          ],
+        },
+      });
+
+      expect(insertMock.mock.calls[0][0]).toMatchObject({
+        autofix_applied: true,
+        autofix_group_id: 'group-1',
+        autofix_role: 'retry',
+      });
+    });
+
+    it('does not stamp the primary Autofix record on an ordinary fallback success', async () => {
+      // Regression: a failed primary Autofix that later fell back must not leak
+      // its retry metadata onto the winning fallback's row.
+      await recorder.recordFallbackSuccess(ctx, 'gpt-4o', 'standard', {
+        fallbackFromModel: 'claude-opus',
+        fallbackIndex: 0,
+        timestamp: new Date().toISOString(),
+        authType: 'api_key',
+        autofix: {
+          groupId: 'primary-group',
+          outcome: 'exhausted',
+          original_http_status: 400,
+          chain: [
+            { attempt: 0, origin: 'original', request: {}, http_status: 400 },
+            { attempt: 1, origin: 'autofix', request: {}, http_status: 400 },
+          ],
+        },
+      });
+
+      const row = insertMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(row.autofix_applied).toBeUndefined();
+      expect(row.autofix_group_id).toBeUndefined();
+      expect(row.autofix_role).toBeUndefined();
     });
 
     it('inserts when only prompt_tokens is non-zero', async () => {
@@ -764,6 +887,33 @@ describe('ProxyMessageRecorder', () => {
       });
     });
 
+    it('stamps the routing classification of a post-routing failure without claiming a provider', async () => {
+      await recorder.recordManifestBlockedRequest(ctx, {
+        errorMessage: 'adapter bug',
+        errorCode: 'M500',
+        reason: 'manifest_internal_error',
+        httpStatus: 500,
+        routing: {
+          tier: 'standard',
+          specificityCategory: 'coding',
+          headerTierId: 'header-tier-1',
+          headerTierName: 'Program Weeks',
+          headerTierColor: 'indigo',
+        },
+      });
+
+      expect(insertMock.mock.calls[0][0]).toMatchObject({
+        error_code: 'M500',
+        provider: null,
+        auth_type: null,
+        routing_tier: 'standard',
+        specificity_category: 'coding',
+        header_tier_id: 'header-tier-1',
+        header_tier_name: 'Program Weeks',
+        header_tier_color: 'indigo',
+      });
+    });
+
     it('leaves error_code null when a Manifest row carries no documented code', async () => {
       await recorder.recordManifestBlockedRequest(ctx, {
         errorMessage: 'something went sideways',
@@ -1089,7 +1239,7 @@ describe('ProxyMessageRecorder', () => {
           errorBody: JSON.stringify({
             error: {
               message:
-                '[🦚 Manifest M100] No anthropic API key yet. Add one here: https://x/routing See https://manifest.build/docs/errors/M100',
+                '[🦚 Manifest M100] No anthropic API key yet. Add one here: https://x/routing See https://manifest.build/llm-gateway/docs/errors/M100/',
             },
           }),
           fallbackIndex: 0,
@@ -1120,7 +1270,7 @@ describe('ProxyMessageRecorder', () => {
           errorBody: JSON.stringify({
             error: {
               message:
-                '[🦚 Manifest M102] anthropic subscription credentials could not be refreshed. Reconnect OAuth here: https://x/routing See https://manifest.build/docs/errors/M102',
+                '[🦚 Manifest M102] anthropic subscription credentials could not be refreshed. Reconnect OAuth here: https://x/routing See https://manifest.build/llm-gateway/docs/errors/M102/',
             },
           }),
           fallbackIndex: 0,
@@ -1376,7 +1526,7 @@ describe('ProxyMessageRecorder', () => {
       const body = JSON.stringify({
         error: {
           message:
-            '[🦚 Manifest M102] openai subscription credentials could not be refreshed. Reconnect OAuth here: https://x/routing See https://manifest.build/docs/errors/M102',
+            '[🦚 Manifest M102] openai subscription credentials could not be refreshed. Reconnect OAuth here: https://x/routing See https://manifest.build/llm-gateway/docs/errors/M102/',
         },
       });
       await recorder.recordPrimaryFailure(
@@ -1798,7 +1948,7 @@ describe('ProxyMessageRecorder', () => {
     });
 
     it('produces N separate inserts for N successive calls with identical usage, model and agent', async () => {
-      // The regression pinned by mnfst/manifest#2513: ProxyMessageDedup used to
+      // The regression pinned by mnfst/llm-gateway#2513: ProxyMessageDedup used to
       // treat "same tenant/agent/model/usage within a short window" as a
       // duplicate and silently drop it via an update-into-existing-row path.
       // Distinct requests that happen to look alike must each persist their
@@ -2018,14 +2168,14 @@ describe('ProxyMessageRecorder', () => {
 
     it('updateAttemptHeaders stores outbound provider identity on the attempt', async () => {
       await recorder.updateAttemptHeaders('attempt-outbound', {
-        'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
+        'user-agent': 'claude-cli/2.1.293 (external, sdk-cli)',
         'x-app': 'cli',
       });
       expect(updateMock).toHaveBeenCalledWith(
         { id: 'attempt-outbound' },
         {
           request_headers: {
-            'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
+            'user-agent': 'claude-cli/2.1.293 (external, sdk-cli)',
             'x-app': 'cli',
           },
         },
@@ -2041,7 +2191,7 @@ describe('ProxyMessageRecorder', () => {
         completedAtMs: 1_050,
         pendingWrite: Promise.resolve(true),
         outboundHeaders: {
-          'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
+          'user-agent': 'claude-cli/2.1.293 (external, sdk-cli)',
           'x-app': 'cli',
         },
       };
@@ -2054,7 +2204,7 @@ describe('ProxyMessageRecorder', () => {
         { requestHeaders: { 'user-agent': 'OpenAI/Python 2.24.0' }, attempt },
       );
       expect(updateMock.mock.calls.at(-1)![1].request_headers).toEqual({
-        'user-agent': 'claude-cli/2.1.287 (external, sdk-cli)',
+        'user-agent': 'claude-cli/2.1.293 (external, sdk-cli)',
         'x-app': 'cli',
       });
     });

@@ -7,6 +7,7 @@ import type { AuthType, PlaygroundStreamEvent } from 'manifest-shared';
 import { AgentMessage } from '../entities/agent-message.entity';
 import { CustomProvider } from '../entities/custom-provider.entity';
 import { ProviderClient } from '../routing/proxy/provider-client';
+import { buildProviderExtraHeaders } from '../routing/proxy/provider-hooks';
 import { resolveForwardEndpoint } from '../routing/proxy/forward-endpoint-resolver';
 import { CustomProviderService } from '../routing/custom-provider/custom-provider.service';
 import {
@@ -63,6 +64,32 @@ export class PlaygroundService {
     private readonly customProviders: CustomProviderService,
     private readonly opencodeGoCatalog: OpencodeGoCatalogService,
   ) {}
+
+  /**
+   * Headers forwarded with the upstream request: the provider-required ones the
+   * proxy attaches (e.g. OpenCode's x-opencode-session) underneath the
+   * sanitized user-supplied ones, which win on a case-insensitive name clash.
+   * The Playground has no x-session-key, so providers that need a session id
+   * fall back to the same tenant+agent scope key the proxy uses.
+   */
+  private buildExtraHeaders(
+    agent: { id: string; tenant_id: string },
+    dto: RunPlaygroundDto,
+  ): Record<string, string> | undefined {
+    const userHeaders = sanitizeRequestHeaders(dto.requestHeaders);
+    const providerHeaders = buildProviderExtraHeaders(
+      dto.provider,
+      undefined,
+      `${agent.tenant_id}\u0000${agent.id}`,
+    );
+    if (!providerHeaders) return userHeaders;
+    if (!userHeaders) return providerHeaders;
+    const userNames = new Set(Object.keys(userHeaders).map((name) => name.toLowerCase()));
+    const missing = Object.entries(providerHeaders).filter(
+      ([name]) => !userNames.has(name.toLowerCase()),
+    );
+    return { ...Object.fromEntries(missing), ...userHeaders };
+  }
 
   /**
    * Streams one model's response over SSE. Failures *before* the stream opens
@@ -177,7 +204,7 @@ export class PlaygroundService {
       return this.sendPreStreamError(res, status, message);
     }
 
-    const extraHeaders = sanitizeRequestHeaders(dto.requestHeaders);
+    const extraHeaders = this.buildExtraHeaders(agent, dto);
     const abort = new AbortController();
     res.on('close', () => abort.abort());
 

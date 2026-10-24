@@ -1,9 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { getSubscriptionProviderConfig } from 'manifest-shared';
 import { CustomProvider } from '../entities/custom-provider.entity';
 import { TenantProvider } from '../entities/tenant-provider.entity';
 import type { DiscoveredModel } from '../model-discovery/model-fetcher';
+import { supplementWithKnownModels } from '../model-discovery/model-fallback';
 import { CustomProviderService } from '../routing/custom-provider/custom-provider.service';
 import { AnthropicOauthService } from '../routing/oauth/anthropic/anthropic-oauth.service';
 import { GeminiOauthService } from '../routing/oauth/gemini/gemini-oauth.service';
@@ -93,7 +95,16 @@ export class ConnectionTestService {
       ...extra,
     });
 
-    const model = pickTestModel(connection.cached_models);
+    const preferredModel =
+      connection.auth_type === 'subscription'
+        ? getSubscriptionProviderConfig(connection.provider)?.connectionTestModel
+        : undefined;
+    // Match the routing catalog's read-time supplementation when the provider
+    // specifies a diagnostic model: an account's snapshot may predate it.
+    const models = preferredModel
+      ? supplementWithKnownModels([...(connection.cached_models ?? [])], connection.provider)
+      : connection.cached_models;
+    const model = pickTestModel(models, preferredModel);
     if (!model) {
       return done(
         'untestable',
@@ -216,18 +227,28 @@ export class ConnectionTestService {
 }
 
 /**
- * Cheapest text-capable model on the connection.
+ * Prefer the provider's supported diagnostic model, otherwise the cheapest
+ * text-capable model on the connection. Unknown prices are not free.
  *
  * Price first, then quality score as the tie-break: subscription connections
  * (Gemini, Claude) carry no per-token pricing at all, so without the second key
  * every one of their models would tie at 0 and the pick would be arbitrary.
  */
-export function pickTestModel(models: DiscoveredModel[] | null): DiscoveredModel | null {
+export function pickTestModel(
+  models: DiscoveredModel[] | null,
+  preferredModelId?: string,
+): DiscoveredModel | null {
   if (!Array.isArray(models) || models.length === 0) return null;
   const textCapable = models.filter(
     (m) => !m.outputModalities || m.outputModalities.includes('text'),
   );
   if (textCapable.length === 0) return null;
+  if (preferredModelId) {
+    const preferred = textCapable.find((m) => m.id === preferredModelId);
+    if (preferred) return preferred;
+    const versioned = textCapable.find((m) => m.id.startsWith(`${preferredModelId}-`));
+    if (versioned) return versioned;
+  }
   return textCapable.reduce((best, candidate) =>
     rank(candidate) < rank(best) ||
     (rank(candidate) === rank(best) && candidate.qualityScore < best.qualityScore)
@@ -237,5 +258,8 @@ export function pickTestModel(models: DiscoveredModel[] | null): DiscoveredModel
 }
 
 function rank(model: DiscoveredModel): number {
-  return (model.inputPricePerToken ?? 0) + (model.outputPricePerToken ?? 0);
+  if (model.inputPricePerToken == null || model.outputPricePerToken == null) {
+    return Infinity;
+  }
+  return model.inputPricePerToken + model.outputPricePerToken;
 }

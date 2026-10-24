@@ -657,7 +657,7 @@ describe('ProviderSelectModal', () => {
       fireEvent.click(screen.getByText('Sign in with Claude'));
 
       await waitFor(() => {
-        expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent');
+        expect(mockStartAnthropicOAuth).toHaveBeenCalledWith('test-agent', undefined);
       });
       await waitFor(() => {
         expect(screen.getByLabelText('Anthropic authorization code')).toBeDefined();
@@ -772,7 +772,7 @@ describe('ProviderSelectModal', () => {
       fireEvent.click(screen.getByText('Log in with OpenAI'));
 
       await waitFor(() => {
-        expect(mockGetOpenaiOAuthUrl).toHaveBeenCalledWith('test-agent');
+        expect(mockGetOpenaiOAuthUrl).toHaveBeenCalledWith('test-agent', {});
       });
       expect(window.open).toHaveBeenCalledWith(
         'https://auth.openai.com/oauth/authorize?test=1',

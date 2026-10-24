@@ -1,38 +1,33 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mnfst/manifest/HEAD/.github/assets/logo-white.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/mnfst/manifest/HEAD/.github/assets/logo-dark.svg" />
-    <img src="https://raw.githubusercontent.com/mnfst/manifest/HEAD/.github/assets/logo-dark.svg" alt="Manifest" height="53" title="Manifest"/>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mnfst/llm-gateway/HEAD/.github/assets/logo-light-new.png" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/mnfst/llm-gateway/HEAD/.github/assets/logo-dark-new.png" />
+    <img src="https://raw.githubusercontent.com/mnfst/llm-gateway/HEAD/.github/assets/logo-dark-new.png" alt="Manifest Gateway" height="53" title="Manifest Gateway"/>
   </picture>
 </p>
 <p align="center">
   <a href="https://hub.docker.com/r/manifestdotbuild/manifest"><img src="https://img.shields.io/docker/pulls/manifestdotbuild/manifest?color=2496ED&label=docker%20pulls" alt="Docker pulls" /></a>
   &nbsp;
-  <a href="https://github.com/mnfst/manifest/stargazers"><img src="https://img.shields.io/github/stars/mnfst/manifest?style=flat" alt="GitHub stars" /></a>
+  <a href="https://github.com/mnfst/llm-gateway/stargazers"><img src="https://img.shields.io/github/stars/mnfst/llm-gateway?style=flat" alt="GitHub stars" /></a>
   &nbsp;
-  <a href="https://github.com/mnfst/manifest/blob/main/LICENSE"><img src="https://img.shields.io/github/license/mnfst/manifest?color=blue" alt="license" /></a>
+  <a href="https://github.com/mnfst/llm-gateway/blob/main/LICENSE"><img src="https://img.shields.io/github/license/mnfst/llm-gateway?color=blue" alt="license" /></a>
   &nbsp;
   <a href="https://discord.gg/FepAked3W7"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
-> ### 🚀 Manifest is becoming the self-healing layer for APIs
->
-> We're building a new product that fixes failed API requests on the fly, independently of the gateway.
->
-> **This open-source gateway stays available and maintained.**
->
-> **[Read about the new direction →](https://manifest.build/blog/introducing-paid-plans/)**
+## What is Manifest Gateway?
 
-## What is Manifest?
+Manifest Gateway is an open-source LLM gateway for agents and apps. It sits between your agents and your LLM providers (OpenAI, Anthropic, Gemini, local models, and 300+ more) and gives you complete control over routing decisions. Define custom routing rules, set fallbacks when models fail, enable self-healing with Autofix, and track everything from one dashboard.
 
-Manifest is a smart model router for **AI agents** like OpenClaw, Hermes, or anything speaking the OpenAI-compatible HTTP API. It sits between your agents and your providers (API keys, subscriptions, or local models) and sends each request to the right one. Simple questions go to fast, cheap models. Hard problems go to the powerful ones. One endpoint for every provider, and a smaller bill as a bonus.
+- **Custom routing rules**: route by model, header, complexity, or task type
+- **Automatic fallbacks**: if a model fails, the next one picks up instantly
+- **Self-healing with Autofix**: failed requests are repaired in real time before they break your app
+- **Cost control**: set limits and track spending across all providers
+- **Self-hosted**: your requests, your providers, your data — complete privacy
 
-- One endpoint, every provider: send each request to the right model
-- Automatic fallbacks: if a model fails, the next one picks up
-- Set limits: don't exceed your budget
-- Self-hosted: your requests, your providers, your data
+![manifest-gh](https://raw.githubusercontent.com/mnfst/llm-gateway/HEAD/.github/assets/manifest-screenshot.png)
 
-![manifest-gh](https://raw.githubusercontent.com/mnfst/manifest/HEAD/.github/assets/manifest-screenshot.png)
+---
 
 ## Table of contents
 
@@ -80,7 +75,7 @@ Three paths, ordered from fastest to most hands-on. All three end in the same pl
 One command. The installer downloads the compose file, generates the secrets, and brings up the stack. First boot pulls the app image and Postgres, so give it up to a couple of minutes.
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/mnfst/manifest/main/docker/install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/mnfst/llm-gateway/main/docker/install.sh)
 ```
 
 <details>
@@ -89,7 +84,7 @@ bash <(curl -sSL https://raw.githubusercontent.com/mnfst/manifest/main/docker/in
 Download the script:
 
 ```bash
-curl -sSLO https://raw.githubusercontent.com/mnfst/manifest/main/docker/install.sh
+curl -sSLO https://raw.githubusercontent.com/mnfst/llm-gateway/main/docker/install.sh
 ```
 
 Review it (optional):
@@ -117,8 +112,8 @@ Same underlying flow as the install script, but you drive it yourself so you can
 1. Download the compose file and the env template into the same directory:
 
 ```bash
-curl -O https://raw.githubusercontent.com/mnfst/manifest/main/docker/docker-compose.yml
-curl -O https://raw.githubusercontent.com/mnfst/manifest/main/docker/.env.example
+curl -O https://raw.githubusercontent.com/mnfst/llm-gateway/main/docker/docker-compose.yml
+curl -O https://raw.githubusercontent.com/mnfst/llm-gateway/main/docker/.env.example
 cp .env.example .env
 ```
 
@@ -129,10 +124,14 @@ cp .env.example .env
 openssl rand -hex 32
 ```
 
-`MANIFEST_ENCRYPTION_KEY` encrypts the provider API keys and OAuth tokens
-Manifest stores. Left unset it falls back to `BETTER_AUTH_SECRET`, which means
-one leaked session-signing secret also decrypts every stored credential. Set it
-before first boot — adding it later means re-encrypting what is already stored.
+`MANIFEST_ENCRYPTION_KEY` encrypts the provider API keys, OAuth tokens and
+request recordings Manifest stores; the rest of the database is not encrypted
+by it. Left unset it falls back to `BETTER_AUTH_SECRET`, which means one leaked
+session-signing secret also decrypts every stored credential and recording.
+Set it before first boot.
+Recordings written under a previous secret are not migrated: after the secret
+changes they can no longer be decrypted and the dashboard shows them as
+unavailable, while retention removes them on schedule.
 
 (Optional: to use a stronger database password, set BOTH `POSTGRES_PASSWORD` and `DATABASE_URL` in `.env`, they must agree, and any special characters in the password need to be percent-encoded in the URL.)
 
@@ -235,7 +234,7 @@ explicit choice and falls back to your routing config if it matches nothing.
 
 Errors from Manifest itself carry an `M###` code, a plain-English cause, and a
 link to the matching page under
-[manifest.build/docs/errors](https://manifest.build/docs/errors) — including
+[manifest.build/llm-gateway/docs/errors](https://manifest.build/llm-gateway/docs/errors/) — including
 `M100` (no provider connected yet) and `M003`/`M005` (bad or unknown key), the
 three you are most likely to hit on a fresh install.
 
@@ -245,7 +244,7 @@ Published images are signed with cosign keyless signing (Sigstore). Verify befor
 
 ```bash
 cosign verify manifestdotbuild/manifest:<version> \
-  --certificate-identity-regexp="^https://github.com/mnfst/manifest/" \
+  --certificate-identity-regexp="^https://github.com/mnfst/llm-gateway/" \
   --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 ```
 
@@ -309,6 +308,8 @@ docker compose up -d
 ```
 
 Database migrations run automatically on boot, no manual steps. Your data in the `pgdata` volume is preserved across upgrades. Pin to a specific major version (e.g. `manifestdotbuild/manifest:6`) in `docker-compose.yml` if you want control over when major upgrades happen.
+
+The dashboard checks GitHub once a day for the latest release and shows a "new version available" badge linking to the [changelog](https://manifest.build/changelog/). The check only reads the public release list and sends nothing about your install. To turn it off (for example on an air-gapped host), set `MANIFEST_UPDATE_CHECK_DISABLED=1` in `.env`.
 
 ## Backup & persistence
 
@@ -434,7 +435,7 @@ refuses to run under `NODE_ENV=production` regardless of `SEED_DATA`. Use the
 first-run setup wizard to create your admin account.
 
 Full env var reference:
-[manifest.build/docs/reference/environment-variables](https://manifest.build/docs/reference/environment-variables)
+[manifest.build/llm-gateway/docs/reference/environment-variables](https://manifest.build/llm-gateway/docs/reference/environment-variables/)
 
 ## Anonymous usage telemetry
 
@@ -447,7 +448,7 @@ platform, OS, and arch.
 
 To disable, set `MANIFEST_TELEMETRY_DISABLED=1` in your `.env` file and
 restart the container. The full field list is published at
-[manifest.build/docs/self-hosted#telemetry](https://manifest.build/docs/self-hosted#telemetry).
+[manifest.build/llm-gateway/docs/self-hosted#telemetry](https://manifest.build/llm-gateway/docs/self-hosted/#telemetry).
 
 ## Autofix privacy and instance identity
 
@@ -498,11 +499,11 @@ both announce a new one. Your install will look like a new install to both.
 
 ## Links
 
-- [GitHub](https://github.com/mnfst/manifest)
+- [GitHub](https://github.com/mnfst/llm-gateway)
 - [Website](https://manifest.build)
-- [Docs](https://manifest.build/docs)
+- [Docs](https://manifest.build/llm-gateway/docs/introduction/)
 - [Discord](https://discord.gg/FepAked3W7)
 
 ## License
 
-[MIT](https://github.com/mnfst/manifest/blob/main/LICENSE)
+[MIT](https://github.com/mnfst/llm-gateway/blob/main/LICENSE)

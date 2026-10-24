@@ -15,7 +15,12 @@ import {
   buildClaudeCodeSubscriptionHeaders,
 } from '../../common/constants/subscription-clients';
 import { normalizeProviderBaseUrl } from '../provider-base-url';
-import { getBedrockMantleBaseUrl } from '../bedrock-region';
+import {
+  getBedrockInferenceProfileBaseModelId,
+  getBedrockMantleBaseUrl,
+  getBedrockRuntimeBaseUrl,
+} from '../bedrock-region';
+import { getBedrockRuntimeCapabilities } from '../bedrock-runtime-capabilities';
 import { getQwenCompatibleBaseUrl } from '../qwen-region';
 import { getXiaomiTokenPlanBaseUrl } from '../xiaomi-region';
 import { getZaiCodingPlanBaseUrl } from '../zai-region';
@@ -66,6 +71,8 @@ export interface ProviderEndpoint {
   forwardResponsesStream?: boolean;
   /** Map Chat Completions token caps to `max_output_tokens`. */
   acceptsMaxOutputTokens?: boolean;
+  /** Send Manifest's stable `prompt_cache_key` when the caller did not set one. */
+  acceptsPromptCacheKey?: boolean;
 }
 
 const openaiStreamUsage = { streamUsageReporting: 'openai_stream_options' as const };
@@ -82,15 +89,37 @@ const pioneerHeaders = (apiKey: string) => ({
 
 const openaiPath = () => '/v1/chat/completions';
 const BEDROCK_OPENAI_MODEL_RE = /(?:^|\.)openai\./i;
-const BEDROCK_GPT_5_MODEL_RE = /(?:^|\.)openai\.gpt-5(?:[.-]|$)/i;
+// Bedrock rejects `/v1/responses` for the numbered GPT families from GPT-5 on
+// (gpt-5.x, gpt-6-*, ...); they need the namespaced path. GPT OSS stays on the
+// generic one.
+const BEDROCK_NAMESPACED_GPT_MODEL_RE = /(?:^|\.)openai\.gpt-[5-9](?:[.-]|$)/i;
 const BEDROCK_ANTHROPIC_MODEL_RE = /(?:^|\.)anthropic\./i;
 
 const bedrockResponsesPath = (model: string) =>
-  BEDROCK_GPT_5_MODEL_RE.test(stripVendorPrefix(model)) ? '/openai/v1/responses' : '/v1/responses';
+  BEDROCK_NAMESPACED_GPT_MODEL_RE.test(stripVendorPrefix(model))
+    ? '/openai/v1/responses'
+    : '/v1/responses';
 
 export function resolveBedrockEndpointKey(
   model: string,
-): 'bedrock' | 'bedrock-responses' | 'bedrock-anthropic' {
+  apiMode?: string,
+):
+  | 'bedrock'
+  | 'bedrock-responses'
+  | 'bedrock-anthropic'
+  | 'bedrock-runtime'
+  | 'bedrock-runtime-responses'
+  | 'bedrock-runtime-anthropic' {
+  // Claude CRIS profiles go to Runtime's Anthropic Messages API on every API
+  // mode: Mantle 404s them, and some (Sonnet 5.5) are served only that way.
+  if (getBedrockInferenceProfileBaseModelId(model)?.startsWith('anthropic.')) {
+    return 'bedrock-runtime-anthropic';
+  }
+  // Mantle does not serve CRIS profiles. Catalogued ones go to Runtime on the
+  // API the agent called; every other model ID keeps its Mantle route.
+  if (getBedrockRuntimeCapabilities(model)) {
+    return apiMode === 'responses' ? 'bedrock-runtime-responses' : 'bedrock-runtime';
+  }
   const bareModel = stripVendorPrefix(model);
   if (BEDROCK_OPENAI_MODEL_RE.test(bareModel)) return 'bedrock-responses';
   if (BEDROCK_ANTHROPIC_MODEL_RE.test(bareModel)) return 'bedrock-anthropic';
@@ -217,8 +246,35 @@ export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
     forwardResponsesStream: true,
     acceptsMaxOutputTokens: true,
   },
+  'bedrock-runtime': {
+    baseUrl: getBedrockRuntimeBaseUrl(),
+    buildHeaders: openaiHeaders,
+    buildPath: () => '/openai/v1/chat/completions',
+    format: 'openai',
+    acceptsPromptCacheKey: true,
+    ...openaiStreamUsage,
+  },
+  'bedrock-runtime-responses': {
+    baseUrl: getBedrockRuntimeBaseUrl(),
+    buildHeaders: openaiHeaders,
+    buildPath: () => '/openai/v1/responses',
+    format: 'chatgpt',
+    forwardResponsesStream: true,
+    acceptsMaxOutputTokens: true,
+    acceptsPromptCacheKey: true,
+  },
   'bedrock-anthropic': {
     baseUrl: getBedrockMantleBaseUrl(),
+    buildHeaders: anthropicApiKeyHeaders,
+    buildPath: () => '/anthropic/v1/messages',
+    format: 'anthropic',
+    skipSubscriptionIdentity: true,
+  },
+  // Same Messages API on the Runtime host, for Claude CRIS profiles. Mantle
+  // 404s them, and Sonnet 5.5 is served only by Runtime via CRIS in commercial
+  // regions.
+  'bedrock-runtime-anthropic': {
+    baseUrl: getBedrockRuntimeBaseUrl(),
     buildHeaders: anthropicApiKeyHeaders,
     buildPath: () => '/anthropic/v1/messages',
     format: 'anthropic',
@@ -433,6 +489,9 @@ export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
       'x-goog-api-key': apiKey,
     }),
     buildPath: (model: string) => `/v1beta/models/${model}:generateContent`,
+    // `:generateContent?alt=sse` answers with one event once the whole reply is
+    // generated; only `:streamGenerateContent` streams incrementally.
+    buildStreamPath: (model: string) => `/v1beta/models/${model}:streamGenerateContent`,
     format: 'google',
   },
   // Vertex AI: the same Gemini wire format as `google`, on Google Cloud's

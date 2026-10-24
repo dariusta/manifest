@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RouteModelParamsModule } from './model-params/route-model-params.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ModelPricesModule } from '../model-prices/model-prices.module';
 import { ModelDiscoveryModule } from '../model-discovery/model-discovery.module';
@@ -58,6 +59,7 @@ import { InstallMetadata } from '../entities/install-metadata.entity';
     ResolveModule,
     HeaderTiersModule,
     AutofixModule,
+    RouteModelParamsModule,
   ],
   controllers: [
     ProviderController,

@@ -689,9 +689,21 @@ describe('OAuthDetailView', () => {
     expect(mockSubmitOpenaiOAuthCallback).not.toHaveBeenCalled();
   });
 
-  it('handlePasteSubmit shows error when exchange fails', async () => {
+  it.each([
+    [
+      'the server message',
+      new Error('Invalid or expired OAuth state'),
+      /Invalid or expired OAuth state/,
+    ],
+    ['a generic hint when the server says nothing', new Error(''), /Failed to exchange token/],
+    [
+      'a generic hint on a network failure',
+      new TypeError('Failed to fetch'),
+      /Failed to exchange token/,
+    ],
+  ])('handlePasteSubmit shows %s when exchange fails', async (_case, error, expected) => {
     mockGetOpenaiOAuthUrl.mockResolvedValue({ url: 'https://oauth.openai.com/authorize' });
-    mockSubmitOpenaiOAuthCallback.mockRejectedValue(new Error('expired'));
+    mockSubmitOpenaiOAuthCallback.mockRejectedValue(error);
     vi.spyOn(window, 'open').mockReturnValue({ closed: false } as unknown as Window);
 
     renderView();
@@ -705,7 +717,7 @@ describe('OAuthDetailView', () => {
     fireEvent.click(screen.getByText('Connect'));
 
     await waitFor(() => {
-      expect(screen.getByText('expired')).toBeDefined();
+      expect(screen.getByText(expected)).toBeDefined();
     });
   });
 

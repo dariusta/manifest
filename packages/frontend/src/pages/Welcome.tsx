@@ -30,8 +30,9 @@ import {
 } from './welcome-helpers.js';
 import { createRoutingActions } from './RoutingActions.js';
 import { providerIcon } from '../components/ProviderIcon.jsx';
-import { PROVIDERS } from '../services/providers.js';
+import { PROVIDERS, subscriptionCatalog } from '../services/providers.js';
 import { authClient } from '../services/auth-client.js';
+import { installOrigin } from '../services/install-endpoints.js';
 import {
   createAgent,
   deleteModelParams,
@@ -63,6 +64,7 @@ import {
   PLATFORM_ICONS,
   PLATFORM_LABELS,
   PLATFORMS_BY_CATEGORY,
+  manifestErrorDocsUrl,
 } from 'manifest-shared';
 import '../styles/routing.css';
 import '../styles/routing-providers.css';
@@ -244,7 +246,8 @@ const Welcome: Component = () => {
   ];
 
   const allTabProviders = () => {
-    if (tab() === 'subscription') return PROVIDERS.filter((p) => p.supportsSubscription);
+    if (tab() === 'subscription')
+      return subscriptionCatalog(PROVIDERS, (id) => isConnected(id, 'subscription'));
     if (tab() === 'local') return PROVIDERS.filter((p) => p.localOnly);
     return PROVIDERS.filter((p) => !p.subscriptionOnly && !p.localOnly);
   };
@@ -291,9 +294,7 @@ const Welcome: Component = () => {
   };
 
   const baseUrl = () => {
-    const host = window.location.hostname;
-    if (host === 'app.manifest.build') return 'https://app.manifest.build/v1';
-    return `${window.location.origin}/v1`;
+    return `${installOrigin()}/v1`;
   };
 
   const createHarness = async () => {
@@ -763,7 +764,7 @@ const Welcome: Component = () => {
         <div class="welcome__sidebar-top">
           <img
             src="/logotype-white.svg"
-            alt="Manifest"
+            alt="Manifest LLM Gateway"
             class="welcome__logo-mark welcome__logo-light"
           />
           <img src="/logotype-dark.svg" alt="" class="welcome__logo-mark welcome__logo-dark" />
@@ -1385,7 +1386,7 @@ const Welcome: Component = () => {
                           <Show when={errorDocCode()}>
                             <a
                               class="welcome__text-link"
-                              href={`https://manifest.build/docs/errors/${errorDocCode()}`}
+                              href={manifestErrorDocsUrl(errorDocCode()!)}
                               target="_blank"
                               rel="noreferrer"
                             >

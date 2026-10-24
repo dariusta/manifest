@@ -1,3 +1,5 @@
+import { getRoutingPresets, applyRoutingPreset } from '../services/api/routing-presets.js';
+import { For } from 'solid-js';
 import {
   createEffect,
   createResource,
@@ -33,6 +35,11 @@ const AddAgentModal: Component<{ open: boolean; onClose: () => void }> = (props)
     PLATFORMS_BY_CATEGORY['personal'][0] ?? null,
   );
   const [creating, setCreating] = createSignal(false);
+  const [presetId, setPresetId] = createSignal('');
+  const [presets] = createResource(
+    () => props.open,
+    async () => getRoutingPresets().catch(() => []),
+  );
   // Both default ON — explicit so create always sends a choice rather than
   // relying on the server-side inherit path (which is OFF for Autofix on
   // self-hosted).
@@ -57,11 +64,7 @@ const AddAgentModal: Component<{ open: boolean; onClose: () => void }> = (props)
     return ++attemptToken;
   };
   const isStale = (token: number): boolean => cancelled || token !== attemptToken;
-  // Reopening invalidates whatever the previous session left in flight. The
-  // success path closes the modal *before* awaiting the providers lookup, and
-  // closing is not a dismissal — so a user who immediately reopens to add a
-  // second harness would otherwise be yanked to the first one the moment that
-  // lookup lands, mid-typing.
+  // Reopening invalidates whatever the previous session left in flight.
   createEffect(() => {
     if (props.open) attemptToken++;
   });
@@ -87,6 +90,7 @@ const AddAgentModal: Component<{ open: boolean; onClose: () => void }> = (props)
    * @param autofixChoice the Autofix setting pinned when the submit started.
    */
   const createAgentNow = async (token: number, autofixChoice: boolean) => {
+    const selectedPreset = presetId();
     const agentName = name().trim();
     if (!agentName) return;
     setCreating(true);
@@ -104,16 +108,19 @@ const AddAgentModal: Component<{ open: boolean; onClose: () => void }> = (props)
       // The user dismissed the modal while the request was in flight — honour
       // that dismissal and skip every success side effect + the navigation.
       if (isStale(token)) return;
-      toast.success(`Harness "${agentName}" connected`);
-      props.onClose();
-      resetForm();
-      const slug = result?.agent?.name ?? agentName;
-      markAgentCreated(slug);
-      // Persistent flag so the setup modal reopens after a page refresh until
-      // the user dismisses or completes it (the in-memory mark above is dropped
-      // on reload / cleared by AgentGuard once the agent appears in the list).
-      markSetupPending(slug);
+      if (selectedPreset) {
+        try {
+          await applyRoutingPreset(selectedPreset, result.agent.name);
+          if (isStale(token)) return;
+          localStorage.setItem(`setup_completed_${result.agent.name}`, 'true');
+        } catch (error) {
+          toast.error(
+            `Harness created, but the preset could not be applied: ${error instanceof Error ? error.message : 'Try again from Routing.'}`,
+          );
+        }
+      }
 
+      const slug = result?.agent?.name ?? agentName;
       // Decide whether to nudge the user into connecting a provider. A brand-new
       // tenant has nothing routed yet, so we open the provider flow on landing.
       // A failed lookup must not block the redirect — fall back to "has none".
@@ -128,6 +135,14 @@ const AddAgentModal: Component<{ open: boolean; onClose: () => void }> = (props)
 
       // A dismissal during the providers lookup must also skip the redirect.
       if (isStale(token)) return;
+
+      toast.success(`Harness "${agentName}" connected`);
+      markAgentCreated(slug);
+      markSetupPending(slug);
+      // Closing can unmount this lazy modal. Complete all asynchronous work and
+      // cancellation checks first so cleanup cannot cancel a successful create.
+      props.onClose();
+      resetForm();
 
       // Land on Routing either way; the new agent's API key is surfaced there.
       navigate(`/harnesses/${encodeURIComponent(slug)}/routing`, {
@@ -154,6 +169,7 @@ const AddAgentModal: Component<{ open: boolean; onClose: () => void }> = (props)
   };
 
   const resetForm = () => {
+    setPresetId('');
     setName('');
     setCategory('personal');
     setPlatform(PLATFORMS_BY_CATEGORY['personal'][0] ?? null);
@@ -213,6 +229,23 @@ const AddAgentModal: Component<{ open: boolean; onClose: () => void }> = (props)
             </div>
           </div>
 
+          <Show when={presets()?.length}>
+            <label class="preset-name" style="margin-bottom: 16px;">
+              Routing preset
+              <select
+                class="modal-card__input"
+                aria-label="Routing preset"
+                value={presetId()}
+                disabled={creating()}
+                onChange={(e) => setPresetId(e.currentTarget.value)}
+              >
+                <option value="">Start without a preset</option>
+                <For each={presets()}>
+                  {(preset) => <option value={preset.id}>{preset.name}</option>}
+                </For>
+              </select>
+            </label>
+          </Show>
           <div class="add-agent-toggles">
             <div class="model-params__group">
               {/* Same label treatment as the Type / Harness name field labels,

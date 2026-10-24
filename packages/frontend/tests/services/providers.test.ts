@@ -5,6 +5,7 @@ import {
   getModelLabel,
   getProvider,
   buildProviderDef,
+  subscriptionCatalog,
 } from '../../src/services/providers';
 import { validateApiKey, validateSubscriptionKey } from '../../src/services/provider-utils';
 import {
@@ -1083,6 +1084,27 @@ describe('PROVIDERS', () => {
 });
 
 /* ── STAGES constant ───────────────────────────── */
+
+describe('subscriptionCatalog', () => {
+  const open = PROVIDERS.find((p) => p.id === 'openai')!;
+  const google = PROVIDERS.find((p) => p.id === 'gemini')!;
+
+  it('keeps the fork Google Antigravity sign-in available', () => {
+    expect(google.subscriptionClosedNote).toBeUndefined();
+    expect(subscriptionCatalog([google], () => false)).toEqual([google]);
+  });
+
+  it('lists a closed provider only where the workspace already has it', () => {
+    const closed = { ...google, subscriptionClosedNote: 'This sign-in is closed.' };
+    expect(subscriptionCatalog([open, closed], () => false)).toEqual([open]);
+    expect(subscriptionCatalog([open, closed], (id) => id === 'gemini')).toEqual([open, closed]);
+  });
+
+  it('never lists providers without subscription support', () => {
+    const groq = PROVIDERS.find((p) => p.id === 'groq')!;
+    expect(subscriptionCatalog([groq], () => true)).toEqual([]);
+  });
+});
 
 describe('STAGES', () => {
   it('has 4 stages', () => {

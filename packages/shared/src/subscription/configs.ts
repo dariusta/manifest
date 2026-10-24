@@ -11,6 +11,10 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     subscriptionKeyPlaceholder: 'Paste your setup-token',
     subscriptionCommand: 'claude setup-token',
     subscriptionTokenPrefix: 'sk-ant-oat',
+    // Keep the credential ping on a supported lightweight model. Curated
+    // subscription entries have zero prices, so price/quality ranking alone
+    // can select an obsolete family prefix such as claude-opus-4.
+    connectionTestModel: 'claude-haiku-5-5',
     knownModels: Object.freeze([
       'claude-fable-5',
       // claude-fable-5-1 is a distinct model from claude-fable-5 — prefix
@@ -28,6 +32,8 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
       // buildSubscriptionFallbackModels), so 'claude-opus-5' never offers 5.5.
       'claude-opus-5-5',
       'claude-sonnet-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
     ]),
     subscriptionCapabilities: Object.freeze({
       maxContextWindow: 200000,
@@ -37,6 +43,8 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
         'claude-opus-5': 1000000,
         'claude-opus-5-5': 1000000,
         'claude-sonnet-5': 1000000,
+        'claude-sonnet-5-5': 1000000,
+        'claude-haiku-5-5': 1000000,
       }),
       supportsPromptCaching: true,
       supportsBatching: false,
@@ -243,6 +251,7 @@ export const SUBSCRIPTION_PROVIDER_CONFIGS: Readonly<
     subscriptionKeyPlaceholder: 'Paste your Z.ai API key',
     knownModels: Object.freeze([
       'glm-5.3',
+      'glm-5.3-flash',
       'glm-5.2',
       'glm-5.1',
       'glm-5-turbo',

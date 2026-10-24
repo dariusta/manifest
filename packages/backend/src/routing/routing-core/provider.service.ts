@@ -19,7 +19,12 @@ import { ModelPricingCacheService } from '../../model-prices/model-pricing-cache
 import { RoutingCacheService } from './routing-cache.service';
 import { TenantCacheService } from '../../common/services/tenant-cache.service';
 import { randomUUID } from 'crypto';
-import { encrypt, decrypt, getEncryptionSecret } from '../../common/utils/crypto.util';
+import {
+  encrypt,
+  decryptWithAny,
+  getEncryptionSecret,
+  getDecryptionSecrets,
+} from '../../common/utils/crypto.util';
 import {
   isManifestUsableProvider,
   isSupportedSubscriptionProvider,
@@ -42,6 +47,10 @@ import {
   getSubscriptionEndpointRegionConfig,
   SubscriptionEndpointRegionConfig,
 } from '../subscription-region';
+import {
+  MINIMAX_API_KEY_REGION_VALIDATION_MESSAGE,
+  isMinimaxRegion,
+} from '../oauth/minimax/minimax-oauth-helpers';
 import { filterProvidersForDeployment } from '../../common/utils/provider-availability';
 import { getManagedFreeProviderConfig } from '../../common/constants/managed-free-providers';
 
@@ -272,7 +281,7 @@ export class ProviderService {
     const row = rows.find((r) => r.label.toLowerCase() === wantedLabel);
     if (!row?.api_key_encrypted) return null;
     try {
-      return decrypt(row.api_key_encrypted, getEncryptionSecret());
+      return decryptWithAny(row.api_key_encrypted, getDecryptionSecrets()).plaintext;
     } catch {
       return null;
     }
@@ -330,7 +339,7 @@ export class ProviderService {
         readFreshRaw: async () => {
           if (!row?.api_key_encrypted) return null;
           try {
-            return decrypt(row.api_key_encrypted, getEncryptionSecret());
+            return decryptWithAny(row.api_key_encrypted, getDecryptionSecrets()).plaintext;
           } catch {
             return null;
           }
@@ -564,7 +573,7 @@ export class ProviderService {
   }
 
   async renameKey(
-    agentId: string,
+    agentId: string | null,
     tenantId: string,
     provider: string,
     authType: AuthType,
@@ -588,7 +597,7 @@ export class ProviderService {
     target.updated_at = new Date().toISOString();
     await this.providerRepo.save(target);
     await this.relabelOverrides(tenantId, provider, authType, previousLabel, trimmed);
-    this.routingCache.invalidateAgent(agentId);
+    if (agentId !== null) this.routingCache.invalidateAgent(agentId);
     this.routingCache.invalidateTenant(tenantId);
     return target;
   }
@@ -614,7 +623,7 @@ export class ProviderService {
       throw new NotFoundException('This provider has no stored key to reveal');
     }
     try {
-      return decrypt(target.api_key_encrypted, getEncryptionSecret());
+      return decryptWithAny(target.api_key_encrypted, getDecryptionSecrets()).plaintext;
     } catch {
       throw new BadRequestException('Stored key could not be decrypted');
     }
@@ -673,6 +682,16 @@ export class ProviderService {
     existing: TenantProvider | null,
   ): Promise<string | null> {
     const lower = provider.toLowerCase();
+
+    if (lower === 'minimax' && authType === 'api_key') {
+      if (requestedRegion === undefined) {
+        return isMinimaxRegion(existing?.region ?? undefined) ? existing!.region : null;
+      }
+      if (!isMinimaxRegion(requestedRegion)) {
+        throw new BadRequestException(MINIMAX_API_KEY_REGION_VALIDATION_MESSAGE);
+      }
+      return requestedRegion;
+    }
 
     const subscriptionRegionConfig = getSubscriptionEndpointRegionConfig(lower, authType);
     if (subscriptionRegionConfig) {
@@ -747,7 +766,7 @@ export class ProviderService {
     if (!existing?.api_key_encrypted) return null;
 
     try {
-      return decrypt(existing.api_key_encrypted, getEncryptionSecret());
+      return decryptWithAny(existing.api_key_encrypted, getDecryptionSecrets()).plaintext;
     } catch {
       this.logger.warn('Failed to decrypt API key while auto-detecting Alibaba region');
       return null;
@@ -851,22 +870,26 @@ export class ProviderService {
     const invalidated = await this.providerRepo.manager.transaction(async (manager) => {
       const txRepo = manager.getRepository(TenantProvider);
       const rows = await txRepo.find({ where: { tenant_id: tenantId, provider } });
-      const target = rows.find((r) => r.auth_type !== nextAuthType && r.is_active);
-      if (!target) return false;
+      // A custom provider can hold several connections; all of them move.
+      const targets = rows.filter((r) => r.auth_type !== nextAuthType && r.is_active);
+      if (targets.length === 0) return false;
 
-      // Protect the unique index on (tenant_id, provider, auth_type, LOWER(label)):
-      // if a row already exists for the destination auth_type with the same
-      // label, the UPDATE would fail. Drop the stale destination row first.
-      const collision = rows.find(
-        (r) => r.auth_type === nextAuthType && r.label.toLowerCase() === target.label.toLowerCase(),
-      );
-      if (collision) {
-        await txRepo.remove(collision);
+      for (const target of targets) {
+        // Protect the unique index on (tenant_id, provider, auth_type, LOWER(label)):
+        // if a row already exists for the destination auth_type with the same
+        // label, the UPDATE would fail. Drop the stale destination row first.
+        const collision = rows.find(
+          (r) =>
+            r.auth_type === nextAuthType && r.label.toLowerCase() === target.label.toLowerCase(),
+        );
+        if (collision) {
+          await txRepo.remove(collision);
+        }
+
+        target.auth_type = nextAuthType;
+        target.updated_at = new Date().toISOString();
+        await txRepo.save(target);
       }
-
-      target.auth_type = nextAuthType;
-      target.updated_at = new Date().toISOString();
-      await txRepo.save(target);
       return true;
     });
 
@@ -885,9 +908,7 @@ export class ProviderService {
     manager?: EntityManager,
   ): Promise<{ notifications: string[] }> {
     if (label) {
-      // Labeled key chains only exist for agent-scoped standard providers;
-      // tenant-global custom providers never pass a label, so agentId is set.
-      return this.removeKeyByLabel(agentId as string, tenantId, provider, authType, label, manager);
+      return this.removeKeyByLabel(agentId, tenantId, provider, authType, label, manager);
     }
 
     // Legacy disconnect: deactivate every active key for the (provider,
@@ -1422,7 +1443,7 @@ export class ProviderService {
 
   private decryptOrNull(encrypted: string): string | null {
     try {
-      return decrypt(encrypted, getEncryptionSecret());
+      return decryptWithAny(encrypted, getDecryptionSecrets()).plaintext;
     } catch {
       return null;
     }

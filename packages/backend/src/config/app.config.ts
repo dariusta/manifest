@@ -52,9 +52,10 @@ export const appConfig = registerAs('app', () => ({
   // routing during the post-SIGTERM deregistration lag (the rolling-deploy 5xx
   // spike). Must be shorter than Railway's `drainingSeconds`. 0 disables it.
   shutdownDrainMs: Number(process.env['SHUTDOWN_DRAIN_MS'] ?? 10000),
-  // When true, /api/v1/public/* endpoints expose aggregate stats without auth.
-  // Off by default — only Manifest Cloud's marketing homepage should enable it.
-  publicStatsEnabled: process.env['MANIFEST_PUBLIC_STATS'] === 'true',
+  // When true, /api/v1/public/error-pages serves the published error pages
+  // without auth. Off by default; only Manifest Cloud's marketing site uses it.
+  // The variable keeps its historical name so existing deployments stay on.
+  publicErrorPagesEnabled: process.env['MANIFEST_PUBLIC_STATS'] === 'true',
   // Optional instance-wide override. When unset, request recordings follow the
   // Cloud plan policy (Free 7 days, Pro 365 days); non-billing deployments use
   // the 365-day default.
@@ -77,4 +78,20 @@ export const appConfig = registerAs('app', () => ({
   // `x-internal-secret` header to publish/unpublish curated error pages.
   // Empty by default — the endpoint rejects all writes until it is set.
   errorPagePushSecret: process.env['ERROR_PAGE_PUSH_SECRET'] ?? '',
+  // Shared secret guarding the internal CRM metrics feed
+  // (/api/v1/internal/crm-metrics), which the outreach CRM polls daily. Sent in
+  // the `x-internal-secret` header. Deliberately separate from
+  // errorPagePushSecret: different consumer, different credential. Empty by
+  // default, and anything shorter than 32 chars counts as unset — this route
+  // exports user email addresses across tenants.
+  crmMetricsSecret: process.env['CRM_METRICS_SECRET'] ?? '',
+  // Sliding lifetime (days) of a CLI-minted management PAT. Every successful
+  // authentication pushes the key's `expires_at` this far into the future, so
+  // an active CLI never has to re-login and an abandoned one lapses.
+  cliTokenTtlDays: optionalPositiveInteger(process.env['CLI_TOKEN_TTL_DAYS']) ?? 30,
+  // Absolute ceiling for a CLI PAT, in days from issuance. The sliding window
+  // renews on every use, so this is what ultimately retires a token that is in
+  // constant use. Must be >= cliTokenTtlDays to be meaningful.
+  cliTokenAbsoluteTtlDays:
+    optionalPositiveInteger(process.env['CLI_TOKEN_ABSOLUTE_TTL_DAYS']) ?? 90,
 }));

@@ -460,7 +460,8 @@
         "agent-filter-select__trigger"
       ],
       "files": [
-        "filter-select.css"
+        "filter-select.css",
+        "theme.css"
       ]
     },
     "agent-type-select": {
@@ -471,6 +472,7 @@
         "agent-type-select__dropdown",
         "agent-type-select__dropdown--inline",
         "agent-type-select__group-label",
+        "agent-type-select__groups",
         "agent-type-select__option",
         "agent-type-select__option--selected",
         "agent-type-select__option-icon",
@@ -639,6 +641,7 @@
         "auth-form__notice",
         "auth-form__notice-link",
         "auth-form__submit",
+        "auth-form__submit--secondary",
         "auth-form__success"
       ],
       "files": [
@@ -821,6 +824,7 @@
         "routing-providers.css",
         "routing.css",
         "skeleton.css",
+        "subscription-health.css",
         "theme.css"
       ]
     },
@@ -918,6 +922,21 @@
         "routing-providers.css"
       ]
     },
+    "connection-detail": {
+      "classes": [
+        "connection-detail__badge",
+        "connection-detail__badges",
+        "connection-detail__controls",
+        "connection-detail__header",
+        "connection-detail__identity",
+        "connection-detail__meta",
+        "connection-detail__title",
+        "connection-detail__title-row"
+      ],
+      "files": [
+        "connection-detail.css"
+      ]
+    },
     "connection-label-cell": {
       "classes": [
         "connection-label-cell",
@@ -960,6 +979,7 @@
       ],
       "files": [
         "layout.css",
+        "routing.css",
         "theme.css"
       ]
     },
@@ -1038,16 +1058,6 @@
         "routing-providers.css"
       ]
     },
-    "cost-range-filter": {
-      "classes": [
-        "cost-range-filter",
-        "cost-range-filter__input",
-        "cost-range-filter__sep"
-      ],
-      "files": [
-        "controls.css"
-      ]
-    },
     "count-link": {
       "classes": [
         "count-link"
@@ -1113,6 +1123,7 @@
         "custom-select__value"
       ],
       "files": [
+        "connection-detail.css",
         "custom-select.css",
         "discovery.css",
         "routing-providers.css"
@@ -1132,13 +1143,12 @@
         "modals.css",
         "model-filter.css",
         "overview.css",
-        "pivot.css",
+        "platform-icons.css",
         "request-drawer.css",
         "routing-deprecation.css",
         "routing-providers.css",
         "routing.css",
         "syntax-highlight.css",
-        "theme.css",
         "tokens.css",
         "welcome.css",
         "wizard.css"
@@ -1503,6 +1513,18 @@
         "data.css"
       ]
     },
+    "free-plan-ends-banner": {
+      "classes": [
+        "free-plan-ends-banner",
+        "free-plan-ends-banner__actions",
+        "free-plan-ends-banner__btn",
+        "free-plan-ends-banner__link",
+        "free-plan-ends-banner__text"
+      ],
+      "files": [
+        "modals.css"
+      ]
+    },
     "free-tag": {
       "classes": [
         "free-tag"
@@ -1526,7 +1548,9 @@
         "header__avatar-btn",
         "header__breadcrumb-current",
         "header__breadcrumb-icon",
+        "header__breadcrumb-label",
         "header__breadcrumb-link",
+        "header__breadcrumb-provider-icon",
         "header__docs-link",
         "header__dropdown",
         "header__dropdown-divider",
@@ -1845,6 +1869,15 @@
         "syntax-highlight.css"
       ]
     },
+    "info-card": {
+      "classes": [
+        "info-card__content",
+        "info-card__text"
+      ],
+      "files": [
+        "cards.css"
+      ]
+    },
     "info-tooltip": {
       "classes": [
         "info-tooltip",
@@ -1862,6 +1895,26 @@
       "files": [
         "plan-usage.css",
         "theme.css"
+      ]
+    },
+    "integration-grid": {
+      "classes": [
+        "integration-grid"
+      ],
+      "files": [
+        "theme.css",
+        "wizard.css"
+      ]
+    },
+    "integration-panel": {
+      "classes": [
+        "integration-panel__desc",
+        "integration-panel__header",
+        "integration-panel__tabs"
+      ],
+      "files": [
+        "theme.css",
+        "wizard.css"
       ]
     },
     "json-block": {
@@ -2045,7 +2098,6 @@
         "modals.css",
         "notifications.css",
         "overview.css",
-        "pivot.css",
         "routing-header-tiers.css",
         "routing.css"
       ]
@@ -2206,6 +2258,7 @@
         "model-params__number--slider",
         "model-params__param-key",
         "model-params__request-link",
+        "model-params__reset",
         "model-params__row",
         "model-params__row--disabled",
         "model-params__row-control",
@@ -2411,18 +2464,6 @@
         "agents.css"
       ]
     },
-    "overview-discovery-banner": {
-      "classes": [
-        "overview-discovery-banner",
-        "overview-discovery-banner__cta",
-        "overview-discovery-banner__dismiss",
-        "overview-discovery-banner__inner",
-        "overview-discovery-banner__text"
-      ],
-      "files": [
-        "overview.css"
-      ]
-    },
     "overview-split": {
       "classes": [
         "overview-split"
@@ -2447,7 +2488,9 @@
     },
     "overview-stats": {
       "classes": [
-        "overview-stats"
+        "overview-stats",
+        "overview-stats--3",
+        "overview-stats--5"
       ],
       "files": [
         "analytics-overview.css"
@@ -2463,6 +2506,7 @@
       ],
       "files": [
         "analytics-overview.css",
+        "connection-detail.css",
         "layout.css",
         "theme.css"
       ]
@@ -2503,6 +2547,14 @@
         "wizard.css"
       ]
     },
+    "plan-banners": {
+      "classes": [
+        "plan-banners"
+      ],
+      "files": [
+        "modals.css"
+      ]
+    },
     "plan-picker": {
       "classes": [
         "plan-picker",
@@ -2515,6 +2567,7 @@
         "plan-picker__details",
         "plan-picker__features",
         "plan-picker__name",
+        "plan-picker__notice",
         "plan-picker__period",
         "plan-picker__price-inline",
         "plan-picker__radio",
@@ -2693,6 +2746,14 @@
         "plan-usage.css"
       ]
     },
+    "platform-icon": {
+      "classes": [
+        "platform-icon"
+      ],
+      "files": [
+        "platform-icons.css"
+      ]
+    },
     "playground": {
       "classes": [
         "playground",
@@ -2856,6 +2917,32 @@
       ],
       "files": [
         "playground.css"
+      ]
+    },
+    "preset-chain": {
+      "classes": [
+        "preset-chain",
+        "preset-chain__fallback",
+        "preset-chain__mode"
+      ],
+      "files": [
+        "routing-presets.css"
+      ]
+    },
+    "preset-error": {
+      "classes": [
+        "preset-error"
+      ],
+      "files": [
+        "routing-presets.css"
+      ]
+    },
+    "preset-name": {
+      "classes": [
+        "preset-name"
+      ],
+      "files": [
+        "routing-presets.css"
       ]
     },
     "pro-range-badge": {
@@ -3424,6 +3511,25 @@
         "routing-tabs.css"
       ]
     },
+    "routing-preset-modal": {
+      "classes": [
+        "routing-preset-modal",
+        "routing-preset-modal__chains"
+      ],
+      "files": [
+        "routing-presets.css"
+      ]
+    },
+    "routing-presets": {
+      "classes": [
+        "routing-presets",
+        "routing-presets__hint",
+        "routing-presets__toolbar"
+      ],
+      "files": [
+        "routing-presets.css"
+      ]
+    },
     "routing-priority-legend": {
       "classes": [
         "routing-priority-legend"
@@ -3558,6 +3664,19 @@
         "theme.css"
       ]
     },
+    "services-modal": {
+      "classes": [
+        "services-modal",
+        "services-modal__contact",
+        "services-modal__list",
+        "services-modal__offer",
+        "services-modal__sent",
+        "services-modal__textarea"
+      ],
+      "files": [
+        "modals.css"
+      ]
+    },
     "settings-card": {
       "classes": [
         "settings-card",
@@ -3565,6 +3684,7 @@
         "settings-card--disabled",
         "settings-card--flush",
         "settings-card--highlight",
+        "settings-card--info",
         "settings-card__body",
         "settings-card__control",
         "settings-card__control--end",
@@ -3586,6 +3706,7 @@
       ],
       "files": [
         "agents.css",
+        "cards.css",
         "controls.css",
         "modals.css",
         "notifications.css"
@@ -3612,14 +3733,6 @@
         "agents.css",
         "modals.css",
         "welcome.css"
-      ]
-    },
-    "settings-type": {
-      "classes": [
-        "settings-type__icon"
-      ],
-      "files": [
-        "agents.css"
       ]
     },
     "setup-agents-card": {
@@ -3782,23 +3895,17 @@
       "classes": [
         "sidebar",
         "sidebar--mobile-open",
-        "sidebar__agent-icon",
-        "sidebar__agent-item",
-        "sidebar__agent-item--active",
-        "sidebar__agent-item-name",
-        "sidebar__agents-empty",
-        "sidebar__agents-list",
+        "sidebar__badge",
         "sidebar__feedback",
         "sidebar__feedback-hint",
         "sidebar__feedback-title",
         "sidebar__footer",
         "sidebar__link",
         "sidebar__link--disabled",
+        "sidebar__link-row",
         "sidebar__logo",
         "sidebar__logo-dot",
         "sidebar__section-add",
-        "sidebar__section-caret",
-        "sidebar__section-header",
         "sidebar__section-label",
         "sidebar__spacer"
       ],
@@ -3807,30 +3914,12 @@
         "theme.css"
       ]
     },
-    "sidebar-pivot": {
+    "sidebar-services": {
       "classes": [
-        "sidebar-pivot",
-        "sidebar-pivot__bottom",
-        "sidebar-pivot__btn",
-        "sidebar-pivot__canvas",
-        "sidebar-pivot__desc",
-        "sidebar-pivot__dismiss",
-        "sidebar-pivot__header",
-        "sidebar-pivot__joined",
-        "sidebar-pivot__title",
-        "sidebar-pivot__top"
+        "sidebar-services"
       ],
       "files": [
-        "pivot.css"
-      ]
-    },
-    "sidebar-pivot-modal": {
-      "classes": [
-        "sidebar-pivot-modal",
-        "sidebar-pivot-modal__logo"
-      ],
-      "files": [
-        "pivot.css"
+        "modals.css"
       ]
     },
     "sidebar-upgrade": {
@@ -3995,6 +4084,27 @@
         "routing-providers.css"
       ]
     },
+    "subscription-health": {
+      "classes": [
+        "subscription-health",
+        "subscription-health__actions",
+        "subscription-health__copy",
+        "subscription-health__heading",
+        "subscription-health__item",
+        "subscription-health__list"
+      ],
+      "files": [
+        "subscription-health.css"
+      ]
+    },
+    "subscription-health-badge": {
+      "classes": [
+        "subscription-health-badge"
+      ],
+      "files": [
+        "subscription-health.css"
+      ]
+    },
     "summary-card": {
       "classes": [
         "summary-card",
@@ -4004,14 +4114,6 @@
       ],
       "files": [
         "cards.css",
-        "theme.css"
-      ]
-    },
-    "svg": {
-      "classes": [
-        "svg"
-      ],
-      "files": [
         "theme.css"
       ]
     },
@@ -4283,6 +4385,7 @@
         "upgrade-plan-card__footer",
         "upgrade-plan-card__header",
         "upgrade-plan-card__no-commitment",
+        "upgrade-plan-card__notice",
         "upgrade-plan-card__period",
         "upgrade-plan-card__price",
         "upgrade-plan-card__usage"
@@ -4342,28 +4445,12 @@
         "modals.css"
       ]
     },
-    "user-discovery-modal": {
-      "classes": [
-        "user-discovery-modal",
-        "user-discovery-modal__banner",
-        "user-discovery-modal__banner-img",
-        "user-discovery-modal__body",
-        "user-discovery-modal__close",
-        "user-discovery-modal__cta",
-        "user-discovery-modal__features",
-        "user-discovery-modal__highlight",
-        "user-discovery-modal__later",
-        "user-discovery-modal__subtitle",
-        "user-discovery-modal__title",
-        "user-discovery-modal__title-logo"
-      ],
-      "files": [
-        "modals.css"
-      ]
-    },
     "version-indicator": {
       "classes": [
-        "version-indicator"
+        "version-indicator",
+        "version-indicator--update",
+        "version-indicator__dismiss",
+        "version-indicator__update"
       ],
       "files": [
         "version-indicator.css"
@@ -4522,7 +4609,18 @@
         "wingman-fab__label"
       ],
       "files": [
-        "controls.css"
+        "controls.css",
+        "version-indicator.css"
+      ]
+    },
+    "workspace-table": {
+      "classes": [
+        "workspace-table__actions",
+        "workspace-table__icon",
+        "workspace-table__name"
+      ],
+      "files": [
+        "agents.css"
       ]
     }
   },
@@ -4534,7 +4632,7 @@
       "prop": "color",
       "value": "hsl(var(--foreground))",
       "file": "analytics-overview.css",
-      "line": 170
+      "line": 213
     },
     {
       "selector": ".custom-select__option--top > svg",
@@ -4590,14 +4688,14 @@
       "prop": "background",
       "value": "hsl(38 92% 50% / 0.15)",
       "file": "overview.css",
-      "line": 194
+      "line": 105
     },
     {
       "selector": ".tier-badge--fallback",
       "prop": "color",
       "value": "hsl(38 92% 40%)",
       "file": "overview.css",
-      "line": 195
+      "line": 106
     },
     {
       "selector": ".plan-usage-plan",
@@ -4611,21 +4709,21 @@
       "prop": "border",
       "value": "1px solid hsl(36 80% 50% / 0.24)",
       "file": "request-drawer.css",
-      "line": 874
+      "line": 918
     },
     {
       "selector": ".request-tool",
       "prop": "border-radius",
       "value": "var(--radius-sm)",
       "file": "request-drawer.css",
-      "line": 875
+      "line": 919
     },
     {
       "selector": ".request-tool",
       "prop": "background",
       "value": "hsl(36 80% 50% / 0.04)",
       "file": "request-drawer.css",
-      "line": 876
+      "line": 920
     },
     {
       "selector": ".hljs-attr",
@@ -4726,74 +4824,67 @@
       "line": 827
     },
     {
-      "selector": ".sidebar__agent-item",
-      "prop": "gap",
-      "value": "8px",
-      "file": "theme.css",
-      "line": 965
-    },
-    {
       "selector": ".theme-toggle",
       "prop": "padding",
       "value": "6px 12px",
       "file": "theme.css",
-      "line": 1043
+      "line": 985
     },
     {
       "selector": ".theme-toggle",
       "prop": "width",
       "value": "100%",
       "file": "theme.css",
-      "line": 1052
+      "line": 994
     },
     {
       "selector": ".chart-tooltip",
       "prop": "font-size",
       "value": "var(--font-size-xs)",
       "file": "theme.css",
-      "line": 1129
+      "line": 1071
     },
     {
       "selector": ".expandable-card__fade",
       "prop": "height",
       "value": "64px",
       "file": "theme.css",
-      "line": 1160
+      "line": 1102
     },
     {
       "selector": ".expandable-card__fade",
       "prop": "background",
       "value": "linear-gradient(transparent, hsl(var(--card)) 70%)",
       "file": "theme.css",
-      "line": 1161
+      "line": 1103
     },
     {
       "selector": ".expandable-card__fade",
       "prop": "padding-bottom",
       "value": "12px",
       "file": "theme.css",
-      "line": 1166
+      "line": 1108
     },
     {
       "selector": ".modal",
       "prop": "box-shadow",
       "value": "rgba(0, 0, 0, 0.08) 0px 0px 0px 1px,\n    0 25px 50px -12px rgb(0 0 0 / 0.25)",
       "file": "theme.css",
-      "line": 1217
+      "line": 1159
     },
     {
       "selector": ".modal__close",
       "prop": "width",
       "value": "2rem",
       "file": "theme.css",
-      "line": 1242
+      "line": 1184
     },
     {
       "selector": ".modal__close",
       "prop": "height",
       "value": "2rem",
       "file": "theme.css",
-      "line": 1243
+      "line": 1185
     },
     {
       "selector": ".toast",
@@ -4921,7 +5012,7 @@
       "value": "hsl(var(--muted-foreground))",
       "file": "cards.css",
       "line": 72,
-      "losesTo": "analytics-overview.css:170"
+      "losesTo": "analytics-overview.css:213"
     },
     {
       "selector": ".chart-card",
@@ -4953,7 +5044,7 @@
       "value": "var(--tooltip-font-size)",
       "file": "charts.css",
       "line": 78,
-      "losesTo": "theme.css:1129"
+      "losesTo": "theme.css:1071"
     },
     {
       "selector": ".expandable-card__fade",
@@ -4961,7 +5052,7 @@
       "value": "80px",
       "file": "charts.css",
       "line": 110,
-      "losesTo": "theme.css:1160"
+      "losesTo": "theme.css:1102"
     },
     {
       "selector": ".expandable-card__fade",
@@ -4969,7 +5060,7 @@
       "value": "linear-gradient(transparent, hsl(var(--card)) 60%)",
       "file": "charts.css",
       "line": 111,
-      "losesTo": "theme.css:1161"
+      "losesTo": "theme.css:1103"
     },
     {
       "selector": ".expandable-card__fade",
@@ -4977,14 +5068,14 @@
       "value": "16px",
       "file": "charts.css",
       "line": 116,
-      "losesTo": "theme.css:1166"
+      "losesTo": "theme.css:1108"
     },
     {
       "selector": ".toast",
       "prop": "align-items",
       "value": "center",
       "file": "controls.css",
-      "line": 172,
+      "line": 124,
       "losesTo": "toast.css:16"
     },
     {
@@ -4992,7 +5083,7 @@
       "prop": "gap",
       "value": "10px",
       "file": "controls.css",
-      "line": 173,
+      "line": 125,
       "losesTo": "toast.css:17"
     },
     {
@@ -5000,7 +5091,7 @@
       "prop": "padding",
       "value": "12px 16px",
       "file": "controls.css",
-      "line": 174,
+      "line": 126,
       "losesTo": "toast.css:18"
     },
     {
@@ -5008,7 +5099,7 @@
       "prop": "box-shadow",
       "value": "0 4px 16px rgb(0 0 0 / 0.15)",
       "file": "controls.css",
-      "line": 177,
+      "line": 129,
       "losesTo": "toast.css:22"
     },
     {
@@ -5016,7 +5107,7 @@
       "prop": "animation",
       "value": "toast-in 200ms ease-out",
       "file": "controls.css",
-      "line": 180,
+      "line": 132,
       "losesTo": "toast.css:26"
     },
     {
@@ -5024,7 +5115,7 @@
       "prop": "padding",
       "value": "var(--gap-md) 0",
       "file": "controls.css",
-      "line": 261,
+      "line": 213,
       "losesTo": "theme.css:827"
     },
     {
@@ -5049,7 +5140,7 @@
       "value": "hsl(var(--muted-foreground) / 0.1)",
       "file": "data.css",
       "line": 299,
-      "losesTo": "overview.css:194"
+      "losesTo": "overview.css:105"
     },
     {
       "selector": ".tier-badge--fallback",
@@ -5057,7 +5148,7 @@
       "value": "hsl(var(--muted-foreground))",
       "file": "data.css",
       "line": 300,
-      "losesTo": "overview.css:195"
+      "losesTo": "overview.css:106"
     },
     {
       "selector": ".feed-item",
@@ -5089,7 +5180,7 @@
       "value": "2rem",
       "file": "layout.css",
       "line": 141,
-      "losesTo": "theme.css:1052"
+      "losesTo": "theme.css:994"
     },
     {
       "selector": ".theme-toggle",
@@ -5097,7 +5188,7 @@
       "value": "0",
       "file": "layout.css",
       "line": 149,
-      "losesTo": "theme.css:1043"
+      "losesTo": "theme.css:985"
     },
     {
       "selector": ".modal",
@@ -5105,7 +5196,7 @@
       "value": "var(--card-shadow),\n    0 25px 50px -12px rgb(0 0 0 / 0.25)",
       "file": "modals.css",
       "line": 22,
-      "losesTo": "theme.css:1217"
+      "losesTo": "theme.css:1159"
     },
     {
       "selector": ".modal__close",
@@ -5113,7 +5204,7 @@
       "value": "32px",
       "file": "modals.css",
       "line": 47,
-      "losesTo": "theme.css:1242"
+      "losesTo": "theme.css:1184"
     },
     {
       "selector": ".modal__close",
@@ -5121,7 +5212,7 @@
       "value": "32px",
       "file": "modals.css",
       "line": 48,
-      "losesTo": "theme.css:1243"
+      "losesTo": "theme.css:1185"
     },
     {
       "selector": ".setup-modal__header",
@@ -5136,7 +5227,7 @@
       "prop": "padding",
       "value": "8px 20px",
       "file": "modals.css",
-      "line": 105,
+      "line": 97,
       "losesTo": "overview.css:42"
     },
     {
@@ -5144,7 +5235,7 @@
       "prop": "color",
       "value": "hsl(var(--primary-foreground))",
       "file": "modals.css",
-      "line": 109,
+      "line": 101,
       "losesTo": "overview.css:46"
     },
     {
@@ -5152,7 +5243,7 @@
       "prop": "background",
       "value": "hsl(var(--primary))",
       "file": "modals.css",
-      "line": 110,
+      "line": 102,
       "losesTo": "overview.css:45"
     },
     {
@@ -5160,7 +5251,7 @@
       "prop": "opacity",
       "value": "0.9",
       "file": "modals.css",
-      "line": 118,
+      "line": 110,
       "losesTo": "overview.css:55"
     },
     {
@@ -5176,40 +5267,32 @@
       "prop": "border",
       "value": "1px solid hsl(var(--border))",
       "file": "request-drawer.css",
-      "line": 646,
-      "losesTo": "request-drawer.css:874"
+      "line": 670,
+      "losesTo": "request-drawer.css:918"
     },
     {
       "selector": ".request-tool",
       "prop": "border-radius",
       "value": "var(--radius)",
       "file": "request-drawer.css",
-      "line": 647,
-      "losesTo": "request-drawer.css:875"
+      "line": 671,
+      "losesTo": "request-drawer.css:919"
     },
     {
       "selector": ".request-tool",
       "prop": "background",
       "value": "hsl(var(--card))",
       "file": "request-drawer.css",
-      "line": 648,
-      "losesTo": "request-drawer.css:876"
+      "line": 672,
+      "losesTo": "request-drawer.css:920"
     },
     {
       "selector": ".hljs-attr",
       "prop": "color",
       "value": "hsl(187 60% 38%)",
       "file": "request-drawer.css",
-      "line": 1054,
+      "line": 1098,
       "losesTo": "syntax-highlight.css:41"
-    },
-    {
-      "selector": ".sidebar__agent-item",
-      "prop": "gap",
-      "value": "var(--gap-xs)",
-      "file": "theme.css",
-      "line": 867,
-      "losesTo": "theme.css:965"
     },
     {
       "selector": ".welcome__progress-header span",
@@ -5263,6 +5346,9 @@
       "pages/providers/PlanUsage.tsx",
       "pages/providers/ProviderConnectionsPage.tsx"
     ],
+    "connection-detail.css": [
+      "pages/providers/ConnectionDetail.tsx"
+    ],
     "discovery.css": [
       "pages/Discovery.tsx"
     ],
@@ -5302,6 +5388,9 @@
     "routing-modal.css": [
       "pages/Welcome.tsx"
     ],
+    "routing-presets.css": [
+      "components/RoutingPresets.tsx"
+    ],
     "routing-providers.css": [
       "pages/Welcome.tsx"
     ],
@@ -5322,6 +5411,9 @@
       "pages/providers/ConnectionDetail.tsx",
       "pages/providers/ProviderConnectionsPage.tsx"
     ],
+    "subscription-health.css": [
+      "components/SubscriptionHealthBanner.tsx"
+    ],
     "syntax-highlight.css": [
       "services/syntax-highlight.ts"
     ],
@@ -5334,9 +5426,9 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 334,
-    "classes": 1775,
-    "canonicalRules": 48,
-    "ghostRules": 48
+    "blocks": 344,
+    "classes": 1796,
+    "canonicalRules": 47,
+    "ghostRules": 47
   }
 }

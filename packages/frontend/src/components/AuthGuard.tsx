@@ -13,11 +13,25 @@ const AuthGuard: ParentComponent = (props) => {
   const location = useLocation();
   const [planChecked, setPlanChecked] = createSignal(false);
 
+  // Start the plan lookup now, in parallel with the session probe: it only
+  // needs the cookie jar. The effect below awaits the same in-flight promise,
+  // so the two serial round trips before first paint become one. Signed-out
+  // visitors get a 401 that loadPlan neither caches nor surfaces.
+  void loadPlan();
+
   createEffect(() => {
     const s = session();
     if (s.isPending) return;
     if (!s.data) {
       navigate(buildLoginRedirect(location.pathname, location.search), { replace: true });
+      return;
+    }
+    // The CLI consent page and the MCP OAuth consent page are not part of
+    // onboarding. Gate them on an authenticated session only, so a user who is
+    // mid-discovery/plan selection can still authorize a client (otherwise the
+    // login flow never gets its code).
+    if (location.pathname === '/cli/auth' || location.pathname === '/consent') {
+      setPlanChecked(true);
       return;
     }
     const userId = s.data.user?.id;
@@ -65,7 +79,7 @@ const AuthGuard: ParentComponent = (props) => {
             <div class="auth-logo">
               <img
                 src="/logotype-white.svg"
-                alt="Manifest"
+                alt="Manifest LLM Gateway"
                 class="auth-logo__img auth-logo__img--light"
               />
               <img src="/logotype-dark.svg" alt="" class="auth-logo__img auth-logo__img--dark" />
