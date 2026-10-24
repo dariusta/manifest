@@ -821,6 +821,7 @@
         "routing-providers.css",
         "routing.css",
         "skeleton.css",
+        "subscription-health.css",
         "theme.css"
       ]
     },
@@ -3995,6 +3996,27 @@
         "routing-providers.css"
       ]
     },
+    "subscription-health": {
+      "classes": [
+        "subscription-health",
+        "subscription-health__actions",
+        "subscription-health__copy",
+        "subscription-health__heading",
+        "subscription-health__item",
+        "subscription-health__list"
+      ],
+      "files": [
+        "subscription-health.css"
+      ]
+    },
+    "subscription-health-badge": {
+      "classes": [
+        "subscription-health-badge"
+      ],
+      "files": [
+        "subscription-health.css"
+      ]
+    },
     "summary-card": {
       "classes": [
         "summary-card",
@@ -5322,6 +5344,9 @@
       "pages/providers/ConnectionDetail.tsx",
       "pages/providers/ProviderConnectionsPage.tsx"
     ],
+    "subscription-health.css": [
+      "components/SubscriptionHealthBanner.tsx"
+    ],
     "syntax-highlight.css": [
       "services/syntax-highlight.ts"
     ],
@@ -5334,8 +5359,8 @@
   "stats": {
     "tokens": 79,
     "darkOverrides": 38,
-    "blocks": 334,
-    "classes": 1775,
+    "blocks": 336,
+    "classes": 1782,
     "canonicalRules": 48,
     "ghostRules": 48
   }

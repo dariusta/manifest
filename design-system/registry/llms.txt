@@ -96,7 +96,7 @@
 --z-toast: 8000
 --z-tooltip: 9999
 
-## Blocks (334 BEM blocks, 1775 classes)
+## Blocks (336 BEM blocks, 1782 classes)
 account-back-btn (agents.css): account-back-btn
 account-email-footer (agents.css): account-email-footer
 account-email-toggle (agents.css): account-email-toggle--disabled
@@ -143,7 +143,7 @@ billing-footer (agents.css): billing-footer billing-footer__actions billing-foot
 billing-stat (agents.css): billing-stat billing-stat__cancel billing-stat__label billing-stat__meta billing-stat__value
 billing-stats (agents.css): billing-stats
 breadcrumb (layout.css, theme.css): breadcrumb
-btn (agents.css, controls.css, data.css, layout.css, limits.css, modals.css, routing-providers.css, routing.css, skeleton.css, theme.css): btn btn--danger btn--ghost btn--outline btn--primary btn--sm
+btn (agents.css, controls.css, data.css, layout.css, limits.css, modals.css, routing-providers.css, routing.css, skeleton.css, subscription-health.css, theme.css): btn btn--danger btn--ghost btn--outline btn--primary btn--sm
 cards-grid (layout.css, theme.css, wizard.css): cards-grid
 chart-card (cards.css, theme.css): chart-card chart-card__body chart-card__controls chart-card__filter-btn chart-card__filter-btn--active chart-card__filters chart-card__header chart-card__label chart-card__stat chart-card__stat--active chart-card__stat--clickable chart-card__subtitle chart-card__subtitle-title chart-card__value chart-card__value-row
 chart-tooltip (charts.css, theme.css): chart-tooltip
@@ -393,6 +393,8 @@ sr-only (playground.css, skeleton.css): sr-only
 status-badge (data.css, theme.css): status-badge status-badge--auto_fixed status-badge--error status-badge--fallback_error status-badge--neutral status-badge--ok status-badge--rate_limited status-badge--retry
 status-badge-tooltip (data.css): status-badge-tooltip status-badge-tooltip__bubble
 subscription-detail (routing-providers.css): subscription-detail__alt subscription-detail__alt-divider subscription-detail__alt-hint subscription-detail__btn subscription-detail__primary
+subscription-health (subscription-health.css): subscription-health subscription-health__actions subscription-health__copy subscription-health__heading subscription-health__item subscription-health__list
+subscription-health-badge (subscription-health.css): subscription-health-badge
 summary-card (cards.css, theme.css): summary-card summary-card__label summary-card__subtitle summary-card__value
 svg (theme.css): svg
 theme-picker (agents.css): theme-picker theme-picker__option theme-picker__option--active
@@ -541,7 +543,7 @@ wingman-fab (controls.css): wingman-fab wingman-fab__label
 .welcome__route-test-heading { align-items: flex-start }  at welcome.css:873 loses to welcome.css:903
 .welcome__route-test-heading { gap: 14px }  at welcome.css:875 loses to welcome.css:904
 
-## Component-loaded sheets — imported by components, not theme.css; they load after the global styles (20)
+## Component-loaded sheets — imported by components, not theme.css; they load after the global styles (21)
 agent-chart-tooltip.css ← components/ChartHoverTooltip.tsx
 analytics-overview.css ← components/AutofixKpiCards.tsx, pages/GlobalOverview.tsx, pages/providers/ConnectionDetail.tsx, pages/providers/PlanUsage.tsx, pages/providers/ProviderConnectionsPage.tsx
 discovery.css ← pages/Discovery.tsx
@@ -560,5 +562,6 @@ routing-providers.css ← pages/Welcome.tsx
 routing-specificity.css ← pages/RoutingSpecificitySection.tsx
 routing-tabs.css ← (via @import)
 routing.css ← pages/AgentProviders.tsx, pages/GlobalOverview.tsx, pages/MessageLog.tsx, pages/Overview.tsx, pages/Playground.tsx, pages/Routing.tsx, pages/Welcome.tsx, pages/providers/ConnectionDetail.tsx, pages/providers/ProviderConnectionsPage.tsx
+subscription-health.css ← components/SubscriptionHealthBanner.tsx
 syntax-highlight.css ← services/syntax-highlight.ts
 welcome.css ← pages/Welcome.tsx

@@ -1,4 +1,4 @@
-import { Controller, Param, Post } from '@nestjs/common';
+import { Controller, Get, Param, Post } from '@nestjs/common';
 import { TenantCtx, TenantContext } from '../common/decorators/tenant-context.decorator';
 import { ConnectionTestService } from './connection-test.service';
 
@@ -12,6 +12,11 @@ import { ConnectionTestService } from './connection-test.service';
 @Controller('api/v1/providers/connection-test')
 export class ConnectionTestController {
   constructor(private readonly connectionTest: ConnectionTestService) {}
+
+  @Get()
+  async subscriptionHealth(@TenantCtx() ctx: TenantContext) {
+    return { connections: await this.connectionTest.subscriptionHealth(ctx.tenantId) };
+  }
 
   @Post(':connectionId')
   async test(@TenantCtx() ctx: TenantContext, @Param('connectionId') connectionId: string) {

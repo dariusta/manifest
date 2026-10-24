@@ -347,6 +347,17 @@ export interface ConnectionTestResult {
   tested_at: string;
 }
 
+/** Cached hourly/manual subscription checks; never runs an upstream completion. */
+export function getSubscriptionHealth() {
+  return fetchJson<{ connections: ConnectionTestResult[] }>(
+    '/providers/connection-test',
+    undefined,
+    {
+      cache: false,
+    },
+  );
+}
+
 /**
  * Send one real completion through this exact connection to prove it works.
  *

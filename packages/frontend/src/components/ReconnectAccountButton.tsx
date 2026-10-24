@@ -24,9 +24,10 @@ interface Props {
  * allocates a new one.
  */
 export const ReconnectAccountButton: Component<Props> = (props) => {
-  const needsReconnect = connectionTestResult(props.connectionId)?.status === 'needs_reconnect';
-  const visible = () => props.always || needsReconnect;
-  const caption = () => (props.always && !needsReconnect ? 'Replace' : 'Reconnect');
+  const needsReconnect = () =>
+    connectionTestResult(props.connectionId)?.status === 'needs_reconnect';
+  const visible = () => props.always || needsReconnect();
+  const caption = () => (props.always && !needsReconnect() ? 'Replace' : 'Reconnect');
   return (
     <Show when={visible()}>
       <button

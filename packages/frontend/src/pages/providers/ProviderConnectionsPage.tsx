@@ -6,6 +6,8 @@ import {
   createResource,
   createSignal,
   For,
+  onCleanup,
+  onMount,
   Show,
   type Component,
 } from 'solid-js';
@@ -13,13 +15,16 @@ import {
   getAgents,
   getCustomProviders,
   getProviders as getAgentProviders,
+  refreshProviderModels,
 } from '../../services/api.js';
 import {
   getProviders as getGlobalProviders,
   getProviderUsage,
+  getSubscriptionHealth,
   mergeUsage,
   connectionUsage,
   type TenantProviderSummary,
+  type ConnectionTestResult,
 } from '../../services/api/providers.js';
 import { analyticsPing, routingPing } from '../../services/sse.js';
 import { toggleScrollFade } from '../../services/scroll-fade.js';
@@ -39,6 +44,14 @@ import { toast } from '../../services/toast-store.js';
 import ProviderSelectModal from '../../components/ProviderSelectModal.jsx';
 import CustomProviderForm from '../../components/CustomProviderForm.jsx';
 import Sparkline from '../../components/Sparkline.jsx';
+import SubscriptionHealthBanner, {
+  subscriptionIssue,
+} from '../../components/SubscriptionHealthBanner.jsx';
+import {
+  clearConnectionTestResult,
+  connectionTestResult,
+  rememberConnectionTestResult,
+} from '../../services/connection-test-store.js';
 import {
   attemptSuccessRate,
   totalAttemptsTooltip,
@@ -331,10 +344,32 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
   // numbers on screen (usage() stays defined) so the table doesn't flicker.
   const usageLoading = () => usage.loading && usage() === undefined;
 
+  const [health, { refetch: refetchHealth }] = createResource(
+    () => props.kind === 'subscriptions' && { routing: routingPing() },
+    async (_, { value }): Promise<ConnectionTestResult[]> => {
+      try {
+        return (await getSubscriptionHealth()).connections;
+      } catch {
+        // A failed read cannot establish a new failure or clear a known one.
+        return value ?? [];
+      }
+    },
+  );
+  const healthById = createMemo(() => new Map((health() ?? []).map((r) => [r.connection_id, r])));
+  const [refreshingProvider, setRefreshingProvider] = createSignal<string | null>(null);
+  onMount(() => {
+    if (props.kind !== 'subscriptions') return;
+    const timer = setInterval(() => {
+      if (!document.hidden) void refetchHealth();
+    }, 60_000);
+    onCleanup(() => clearInterval(timer));
+  });
+
   // Coordinate a usage refetch alongside config on connect/disconnect/rename.
   const refetchGlobalProviders = () => {
     void refetchConfig();
     void refetchUsage();
+    if (props.kind === 'subscriptions') void refetchHealth();
   };
 
   // Merge config + usage by (provider, auth_type). While usage is still loading
@@ -484,6 +519,27 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
     setShowModal(true);
   };
 
+  const refreshSubscriptionModels = async (providerId: string) => {
+    if (!firstAgentName() || refreshingProvider()) return;
+    setRefreshingProvider(providerId);
+    try {
+      const result = await refreshProviderModels(firstAgentName(), providerId, 'subscription');
+      if (!result.ok) {
+        toast.error(result.error ?? 'Could not refresh models');
+        return;
+      }
+      for (const row of connectedRows()) {
+        if (row.summary.provider === providerId) clearConnectionTestResult(row.connection.id);
+      }
+      toast.success('Subscription models refreshed');
+      refetchGlobalProviders();
+    } catch {
+      // fetchMutate already reports the error.
+    } finally {
+      setRefreshingProvider(null);
+    }
+  };
+
   // Deep-link support: visiting a provider page with ?add=true auto-opens the
   // connect modal so onboarding surfaces can route a user straight into adding
   // a provider. React on every navigation (not just initial mount) and clear the
@@ -550,6 +606,21 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
           </button>
         </Show>
       </div>
+
+      <Show when={props.kind === 'subscriptions'}>
+        <SubscriptionHealthBanner
+          rows={connectedRows().map((row) => ({ ...row, provider: row.summary.provider }))}
+          health={healthById()}
+          canManage={!!firstAgentName()}
+          refreshingProvider={refreshingProvider()}
+          onManage={(provider, result?: ConnectionTestResult) => {
+            if (result) rememberConnectionTestResult(result);
+            openModal(provider);
+          }}
+          onRefresh={(provider) => void refreshSubscriptionModels(provider)}
+          onViewDetails={(id) => navigate(`/providers/connections/${id}`)}
+        />
+      </Show>
 
       <Show when={connectedRows().length > 0}>
         <div
@@ -774,7 +845,29 @@ const ProviderConnectionsPage: Component<ProviderConnectionsPageProps> = (props)
                           </Show>
                         </td>
                         <td>
-                          <StatusBadge active={row.connection.is_active} />
+                          <Show
+                            when={
+                              props.kind === 'subscriptions' &&
+                              subscriptionIssue(
+                                row.connection,
+                                connectionTestResult(
+                                  row.connection.id,
+                                  healthById().get(row.connection.id),
+                                ),
+                              )
+                            }
+                            fallback={<StatusBadge active={row.connection.is_active} />}
+                          >
+                            {(issue) => (
+                              <span class="subscription-health-badge">
+                                {issue().status === 'needs_reconnect'
+                                  ? 'Needs relink'
+                                  : issue().status === 'refresh'
+                                    ? 'Needs refresh'
+                                    : 'Connection issue'}
+                              </span>
+                            )}
+                          </Show>
                         </td>
                         <td>
                           <Show when={!usageLoading()} fallback={<UsageShimmer width={96} />}>

@@ -1,17 +1,29 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@solidjs/testing-library';
+import { createSignal } from 'solid-js';
 import { ReconnectAccountButton } from '../../src/components/ReconnectAccountButton';
 
 vi.mock('../../src/services/connection-test-store.js', () => ({
   connectionTestResult: (id: string) =>
-    id === 'needs-it'
-      ? { status: 'needs_reconnect' }
-      : id === 'ok'
-        ? { status: 'ok' }
-        : undefined,
+    id === 'needs-it' ? { status: 'needs_reconnect' } : id === 'ok' ? { status: 'ok' } : undefined,
 }));
 
 describe('ReconnectAccountButton', () => {
+  it('updates the relink caption when the account health changes while mounted', () => {
+    const [connectionId, setConnectionId] = createSignal('ok');
+    render(() => (
+      <ReconnectAccountButton
+        connectionId={connectionId()}
+        label="Work"
+        always
+        onReconnect={vi.fn()}
+      />
+    ));
+    expect(screen.getByRole('button', { name: 'Replace account Work' })).not.toBeNull();
+    setConnectionId('needs-it');
+    expect(screen.getByRole('button', { name: 'Reconnect account Work' })).not.toBeNull();
+  });
+
   it('renders a Replace action even when the connection never needed a reconnect', () => {
     render(() => (
       <ReconnectAccountButton connectionId="ok" label="Work" always onReconnect={vi.fn()} />
@@ -30,7 +42,10 @@ describe('ReconnectAccountButton', () => {
     render(() => (
       <ReconnectAccountButton connectionId="needs-it" label="Work" busy onReconnect={vi.fn()} />
     ));
-    expect((screen.getByRole('button', { name: 'Reconnect account Work' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: 'Reconnect account Work' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
   });
 
   it('starts a reconnect for the named account', () => {
