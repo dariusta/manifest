@@ -22,7 +22,7 @@ on:
 jobs:
   publish:
     # workflow_dispatch accepts any ref and checkout honours it. Only main.
-    if: github.ref == 'refs/heads/main'
+    if: github.repository_owner == 'mnfst' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
       group: npm-publish-mnfst-gateway-cli

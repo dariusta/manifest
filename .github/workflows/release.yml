@@ -12,6 +12,8 @@ permissions:
 
 jobs:
   release:
+    # Upstream's release app and publishing credentials are organization-scoped.
+    if: github.repository_owner == 'mnfst'
     runs-on: ubuntu-latest
     outputs:
       should_publish: ${{ steps.detect.outputs.should_publish }}

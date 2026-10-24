@@ -18,6 +18,7 @@ on:
 jobs:
   publish:
     name: Publish n8n-nodes-manifest to npm
+    if: github.repository_owner == 'mnfst'
     runs-on: ubuntu-latest
 
     permissions:
