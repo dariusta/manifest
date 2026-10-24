@@ -38,6 +38,11 @@ describe('routing presets with PostgreSQL', () => {
       entities,
       migrations,
       migrationsTransactionMode: 'each',
+      // Other E2E suites use synchronize:true and leave a partial schema.
+      // Rebuild from migrations so this suite is independent of run order.
+      synchronize: false,
+      dropSchema: true,
+      logging: false,
     });
     await db.initialize();
     await db.runMigrations({ transaction: 'each' });
@@ -49,56 +54,48 @@ describe('routing presets with PostgreSQL', () => {
       { id: source, name: 'preset-source', tenant_id: tenant },
       { id: target, name: 'preset-target', tenant_id: tenant },
     ]);
-    await db
-      .getRepository(TenantProvider)
-      .insert({
-        id: connection,
-        tenant_id: tenant,
-        provider: 'openai',
-        auth_type: 'api_key',
-        label: 'Default',
-        api_key_encrypted: 'test-only-ciphertext',
-      });
+    await db.getRepository(TenantProvider).insert({
+      id: connection,
+      tenant_id: tenant,
+      provider: 'openai',
+      auth_type: 'api_key',
+      label: 'Default',
+      api_key_encrypted: 'test-only-ciphertext',
+    });
     await db
       .getRepository(AgentEnabledProvider)
       .insert({ agent_id: source, tenant_provider_id: connection });
-    await db
-      .getRepository(TierAssignment)
-      .insert({
-        id: randomUUID(),
-        agent_id: source,
-        tier: 'default',
-        override_route: first,
-        fallback_routes: [second],
-        output_modality: 'text',
-        response_mode: 'buffered',
-      });
-    await db
-      .getRepository(HeaderTier)
-      .insert({
-        id: header,
-        agent_id: source,
-        tenant_id: tenant,
-        name: 'Coding',
-        header_key: 'x-task',
-        header_value: 'code',
-        badge_color: 'blue',
-        override_route: second,
-        fallback_routes: [first],
-        output_modality: 'text',
-        response_mode: 'buffered',
-      });
-    await db
-      .getRepository(AgentModelParams)
-      .insert({
-        id: randomUUID(),
-        agent_id: source,
-        scope_key: `header:${header}`,
-        provider: 'openai',
-        model_name: 'model-b',
-        auth_type: 'api_key',
-        params: { temperature: 0.2 } as never,
-      });
+    await db.getRepository(TierAssignment).insert({
+      id: randomUUID(),
+      agent_id: source,
+      tier: 'default',
+      override_route: first,
+      fallback_routes: [second],
+      output_modality: 'text',
+      response_mode: 'buffered',
+    });
+    await db.getRepository(HeaderTier).insert({
+      id: header,
+      agent_id: source,
+      tenant_id: tenant,
+      name: 'Coding',
+      header_key: 'x-task',
+      header_value: 'code',
+      badge_color: 'blue',
+      override_route: second,
+      fallback_routes: [first],
+      output_modality: 'text',
+      response_mode: 'buffered',
+    });
+    await db.getRepository(AgentModelParams).insert({
+      id: randomUUID(),
+      agent_id: source,
+      scope_key: `header:${header}`,
+      provider: 'openai',
+      model_name: 'model-b',
+      auth_type: 'api_key',
+      params: { temperature: 0.2 } as never,
+    });
     service = new RoutingPresetService(
       db,
       discovery as never,
