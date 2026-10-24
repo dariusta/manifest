@@ -318,6 +318,11 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
     const pricingCache = app.get(ModelPricingCacheService);
     await pricingCache.reload();
 
+    // Keep a stable listener until app.close(). Otherwise Supertest repeatedly
+    // reopens/closes this server between requests, which can reset sockets or
+    // race concurrent requests against the request that owns its lifecycle.
+    await app.listen(0, '127.0.0.1');
+
     return app;
   } finally {
     restoreFetch();

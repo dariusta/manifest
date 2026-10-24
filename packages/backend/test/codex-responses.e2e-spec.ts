@@ -270,7 +270,6 @@ describe('Codex Responses tool loop (e2e)', () => {
   if (codexCli) {
     it('real Codex CLI executes a file write and returns its result through Manifest', async () => {
       const cwd = mkdtempSync(join(tmpdir(), 'codex-pr2837-'));
-      await app.listen(0, '127.0.0.1');
       const url = await app.getUrl();
       let calls = 0;
       makeReply = (body) => {
