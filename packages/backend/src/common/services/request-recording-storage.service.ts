@@ -3,6 +3,7 @@ import {
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
+  S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -27,6 +28,7 @@ export interface S3StorageConfig {
   accessKeyId?: string;
   secretAccessKey?: string;
   forcePathStyle: boolean;
+  filesystemFallbackPath?: string;
 }
 
 export type ResolvedRecordingStorage =
@@ -62,6 +64,8 @@ export function resolveRecordingStorage(
   const secretAccessKey =
     config.get<string>('app.requestRecordingS3SecretAccessKey')?.trim() || undefined;
   const forcePathStyle = config.get<boolean>('app.requestRecordingS3ForcePathStyle') ?? false;
+  const filesystemFallbackPath =
+    config.get<string>('app.requestRecordingFilesystemFallbackPath')?.trim() || undefined;
   const hasExplicitCredentials = Boolean(accessKeyId && secretAccessKey);
   const hasPartialCredentials = Boolean(accessKeyId || secretAccessKey);
   const completeS3 = Boolean(
@@ -78,6 +82,7 @@ export function resolveRecordingStorage(
           accessKeyId,
           secretAccessKey,
           forcePathStyle,
+          ...(filesystemFallbackPath ? { filesystemFallbackPath } : {}),
         }
       : {
           backend: null,
@@ -146,6 +151,7 @@ class FilesystemRecordingStorage implements RecordingStorage {
 export class S3RecordingStorage implements RecordingStorage {
   readonly backend = 's3' as const;
   private readonly client: S3Client;
+  private readonly filesystemFallback: FilesystemRecordingStorage | null;
 
   constructor(
     private readonly config: S3StorageConfig,
@@ -165,6 +171,9 @@ export class S3RecordingStorage implements RecordingStorage {
               }
             : undefined,
       });
+    this.filesystemFallback = config.filesystemFallbackPath
+      ? new FilesystemRecordingStorage(config.filesystemFallbackPath)
+      : null;
   }
 
   async prepare(): Promise<void> {}
@@ -184,11 +193,22 @@ export class S3RecordingStorage implements RecordingStorage {
   }
 
   async get(key: string): Promise<Buffer> {
-    const response = await this.client.send(
-      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
-    );
-    if (!response.Body) throw new Error('Request recording object has no body');
-    return Buffer.from(await response.Body.transformToByteArray());
+    try {
+      const response = await this.client.send(
+        new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      );
+      if (!response.Body) throw new Error('Request recording object has no body');
+      return Buffer.from(await response.Body.transformToByteArray());
+    } catch (error) {
+      if (
+        this.filesystemFallback &&
+        error instanceof S3ServiceException &&
+        error.$metadata.httpStatusCode === 404
+      ) {
+        return this.filesystemFallback.get(key);
+      }
+      throw error;
+    }
   }
 
   async delete(key: string): Promise<void> {
