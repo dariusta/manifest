@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  NoSuchBucket,
+  NoSuchKey,
   PutObjectCommand,
   S3ServiceException,
 } from '@aws-sdk/client-s3';
@@ -189,7 +191,9 @@ describe('S3 recording filesystem read fallback', () => {
     });
 
   it('reads unchanged source bytes when the object has not reached S3 yet', async () => {
-    send.mockRejectedValue(s3Error(404));
+    send.mockRejectedValue(
+      new NoSuchKey({ message: 'Missing object', $metadata: { httpStatusCode: 404 } }),
+    );
     await expect(storage.get(key)).resolves.toEqual(sourceBody);
   });
 
@@ -209,10 +213,21 @@ describe('S3 recording filesystem read fallback', () => {
   );
 
   it('rejects source traversal even when S3 reports an absent object', async () => {
-    send.mockRejectedValue(s3Error(404));
+    send.mockRejectedValue(
+      new NoSuchKey({ message: 'Missing object', $metadata: { httpStatusCode: 404 } }),
+    );
     await expect(storage.get('../outside')).rejects.toThrow(
       'Invalid request recording storage key',
     );
+  });
+
+  it('surfaces a missing S3 bucket instead of serving a local copy', async () => {
+    const error = new NoSuchBucket({
+      message: 'Missing bucket',
+      $metadata: { httpStatusCode: 404 },
+    });
+    send.mockRejectedValue(error);
+    await expect(storage.get(key)).rejects.toBe(error);
   });
 
   it('keeps source bytes unchanged when writing or deleting S3 objects', async () => {

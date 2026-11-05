@@ -1,9 +1,9 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  NoSuchKey,
   PutObjectCommand,
   S3Client,
-  S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -202,7 +202,7 @@ export class S3RecordingStorage implements RecordingStorage {
     } catch (error) {
       if (
         this.filesystemFallback &&
-        error instanceof S3ServiceException &&
+        error instanceof NoSuchKey &&
         error.$metadata.httpStatusCode === 404
       ) {
         return this.filesystemFallback.get(key);
