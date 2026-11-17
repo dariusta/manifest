@@ -67,6 +67,8 @@ export const appConfig = registerAs('app', () => ({
   // filesystem. The explicit selector is an escape hatch for custom setups.
   requestRecordingStorage: process.env['REQUEST_RECORDING_STORAGE'] ?? 'auto',
   requestRecordingFilesystemPath: process.env['REQUEST_RECORDING_FILESYSTEM_PATH'] ?? '',
+  requestRecordingFilesystemFallbackPath:
+    process.env['REQUEST_RECORDING_FILESYSTEM_FALLBACK_PATH'] ?? '',
   requestRecordingS3Bucket: process.env['REQUEST_RECORDING_S3_BUCKET'] ?? '',
   requestRecordingS3Endpoint: process.env['REQUEST_RECORDING_S3_ENDPOINT'] ?? '',
   requestRecordingS3Region: process.env['REQUEST_RECORDING_S3_REGION'] ?? '',

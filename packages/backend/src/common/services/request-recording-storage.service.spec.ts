@@ -1,7 +1,14 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  NoSuchBucket,
+  NoSuchKey,
+  PutObjectCommand,
+  S3ServiceException,
+} from '@aws-sdk/client-s3';
 import {
   RequestRecordingStorageService,
   S3RecordingStorage,
@@ -131,6 +138,105 @@ describe('request recording storage selection', () => {
       backend: null,
       reason: 'Unknown REQUEST_RECORDING_STORAGE value "somewhere-else"',
     });
+  });
+
+  it('keeps an explicitly configured filesystem read fallback with S3', () => {
+    expect(
+      resolveRecordingStorage(
+        config({
+          'app.requestRecordingStorage': 's3',
+          'app.requestRecordingS3Bucket': 'recordings',
+          'app.requestRecordingS3Region': 'us-west-2',
+          'app.requestRecordingFilesystemFallbackPath': '/data/old-recordings',
+        }),
+        true,
+      ),
+    ).toEqual(
+      expect.objectContaining({ backend: 's3', filesystemFallbackPath: '/data/old-recordings' }),
+    );
+  });
+});
+
+describe('S3 recording filesystem read fallback', () => {
+  let directory: string;
+  const send = jest.fn();
+  const key = 'request-recordings/v1/recording.json.gz';
+  const sourceBody = Buffer.from([0, 5, 255, 87]);
+  let storage: S3RecordingStorage;
+
+  beforeEach(async () => {
+    send.mockReset();
+    directory = await mkdtemp(join(tmpdir(), 'manifest-recording-offload-'));
+    await mkdir(join(directory, 'request-recordings/v1'), { recursive: true });
+    await writeFile(join(directory, key), sourceBody);
+    storage = new S3RecordingStorage(
+      {
+        bucket: 'recordings',
+        region: 'us-west-2',
+        forcePathStyle: false,
+        filesystemFallbackPath: directory,
+      },
+      { send } as never,
+    );
+  });
+
+  afterEach(async () => rm(directory, { recursive: true, force: true }));
+
+  const s3Error = (status: number) =>
+    new S3ServiceException({
+      name: 'S3Error',
+      message: 'S3 request failed',
+      $fault: 'client',
+      $metadata: { httpStatusCode: status },
+    });
+
+  it('reads unchanged source bytes when the object has not reached S3 yet', async () => {
+    send.mockRejectedValue(
+      new NoSuchKey({ message: 'Missing object', $metadata: { httpStatusCode: 404 } }),
+    );
+    await expect(storage.get(key)).resolves.toEqual(sourceBody);
+  });
+
+  it('prefers S3 when both copies exist', async () => {
+    const copiedBody = Buffer.from('copied bytes');
+    send.mockResolvedValue({ Body: { transformToByteArray: async () => copiedBody } });
+    await expect(storage.get(key)).resolves.toEqual(copiedBody);
+  });
+
+  it.each([403, 500, 503])(
+    'surfaces S3 error %s instead of masking it with a local copy',
+    async (status) => {
+      const error = s3Error(status);
+      send.mockRejectedValue(error);
+      await expect(storage.get(key)).rejects.toBe(error);
+    },
+  );
+
+  it('rejects source traversal even when S3 reports an absent object', async () => {
+    send.mockRejectedValue(
+      new NoSuchKey({ message: 'Missing object', $metadata: { httpStatusCode: 404 } }),
+    );
+    await expect(storage.get('../outside')).rejects.toThrow(
+      'Invalid request recording storage key',
+    );
+  });
+
+  it('surfaces a missing S3 bucket instead of serving a local copy', async () => {
+    const error = new NoSuchBucket({
+      message: 'Missing bucket',
+      $metadata: { httpStatusCode: 404 },
+    });
+    send.mockRejectedValue(error);
+    await expect(storage.get(key)).rejects.toBe(error);
+  });
+
+  it('keeps source bytes unchanged when writing or deleting S3 objects', async () => {
+    send.mockResolvedValue({});
+    await storage.put(key, Buffer.from('new bytes'));
+    await storage.delete(key);
+    await expect(readFile(join(directory, key))).resolves.toEqual(sourceBody);
+    expect(send.mock.calls[0][0]).toBeInstanceOf(PutObjectCommand);
+    expect(send.mock.calls[1][0]).toBeInstanceOf(DeleteObjectCommand);
   });
 });
 

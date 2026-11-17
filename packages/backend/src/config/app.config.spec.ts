@@ -182,12 +182,14 @@ describe('appConfig', () => {
     process.env['REQUEST_RECORDING_S3_BUCKET'] = 'recordings';
     process.env['REQUEST_RECORDING_S3_REGION'] = 'auto';
     process.env['REQUEST_RECORDING_S3_FORCE_PATH_STYLE'] = 'true';
+    process.env['REQUEST_RECORDING_FILESYSTEM_FALLBACK_PATH'] = '/data/old-recordings';
     const config = await loadConfig();
 
     expect(config.requestRecordingStorage).toBe('s3');
     expect(config.requestRecordingS3Bucket).toBe('recordings');
     expect(config.requestRecordingS3Region).toBe('auto');
     expect(config.requestRecordingS3ForcePathStyle).toBe(true);
+    expect(config.requestRecordingFilesystemFallbackPath).toBe('/data/old-recordings');
   });
 
   it('defaults shutdownDrainMs to 10000 when SHUTDOWN_DRAIN_MS is unset', async () => {
