@@ -237,7 +237,7 @@ export const COPILOT_PLUGIN_VERSION = 'copilot/1.300.0';
 
 // Google shut down Gemini Code Assist for individuals. Personal Google
 // subscriptions now authenticate as Antigravity (`agy`) against Cloud Code.
-export const ANTIGRAVITY_CLI_VERSION = '1.21.9';
+export const ANTIGRAVITY_CLI_VERSION = '2.32.1';
 export const ANTIGRAVITY_ENDPOINT_DAILY = 'https://daily-cloudcode-pa.googleapis.com';
 export const ANTIGRAVITY_ENDPOINT_PROD = 'https://cloudcode-pa.googleapis.com';
 
