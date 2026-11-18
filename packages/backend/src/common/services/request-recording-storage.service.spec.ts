@@ -445,6 +445,9 @@ describe('S3 recording key prefix', () => {
     ['/manifest//recordings/', 'manifest/recordings/'],
     ['manifest\\recordings', 'manifest/recordings/'],
     ['  /manifest/recordings/  ', 'manifest/recordings/'],
+    ['manifest/recordings/\r', 'manifest/recordings/'],
+    ['manifest/recordings/\t', 'manifest/recordings/'],
+    ['\r\nmanifest/recordings\t', 'manifest/recordings/'],
   ])('applies prefix %p as %p on put, get, and delete', async (prefix, stored) => {
     const storage = open(prefix);
     const storedKey = `${stored}${logicalKey}`;
@@ -490,6 +493,8 @@ describe('S3 recording key prefix', () => {
     'foo/./bar',
     './recordings',
     'manifest/\nrecordings',
+    'manifest/\rrecordings',
+    'manifest/\trecordings',
     'foo\u0000bar',
   ])('rejects prefix %s', (prefix) => {
     expect(() => open(prefix)).toThrow(/Invalid REQUEST_RECORDING_S3_PREFIX/);
@@ -539,7 +544,6 @@ describe('S3 filesystem read fallback', () => {
   it.each([
     ['NoSuchKey', { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } }],
     ['NoSuchKey without a status', { name: 'NoSuchKey' }],
-    ['HTTP 404', { $metadata: { httpStatusCode: 404 } }],
     ['Code NoSuchKey', { Code: 'NoSuchKey' }],
   ])('reads the logical key from the filesystem when S3 returns %s', async (_label, shape) => {
     const body = Buffer.from(`fallback-${_label}`);
@@ -594,6 +598,7 @@ describe('S3 filesystem read fallback', () => {
       'NoSuchBucket',
       Object.assign(new Error('The specified bucket does not exist.'), {
         name: 'NoSuchBucket',
+        code: '404',
         $metadata: { httpStatusCode: 404 },
       }),
     ],
@@ -611,6 +616,8 @@ describe('S3 filesystem read fallback', () => {
         $metadata: { httpStatusCode: 403 },
       }),
     ],
+    ['bare 404', Object.assign(new Error('missing'), { $metadata: { httpStatusCode: 404 } })],
+    ['code 404', Object.assign(new Error('missing'), { code: '404' })],
     ['403', Object.assign(new Error('Forbidden'), { $metadata: { httpStatusCode: 403 } })],
     [
       '500',

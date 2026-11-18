@@ -48,9 +48,11 @@ function invalidRecordingS3Prefix(prefix: string): Error {
  */
 export function normalizeRecordingS3Prefix(prefix: string | undefined | null): string {
   if (prefix == null) return '';
-  if (/[\u0000-\u001F\u007F]/.test(prefix)) throw invalidRecordingS3Prefix(prefix);
-  const collapsed = prefix
-    .trim()
+  // Trim before the control-character check so a trailing CR or tab from a
+  // Windows .env is the same as a trailing space, not a boot failure.
+  const trimmed = prefix.trim();
+  if (/[\u0000-\u001F\u007F]/.test(trimmed)) throw invalidRecordingS3Prefix(prefix);
+  const collapsed = trimmed
     .replaceAll('\\', '/')
     .replace(/\/+/g, '/')
     .replace(/^\/+|\/+$/g, '');
@@ -200,18 +202,13 @@ function describeRecordingError(error: unknown): string {
 }
 
 /**
- * Missing object only. NoSuchKey (name or code) qualifies, as does a bare
- * HTTP 404 with no named cause. NoSuchBucket and every other named 404 cause
- * do not: a wrong bucket must surface instead of being served from disk.
+ * Missing object only when the error is named NoSuchKey. S3 and R2 GetObject
+ * both return that name for a key that is not in the bucket. A bare HTTP 404
+ * is not that response, so it is not a reason to read the filesystem copy.
  */
 function isMissingRecordingObject(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
-  const labels = recordingErrorLabels(error);
-  if (labels.includes('NoSuchBucket')) return false;
-  if (labels.includes('NoSuchKey')) return true;
-  if (labels.length > 0) return false;
-  const status = (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode;
-  return Number(status) === 404;
+  return recordingErrorLabels(error).includes('NoSuchKey');
 }
 
 function isEnoent(error: unknown): boolean {
