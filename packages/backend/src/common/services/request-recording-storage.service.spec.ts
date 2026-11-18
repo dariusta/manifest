@@ -1,11 +1,13 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { Logger } from '@nestjs/common';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import {
   RequestRecordingStorageService,
   S3RecordingStorage,
   resolveRecordingStorage,
+  type S3StorageConfig,
 } from './request-recording-storage.service';
 
 function config(values: Record<string, unknown>) {
@@ -132,6 +134,62 @@ describe('request recording storage selection', () => {
       reason: 'Unknown REQUEST_RECORDING_STORAGE value "somewhere-else"',
     });
   });
+
+  it('passes the S3 prefix and read-only filesystem fallback through to S3', () => {
+    expect(
+      resolveRecordingStorage(
+        config({
+          'app.requestRecordingStorage': 's3',
+          'app.requestRecordingS3Bucket': 'recordings',
+          'app.requestRecordingS3Region': 'auto',
+          'app.requestRecordingS3Prefix': 'manifest/recordings/',
+          'app.requestRecordingFallbackFilesystemPath': '  /data/request-recordings  ',
+        }),
+        false,
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        backend: 's3',
+        prefix: 'manifest/recordings/',
+        fallbackFilesystemPath: '/data/request-recordings',
+      }),
+    );
+  });
+
+  it('does not fall back to the filesystem when the S3 prefix is invalid', () => {
+    expect(
+      resolveRecordingStorage(
+        config({
+          'app.requestRecordingStorage': 'auto',
+          'app.nodeEnv': 'production',
+          'app.requestRecordingS3Bucket': 'recordings',
+          'app.requestRecordingS3Region': 'auto',
+          'app.requestRecordingS3AccessKeyId': 'access',
+          'app.requestRecordingS3SecretAccessKey': 'secret',
+          'app.requestRecordingS3Prefix': '..',
+        }),
+        true,
+      ),
+    ).toEqual({
+      backend: null,
+      reason: 'Invalid request recording S3 prefix',
+    });
+  });
+
+  it('keeps filesystem selection when an S3 prefix is also set', () => {
+    expect(
+      resolveRecordingStorage(
+        config({
+          'app.requestRecordingStorage': 'filesystem',
+          'app.nodeEnv': 'production',
+          'app.requestRecordingFilesystemPath': '/data/request-recordings',
+          'app.requestRecordingS3Prefix': '../nope',
+          'app.requestRecordingFallbackFilesystemPath': '/data/request-recordings',
+        }),
+        true,
+      ),
+    ).toEqual({ backend: 'filesystem', path: '/data/request-recordings' });
+  });
 });
 
 describe('S3RecordingStorage', () => {
@@ -192,6 +250,7 @@ describe('S3RecordingStorage', () => {
     await storage.delete('recording.json.gz');
 
     expect(send.mock.calls[0][0]).toBeInstanceOf(DeleteObjectCommand);
+    expect(send.mock.calls[0][0].input.Key).toBe('recording.json.gz');
   });
 
   it('can initialize the default AWS client without explicit credentials', async () => {
@@ -325,4 +384,263 @@ describe('RequestRecordingStorageService filesystem driver', () => {
     expect(service.backend).toBeNull();
     await expect(service.put('recording.json.gz', Buffer.from('nope'))).rejects.toThrow('EEXIST');
   });
+
+  it('does not create the fallback directory while preparing S3 storage', async () => {
+    const fallback = join(directory, 'old-recordings');
+    const service = new RequestRecordingStorageService(
+      config({
+        'app.requestRecordingStorage': 's3',
+        'app.requestRecordingS3Bucket': 'recordings',
+        'app.requestRecordingS3Region': 'auto',
+        'app.requestRecordingS3Prefix': 'manifest/recordings/',
+        'app.requestRecordingFallbackFilesystemPath': fallback,
+      }) as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.backend).toBe('s3');
+    await expect(stat(fallback)).rejects.toHaveProperty('code', 'ENOENT');
+  });
+
+  it('rejects an S3 prefix that climbs out of the bucket', async () => {
+    const service = new RequestRecordingStorageService(
+      config({
+        'app.requestRecordingStorage': 's3',
+        'app.requestRecordingS3Bucket': 'recordings',
+        'app.requestRecordingS3Region': 'auto',
+        'app.requestRecordingS3Prefix': 'manifest/../secret',
+      }) as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.backend).toBeNull();
+    await expect(service.put('recording.json.gz', Buffer.from('nope'))).rejects.toThrow(
+      'Invalid request recording S3 prefix',
+    );
+  });
+
+  it('ignores an invalid S3 prefix while filesystem storage is selected', async () => {
+    const service = new RequestRecordingStorageService(
+      config({
+        'app.requestRecordingStorage': 'filesystem',
+        'app.requestRecordingFilesystemPath': directory,
+        'app.requestRecordingS3Prefix': '..',
+      }) as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.backend).toBe('filesystem');
+  });
 });
+
+describe('S3 recording key prefix', () => {
+  const send = jest.fn();
+  const logicalKey = 'request-recordings/v1/request-1.json.gz';
+
+  beforeEach(() => jest.clearAllMocks());
+
+  function open(prefix?: string): S3RecordingStorage {
+    return new S3RecordingStorage(s3Config({ prefix }), { send } as never);
+  }
+
+  it.each([
+    ['manifest/recordings/', 'manifest/recordings/'],
+    ['manifest/recordings', 'manifest/recordings/'],
+    ['/manifest//recordings/', 'manifest/recordings/'],
+    ['manifest\\recordings', 'manifest/recordings/'],
+    ['  /manifest/recordings/  ', 'manifest/recordings/'],
+  ])('applies prefix %p as %p on put, get, and delete', async (prefix, stored) => {
+    const storage = open(prefix);
+    const storedKey = `${stored}${logicalKey}`;
+    send.mockResolvedValueOnce({});
+    await storage.put(logicalKey, Buffer.from('body'));
+    send.mockResolvedValueOnce({
+      Body: { transformToByteArray: jest.fn().mockResolvedValue(Uint8Array.from([1])) },
+    });
+    await expect(storage.get(logicalKey)).resolves.toEqual(Buffer.from([1]));
+    send.mockResolvedValueOnce({});
+    await storage.delete(logicalKey);
+
+    expect(send.mock.calls.map((call) => call[0].input.Key)).toEqual([
+      storedKey,
+      storedKey,
+      storedKey,
+    ]);
+    expect(send.mock.calls[0][0]).toBeInstanceOf(PutObjectCommand);
+    expect(send.mock.calls[1][0]).toBeInstanceOf(GetObjectCommand);
+    expect(send.mock.calls[2][0]).toBeInstanceOf(DeleteObjectCommand);
+  });
+
+  it.each([undefined, '', '   ', '/'])(
+    'leaves the logical key unchanged when the prefix is %p',
+    async (prefix) => {
+      const storage = open(prefix);
+      send.mockResolvedValue({});
+      await storage.put(logicalKey, Buffer.from('body'));
+      expect(send.mock.calls[0][0].input.Key).toBe(logicalKey);
+    },
+  );
+
+  it.each([
+    '..',
+    '../secret',
+    'manifest/../secret',
+    'manifest/../../etc',
+    'foo/..',
+    '..\\secret',
+    '/../x',
+    'foo/../bar/',
+  ])('rejects prefix %s', (prefix) => {
+    expect(() => open(prefix)).toThrow('Invalid request recording S3 prefix');
+  });
+});
+
+describe('S3 filesystem read fallback', () => {
+  const send = jest.fn();
+  const logicalKey = 'request-recordings/v1/tenants/t/requests/r/attempts/a.json.gz';
+  let directory: string;
+  let debug: jest.SpiedFunction<Logger['debug']>;
+
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'manifest-recording-fallback-'));
+    debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    send.mockReset();
+  });
+
+  afterEach(async () => {
+    debug.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  function open(fallback?: string): S3RecordingStorage {
+    return new S3RecordingStorage(
+      s3Config({
+        prefix: 'manifest/recordings',
+        fallbackFilesystemPath: fallback,
+      }),
+      { send } as never,
+    );
+  }
+
+  function noSuchKey(): Error {
+    return Object.assign(new Error('The specified key does not exist.'), {
+      name: 'NoSuchKey',
+      $metadata: { httpStatusCode: 404 },
+    });
+  }
+
+  async function writeFallback(body: Buffer): Promise<void> {
+    const target = join(directory, logicalKey);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, body);
+  }
+
+  it.each([
+    ['NoSuchKey', { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } }],
+    ['NoSuchKey without a status', { name: 'NoSuchKey' }],
+    ['HTTP 404', { $metadata: { httpStatusCode: 404 } }],
+    ['NotFound', { name: 'NotFound', $metadata: { httpStatusCode: 404 } }],
+    ['Code NoSuchKey', { Code: 'NoSuchKey' }],
+  ])('reads the logical key from the filesystem when S3 returns %s', async (_label, shape) => {
+    const body = Buffer.from(`fallback-${_label}`);
+    await writeFallback(body);
+    send.mockRejectedValue(Object.assign(new Error('missing'), shape));
+    const storage = open(directory);
+
+    await expect(storage.get(logicalKey)).resolves.toEqual(body);
+
+    expect(send.mock.calls[0][0].input.Key).toBe(`manifest/recordings/${logicalKey}`);
+    expect(debug).toHaveBeenCalledWith(`Request recording filesystem fallback hit: ${logicalKey}`);
+  });
+
+  it('rethrows the S3 miss when the fallback object does not exist', async () => {
+    const missing = noSuchKey();
+    send.mockRejectedValue(missing);
+    const storage = open(directory);
+
+    await expect(storage.get(logicalKey)).rejects.toBe(missing);
+    expect(debug).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, '', '   '])(
+    'does not read the filesystem when the fallback path is %p',
+    async (fallback) => {
+      const body = Buffer.from('on disk');
+      await writeFallback(body);
+      const missing = noSuchKey();
+      send.mockRejectedValue(missing);
+      const storage = open(fallback);
+
+      await expect(storage.get(logicalKey)).rejects.toBe(missing);
+
+      expect(debug).not.toHaveBeenCalled();
+      await expect(readFile(join(directory, logicalKey))).resolves.toEqual(body);
+    },
+  );
+
+  it('does not fall back when S3 returns the object', async () => {
+    await writeFallback(Buffer.from('stale'));
+    send.mockResolvedValue({
+      Body: { transformToByteArray: jest.fn().mockResolvedValue(Uint8Array.from([9])) },
+    });
+    const storage = open(directory);
+
+    await expect(storage.get(logicalKey)).resolves.toEqual(Buffer.from([9]));
+    expect(debug).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back on errors other than a missing object', async () => {
+    await writeFallback(Buffer.from('on disk'));
+    const failure = Object.assign(new Error('Access Denied'), {
+      name: 'AccessDenied',
+      $metadata: { httpStatusCode: 403 },
+    });
+    send.mockRejectedValue(failure);
+    const storage = open(directory);
+
+    await expect(storage.get(logicalKey)).rejects.toBe(failure);
+    expect(debug).not.toHaveBeenCalled();
+  });
+
+  it('does not write or delete the fallback filesystem', async () => {
+    const body = Buffer.from('keep');
+    await writeFallback(body);
+    send.mockResolvedValue({});
+    const storage = open(directory);
+    const target = join(directory, logicalKey);
+
+    await storage.put(logicalKey, Buffer.from('new'));
+    await expect(readFile(target)).resolves.toEqual(body);
+
+    await storage.delete(logicalKey);
+    await expect(readFile(target)).resolves.toEqual(body);
+    expect(send.mock.calls.map((call) => call[0].input.Key)).toEqual([
+      `manifest/recordings/${logicalKey}`,
+      `manifest/recordings/${logicalKey}`,
+    ]);
+    expect(send.mock.calls[0][0]).toBeInstanceOf(PutObjectCommand);
+    expect(send.mock.calls[1][0]).toBeInstanceOf(DeleteObjectCommand);
+  });
+
+  it('keeps filesystem path traversal protection on the fallback read', async () => {
+    send.mockRejectedValue(noSuchKey());
+    const storage = open(directory);
+
+    await expect(storage.get('../outside')).rejects.toThrow(
+      'Invalid request recording storage key',
+    );
+    expect(debug).not.toHaveBeenCalled();
+  });
+});
+
+function s3Config(overrides: Partial<S3StorageConfig> = {}): S3StorageConfig {
+  return {
+    bucket: 'recordings',
+    region: 'auto',
+    forcePathStyle: false,
+    ...overrides,
+  };
+}

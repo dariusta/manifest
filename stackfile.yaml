@@ -24,6 +24,16 @@ resources:
       RUN_MIGRATIONS_ON_BOOT: 'true'
       REQUEST_RECORDING_STORAGE: filesystem
       REQUEST_RECORDING_FILESYSTEM_PATH: /data/request-recordings
+      # Optional S3/R2 cutover. Leave the recordings volume mounted while
+      # dual-reading. Access keys belong in secrets, not this file.
+      # 0, none, or forever disables retention deletes.
+      # REQUEST_RECORDING_STORAGE: s3
+      # REQUEST_RECORDING_S3_BUCKET:
+      # REQUEST_RECORDING_S3_ENDPOINT:
+      # REQUEST_RECORDING_S3_REGION: auto
+      # REQUEST_RECORDING_S3_PREFIX: manifest/recordings/
+      # REQUEST_RECORDING_FALLBACK_FILESYSTEM_PATH: /data/request-recordings
+      # REQUEST_RECORDING_RETENTION_DAYS: "0"
       SHUTDOWN_DRAIN_MS: '10000'
     secrets:
       manifest-runtime:

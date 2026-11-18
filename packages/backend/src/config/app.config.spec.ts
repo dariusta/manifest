@@ -118,7 +118,16 @@ describe('appConfig', () => {
     expect(config.requestRecordingRetentionDays).toBe(90);
   });
 
-  it.each(['0', '-1', '1.5', 'invalid', '9007199254740992'])(
+  it.each(['0', 'none', 'forever', 'NONE', 'Forever', ' 0 ', ' none '])(
+    'disables request recording retention for %s',
+    async (value) => {
+      process.env['REQUEST_RECORDING_RETENTION_DAYS'] = value;
+      const config = await loadConfig();
+      expect(config.requestRecordingRetentionDays).toBe(0);
+    },
+  );
+
+  it.each(['-1', '1.5', 'invalid', '9007199254740992', '', '00'])(
     'ignores invalid request recording retention %s',
     async (value) => {
       process.env['REQUEST_RECORDING_RETENTION_DAYS'] = value;
@@ -188,6 +197,24 @@ describe('appConfig', () => {
     expect(config.requestRecordingS3Bucket).toBe('recordings');
     expect(config.requestRecordingS3Region).toBe('auto');
     expect(config.requestRecordingS3ForcePathStyle).toBe(true);
+  });
+
+  it('reads the S3 key prefix and filesystem fallback path', async () => {
+    process.env['REQUEST_RECORDING_S3_PREFIX'] = 'manifest/recordings/';
+    process.env['REQUEST_RECORDING_FALLBACK_FILESYSTEM_PATH'] = '/data/request-recordings';
+    const config = await loadConfig();
+
+    expect(config.requestRecordingS3Prefix).toBe('manifest/recordings/');
+    expect(config.requestRecordingFallbackFilesystemPath).toBe('/data/request-recordings');
+  });
+
+  it('defaults the S3 key prefix and filesystem fallback path to empty', async () => {
+    delete process.env['REQUEST_RECORDING_S3_PREFIX'];
+    delete process.env['REQUEST_RECORDING_FALLBACK_FILESYSTEM_PATH'];
+    const config = await loadConfig();
+
+    expect(config.requestRecordingS3Prefix).toBe('');
+    expect(config.requestRecordingFallbackFilesystemPath).toBe('');
   });
 
   it('defaults shutdownDrainMs to 10000 when SHUTDOWN_DRAIN_MS is unset', async () => {

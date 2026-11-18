@@ -27,6 +27,31 @@ export interface S3StorageConfig {
   accessKeyId?: string;
   secretAccessKey?: string;
   forcePathStyle: boolean;
+  /** Prepended to the logical key on put/get/delete. The database key is unchanged. */
+  prefix?: string;
+  /** Read-only filesystem root used when GetObject returns NoSuchKey or 404. */
+  fallbackFilesystemPath?: string;
+}
+
+const INVALID_S3_PREFIX = 'Invalid request recording S3 prefix';
+
+/**
+ * Collapse duplicate and leading/trailing slashes and require one trailing
+ * slash. `..` path segments are rejected so a prefix cannot climb out of the
+ * intended bucket location. An empty prefix leaves logical keys unchanged.
+ */
+export function normalizeRecordingS3Prefix(prefix: string | undefined | null): string {
+  if (prefix == null) return '';
+  const collapsed = prefix
+    .trim()
+    .replaceAll('\\', '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '');
+  if (!collapsed) return '';
+  if (collapsed.split('/').some((segment) => segment === '..')) {
+    throw new Error(INVALID_S3_PREFIX);
+  }
+  return `${collapsed}/`;
 }
 
 export type ResolvedRecordingStorage =
@@ -62,28 +87,45 @@ export function resolveRecordingStorage(
   const secretAccessKey =
     config.get<string>('app.requestRecordingS3SecretAccessKey')?.trim() || undefined;
   const forcePathStyle = config.get<boolean>('app.requestRecordingS3ForcePathStyle') ?? false;
+  const prefix = config.get<string>('app.requestRecordingS3Prefix') ?? '';
+  const fallbackFilesystemPath =
+    config.get<string>('app.requestRecordingFallbackFilesystemPath')?.trim() || undefined;
   const hasExplicitCredentials = Boolean(accessKeyId && secretAccessKey);
   const hasPartialCredentials = Boolean(accessKeyId || secretAccessKey);
   const completeS3 = Boolean(
     bucket && region && (!hasPartialCredentials || hasExplicitCredentials),
   );
 
-  const s3 = (): ResolvedRecordingStorage =>
-    completeS3
-      ? {
-          backend: 's3',
-          bucket,
-          endpoint,
-          region,
-          accessKeyId,
-          secretAccessKey,
-          forcePathStyle,
-        }
-      : {
-          backend: null,
-          reason:
-            'S3 recording storage requires a bucket, region, and either both access-key values or neither',
-        };
+  const s3 = (): ResolvedRecordingStorage => {
+    if (!completeS3) {
+      return {
+        backend: null,
+        reason:
+          'S3 recording storage requires a bucket, region, and either both access-key values or neither',
+      };
+    }
+    try {
+      // Reject a prefix that climbs out of the bucket before the driver is built,
+      // the same way an unknown storage mode disables recording without failing boot.
+      normalizeRecordingS3Prefix(prefix);
+    } catch (error) {
+      return {
+        backend: null,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+    return {
+      backend: 's3',
+      bucket,
+      endpoint,
+      region,
+      accessKeyId,
+      secretAccessKey,
+      forcePathStyle,
+      prefix,
+      fallbackFilesystemPath,
+    };
+  };
 
   if (requested === 's3') return s3();
   if (requested === 'filesystem') return { backend: 'filesystem', path: filesystemPath };
@@ -143,14 +185,50 @@ class FilesystemRecordingStorage implements RecordingStorage {
   }
 }
 
+function isMissingRecordingObject(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as {
+    name?: unknown;
+    Code?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+  };
+  // S3 reports NoSuchKey. Some compatible stores (and a bare HTTP 404) use
+  // NotFound for the same miss. Other failures must not read the fallback.
+  if (
+    candidate.name === 'NoSuchKey' ||
+    candidate.name === 'NotFound' ||
+    candidate.Code === 'NoSuchKey' ||
+    candidate.Code === 'NotFound'
+  ) {
+    return true;
+  }
+  return Number(candidate.$metadata?.httpStatusCode) === 404;
+}
+
+function isEnoent(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT',
+  );
+}
+
 export class S3RecordingStorage implements RecordingStorage {
   readonly backend = 's3' as const;
   private readonly client: S3Client;
+  private readonly keyPrefix: string;
+  private readonly fallback: FilesystemRecordingStorage | null;
+  private readonly logger = new Logger(S3RecordingStorage.name);
 
   constructor(
     private readonly config: S3StorageConfig,
     client?: S3Client,
   ) {
+    this.keyPrefix = normalizeRecordingS3Prefix(config.prefix);
+    const fallbackPath = config.fallbackFilesystemPath?.trim() ?? '';
+    // Read-only: prepare() is never called, so a missing directory is not created.
+    this.fallback = fallbackPath ? new FilesystemRecordingStorage(fallbackPath) : null;
     this.client =
       client ??
       new S3Client({
@@ -173,7 +251,7 @@ export class S3RecordingStorage implements RecordingStorage {
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.config.bucket,
-        Key: key,
+        Key: this.storedKey(key),
         Body: body,
         // The body is client-side ciphertext (see request-recording-codec), not
         // readable JSON, and declaring ContentEncoding: gzip made some
@@ -184,15 +262,46 @@ export class S3RecordingStorage implements RecordingStorage {
   }
 
   async get(key: string): Promise<Buffer> {
+    try {
+      return await this.readStoredObject(key);
+    } catch (error) {
+      if (!this.fallback || !isMissingRecordingObject(error)) throw error;
+      return this.readFallback(this.fallback, key, error);
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.config.bucket, Key: this.storedKey(key) }),
+    );
+  }
+
+  private storedKey(key: string): string {
+    if (!this.keyPrefix) return key;
+    return `${this.keyPrefix}${key.replace(/^\/+/, '')}`;
+  }
+
+  private async readStoredObject(key: string): Promise<Buffer> {
     const response = await this.client.send(
-      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      new GetObjectCommand({ Bucket: this.config.bucket, Key: this.storedKey(key) }),
     );
     if (!response.Body) throw new Error('Request recording object has no body');
     return Buffer.from(await response.Body.transformToByteArray());
   }
 
-  async delete(key: string): Promise<void> {
-    await this.client.send(new DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }));
+  private async readFallback(
+    fallback: FilesystemRecordingStorage,
+    key: string,
+    missing: unknown,
+  ): Promise<Buffer> {
+    try {
+      const body = await fallback.get(key);
+      this.logger.debug(`Request recording filesystem fallback hit: ${key}`);
+      return body;
+    } catch (error) {
+      if (isEnoent(error)) throw missing;
+      throw error;
+    }
   }
 }
 
