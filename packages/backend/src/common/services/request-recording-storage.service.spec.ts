@@ -156,8 +156,8 @@ describe('request recording storage selection', () => {
     );
   });
 
-  it('does not fall back to the filesystem when the S3 prefix is invalid', () => {
-    expect(
+  it('fails closed instead of using the filesystem when the S3 prefix is invalid', () => {
+    expect(() =>
       resolveRecordingStorage(
         config({
           'app.requestRecordingStorage': 'auto',
@@ -170,10 +170,7 @@ describe('request recording storage selection', () => {
         }),
         true,
       ),
-    ).toEqual({
-      backend: null,
-      reason: 'Invalid request recording S3 prefix',
-    });
+    ).toThrow(/Invalid REQUEST_RECORDING_S3_PREFIX/);
   });
 
   it('keeps filesystem selection when an S3 prefix is also set', () => {
@@ -403,22 +400,18 @@ describe('RequestRecordingStorageService filesystem driver', () => {
     await expect(stat(fallback)).rejects.toHaveProperty('code', 'ENOENT');
   });
 
-  it('rejects an S3 prefix that climbs out of the bucket', async () => {
-    const service = new RequestRecordingStorageService(
-      config({
-        'app.requestRecordingStorage': 's3',
-        'app.requestRecordingS3Bucket': 'recordings',
-        'app.requestRecordingS3Region': 'auto',
-        'app.requestRecordingS3Prefix': 'manifest/../secret',
-      }) as never,
-    );
-
-    await service.onModuleInit();
-
-    expect(service.backend).toBeNull();
-    await expect(service.put('recording.json.gz', Buffer.from('nope'))).rejects.toThrow(
-      'Invalid request recording S3 prefix',
-    );
+  it('fails boot when an S3 prefix climbs out of the bucket', () => {
+    expect(
+      () =>
+        new RequestRecordingStorageService(
+          config({
+            'app.requestRecordingStorage': 's3',
+            'app.requestRecordingS3Bucket': 'recordings',
+            'app.requestRecordingS3Region': 'auto',
+            'app.requestRecordingS3Prefix': 'manifest/../secret',
+          }) as never,
+        ),
+    ).toThrow(/Invalid REQUEST_RECORDING_S3_PREFIX/);
   });
 
   it('ignores an invalid S3 prefix while filesystem storage is selected', async () => {
@@ -493,8 +486,13 @@ describe('S3 recording key prefix', () => {
     '..\\secret',
     '/../x',
     'foo/../bar/',
+    '.',
+    'foo/./bar',
+    './recordings',
+    'manifest/\nrecordings',
+    'foo\u0000bar',
   ])('rejects prefix %s', (prefix) => {
-    expect(() => open(prefix)).toThrow('Invalid request recording S3 prefix');
+    expect(() => open(prefix)).toThrow(/Invalid REQUEST_RECORDING_S3_PREFIX/);
   });
 });
 
@@ -542,7 +540,6 @@ describe('S3 filesystem read fallback', () => {
     ['NoSuchKey', { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } }],
     ['NoSuchKey without a status', { name: 'NoSuchKey' }],
     ['HTTP 404', { $metadata: { httpStatusCode: 404 } }],
-    ['NotFound', { name: 'NotFound', $metadata: { httpStatusCode: 404 } }],
     ['Code NoSuchKey', { Code: 'NoSuchKey' }],
   ])('reads the logical key from the filesystem when S3 returns %s', async (_label, shape) => {
     const body = Buffer.from(`fallback-${_label}`);
@@ -592,17 +589,57 @@ describe('S3 filesystem read fallback', () => {
     expect(debug).not.toHaveBeenCalled();
   });
 
-  it('does not fall back on errors other than a missing object', async () => {
+  it.each([
+    [
+      'NoSuchBucket',
+      Object.assign(new Error('The specified bucket does not exist.'), {
+        name: 'NoSuchBucket',
+        $metadata: { httpStatusCode: 404 },
+      }),
+    ],
+    [
+      'NotFound',
+      Object.assign(new Error('Not Found'), {
+        name: 'NotFound',
+        $metadata: { httpStatusCode: 404 },
+      }),
+    ],
+    [
+      'AccessDenied',
+      Object.assign(new Error('Access Denied'), {
+        name: 'AccessDenied',
+        $metadata: { httpStatusCode: 403 },
+      }),
+    ],
+    ['403', Object.assign(new Error('Forbidden'), { $metadata: { httpStatusCode: 403 } })],
+    [
+      '500',
+      Object.assign(new Error('Internal error'), {
+        name: 'InternalError',
+        $metadata: { httpStatusCode: 500 },
+      }),
+    ],
+    [
+      'timeout',
+      Object.assign(new Error('request timed out'), { name: 'TimeoutError', code: 'ETIMEDOUT' }),
+    ],
+    ['ECONNRESET', Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })],
+  ])('does not fall back on %s', async (_label, failure) => {
     await writeFallback(Buffer.from('on disk'));
-    const failure = Object.assign(new Error('Access Denied'), {
-      name: 'AccessDenied',
-      $metadata: { httpStatusCode: 403 },
-    });
-    send.mockRejectedValue(failure);
-    const storage = open(directory);
+    const errorLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    try {
+      send.mockRejectedValue(failure);
+      const storage = open(directory);
 
-    await expect(storage.get(logicalKey)).rejects.toBe(failure);
-    expect(debug).not.toHaveBeenCalled();
+      await expect(storage.get(logicalKey)).rejects.toBe(failure);
+
+      expect(debug).not.toHaveBeenCalled();
+      expect(errorLog).toHaveBeenCalledWith(
+        expect.stringContaining('filesystem fallback was not used'),
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it('does not write or delete the fallback filesystem', async () => {
@@ -633,6 +670,53 @@ describe('S3 filesystem read fallback', () => {
       'Invalid request recording storage key',
     );
     expect(debug).not.toHaveBeenCalled();
+  });
+});
+
+describe('recording fallback retention warning', () => {
+  let warn: jest.SpiedFunction<Logger['warn']>;
+
+  beforeEach(() => {
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => warn.mockRestore());
+
+  function service(retention: number | null, fallback = '/data/request-recordings') {
+    return new RequestRecordingStorageService(
+      config({
+        'app.requestRecordingStorage': 's3',
+        'app.requestRecordingS3Bucket': 'recordings',
+        'app.requestRecordingS3Region': 'auto',
+        'app.requestRecordingFallbackFilesystemPath': fallback,
+        'app.requestRecordingRetentionDays': retention,
+      }) as never,
+    );
+  }
+
+  function warnedAboutDiskCopies(): boolean {
+    return warn.mock.calls.some((call) => String(call[0]).includes('never deleted'));
+  }
+
+  it.each([null, 30])(
+    'warns at startup when the fallback path is set and retention is %s',
+    async (days) => {
+      const storage = service(days);
+      await storage.onModuleInit();
+      expect(warnedAboutDiskCopies()).toBe(true);
+    },
+  );
+
+  it('does not warn when retention deletes are disabled', async () => {
+    const storage = service(0);
+    await storage.onModuleInit();
+    expect(warnedAboutDiskCopies()).toBe(false);
+  });
+
+  it('does not warn when the fallback path is unset', async () => {
+    const storage = service(30, '');
+    await storage.onModuleInit();
+    expect(warnedAboutDiskCopies()).toBe(false);
   });
 });
 

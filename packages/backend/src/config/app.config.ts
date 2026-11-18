@@ -56,11 +56,12 @@ export const appConfig = registerAs('app', () => ({
   // without auth. Off by default; only Manifest Cloud's marketing site uses it.
   // The variable keeps its historical name so existing deployments stay on.
   publicErrorPagesEnabled: process.env['MANIFEST_PUBLIC_STATS'] === 'true',
-  // Optional instance-wide override. When unset, request recordings follow the
-  // Cloud plan policy (Free 7 days, Pro 365 days); non-billing deployments use
-  // the 365-day default. 0, "none", and "forever" disable retention deletes.
-  // Parsed separately from optionalPositiveInteger, which still treats 0 as
-  // unset for every other variable.
+  // Optional instance-wide override. When unset or blank, request recordings
+  // follow the Cloud plan policy (Free 7 days, Pro 365 days); non-billing
+  // deployments use the 365-day default. 0, "none", and "forever" disable
+  // retention deletes. Any other value throws while config loads, which fails
+  // boot. Parsed separately from optionalPositiveInteger, which still treats
+  // 0 as unset for every other variable.
   requestRecordingRetentionDays: parseRequestRecordingRetentionDays(
     process.env['REQUEST_RECORDING_RETENTION_DAYS'],
   ),

@@ -33,23 +33,30 @@ export interface S3StorageConfig {
   fallbackFilesystemPath?: string;
 }
 
-const INVALID_S3_PREFIX = 'Invalid request recording S3 prefix';
+function invalidRecordingS3Prefix(prefix: string): Error {
+  return new Error(
+    `Invalid REQUEST_RECORDING_S3_PREFIX "${prefix}". Use a relative prefix with no "..", ".", or control characters. An invalid prefix prevents the process from booting.`,
+  );
+}
 
 /**
  * Collapse duplicate and leading/trailing slashes and require one trailing
- * slash. `..` path segments are rejected so a prefix cannot climb out of the
- * intended bucket location. An empty prefix leaves logical keys unchanged.
+ * slash. `..` and `.` segments and control characters are rejected so a prefix
+ * cannot climb out of the intended bucket location or hide a bad value.
+ * An empty prefix leaves logical keys unchanged. An invalid prefix throws:
+ * selecting S3 with that value fails boot instead of disabling recording.
  */
 export function normalizeRecordingS3Prefix(prefix: string | undefined | null): string {
   if (prefix == null) return '';
+  if (/[\u0000-\u001F\u007F]/.test(prefix)) throw invalidRecordingS3Prefix(prefix);
   const collapsed = prefix
     .trim()
     .replaceAll('\\', '/')
     .replace(/\/+/g, '/')
     .replace(/^\/+|\/+$/g, '');
   if (!collapsed) return '';
-  if (collapsed.split('/').some((segment) => segment === '..')) {
-    throw new Error(INVALID_S3_PREFIX);
+  if (collapsed.split('/').some((segment) => segment === '..' || segment === '.')) {
+    throw invalidRecordingS3Prefix(prefix);
   }
   return `${collapsed}/`;
 }
@@ -104,16 +111,9 @@ export function resolveRecordingStorage(
           'S3 recording storage requires a bucket, region, and either both access-key values or neither',
       };
     }
-    try {
-      // Reject a prefix that climbs out of the bucket before the driver is built,
-      // the same way an unknown storage mode disables recording without failing boot.
-      normalizeRecordingS3Prefix(prefix);
-    } catch (error) {
-      return {
-        backend: null,
-        reason: error instanceof Error ? error.message : String(error),
-      };
-    }
+    // Throw rather than disabling storage. The service constructor calls this
+    // while Nest is booting, so a bad prefix stops the process.
+    normalizeRecordingS3Prefix(prefix);
     return {
       backend: 's3',
       bucket,
@@ -185,24 +185,33 @@ class FilesystemRecordingStorage implements RecordingStorage {
   }
 }
 
+function recordingErrorLabels(error: object): string[] {
+  const candidate = error as { name?: unknown; Code?: unknown; code?: unknown };
+  return [candidate.name, candidate.Code, candidate.code].filter(
+    (value): value is string => typeof value === 'string' && value.length > 0 && value !== 'Error',
+  );
+}
+
+function describeRecordingError(error: unknown): string {
+  if (!error || typeof error !== 'object') return String(error);
+  const labels = recordingErrorLabels(error);
+  const message = error instanceof Error ? error.message : '';
+  return labels.length > 0 ? `${labels[0]}: ${message}` : message || String(error);
+}
+
+/**
+ * Missing object only. NoSuchKey (name or code) qualifies, as does a bare
+ * HTTP 404 with no named cause. NoSuchBucket and every other named 404 cause
+ * do not: a wrong bucket must surface instead of being served from disk.
+ */
 function isMissingRecordingObject(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
-  const candidate = error as {
-    name?: unknown;
-    Code?: unknown;
-    $metadata?: { httpStatusCode?: unknown };
-  };
-  // S3 reports NoSuchKey. Some compatible stores (and a bare HTTP 404) use
-  // NotFound for the same miss. Other failures must not read the fallback.
-  if (
-    candidate.name === 'NoSuchKey' ||
-    candidate.name === 'NotFound' ||
-    candidate.Code === 'NoSuchKey' ||
-    candidate.Code === 'NotFound'
-  ) {
-    return true;
-  }
-  return Number(candidate.$metadata?.httpStatusCode) === 404;
+  const labels = recordingErrorLabels(error);
+  if (labels.includes('NoSuchBucket')) return false;
+  if (labels.includes('NoSuchKey')) return true;
+  if (labels.length > 0) return false;
+  const status = (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode;
+  return Number(status) === 404;
 }
 
 function isEnoent(error: unknown): boolean {
@@ -265,8 +274,15 @@ export class S3RecordingStorage implements RecordingStorage {
     try {
       return await this.readStoredObject(key);
     } catch (error) {
-      if (!this.fallback || !isMissingRecordingObject(error)) throw error;
-      return this.readFallback(this.fallback, key, error);
+      if (this.fallback && isMissingRecordingObject(error)) {
+        return this.readFallback(this.fallback, key, error);
+      }
+      if (this.fallback) {
+        this.logger.error(
+          `Request recording S3 read failed; filesystem fallback was not used: ${describeRecordingError(error)}`,
+        );
+      }
+      throw error;
     }
   }
 
@@ -310,8 +326,13 @@ export class RequestRecordingStorageService implements OnModuleInit {
   private readonly logger = new Logger(RequestRecordingStorageService.name);
   private storage: RecordingStorage | null;
   private unavailableReason: string | null;
+  private readonly fallbackFilesystemPath: string;
+  private readonly retentionDays: number | null;
 
   constructor(config: ConfigService) {
+    this.fallbackFilesystemPath =
+      config.get<string>('app.requestRecordingFallbackFilesystemPath')?.trim() ?? '';
+    this.retentionDays = config.get<number | null>('app.requestRecordingRetentionDays') ?? null;
     const resolved = resolveRecordingStorage(config);
     if (resolved.backend === 'filesystem') {
       this.storage = new FilesystemRecordingStorage(resolved.path);
@@ -326,6 +347,7 @@ export class RequestRecordingStorageService implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
+    this.warnIfFallbackOutlivesRetention();
     if (!this.storage) {
       this.logger.warn(`Request recording storage unavailable: ${this.unavailableReason}`);
       return;
@@ -362,6 +384,19 @@ export class RequestRecordingStorageService implements OnModuleInit {
 
   async delete(key: string): Promise<void> {
     await this.requireStorage().delete(key);
+  }
+
+  private warnIfFallbackOutlivesRetention(): void {
+    if (
+      this.storage?.backend !== 's3' ||
+      !this.fallbackFilesystemPath ||
+      this.retentionDays === 0
+    ) {
+      return;
+    }
+    this.logger.warn(
+      'REQUEST_RECORDING_FALLBACK_FILESYSTEM_PATH is set while retention is enabled. Retention deletes only the S3 object and clears the database key; files on the fallback path are never deleted by the app.',
+    );
   }
 
   private requireStorage(): RecordingStorage {
