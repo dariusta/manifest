@@ -29,7 +29,7 @@ export interface S3StorageConfig {
   forcePathStyle: boolean;
   /** Prepended to the logical key on put/get/delete. The database key is unchanged. */
   prefix?: string;
-  /** Read-only filesystem root used when GetObject returns NoSuchKey or 404. */
+  /** Read-only filesystem root used when GetObject returns NoSuchKey. */
   fallbackFilesystemPath?: string;
 }
 
