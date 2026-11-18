@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import type { TenantProvider } from '../entities/tenant-provider.entity';
 import {
   ProviderUsageAdapterRegistry,
+  parseAlibabaCodingPlanUsage,
   parseAnthropicUsage,
   parseCopilotUsage,
   parseGeminiUsage,
@@ -162,33 +163,175 @@ describe('provider usage response parsers', () => {
     });
   });
 
-  it('names repeated Z.ai credit windows by the cadence their reset implies', () => {
-    const inFiveHours = Date.now() + 5 * 3_600_000;
-    const inSixDays = Date.now() + 6 * 24 * 3_600_000;
+  it('names Z.ai credit windows by their unit/number cadence, not by time to reset', () => {
+    // Shape of a live Max-plan response: the weekly window is spent and resets
+    // in four hours, the 5-hour window is idle and has no reset yet. Judging by
+    // time-to-reset labelled the weekly window "5-hour" and swapped the two.
     const parsed = parseZaiUsage({
+      code: 200,
       data: {
         level: 'max',
         limits: [
-          { type: 'CREDIT_LIMIT', percentage: 15, nextResetTime: inFiveHours },
-          { type: 'CREDIT_LIMIT', percentage: 48, nextResetTime: inSixDays },
+          {
+            type: 'CREDIT_LIMIT',
+            unit: 3,
+            number: 5,
+            usage: 28000,
+            currentValue: 0,
+            remaining: 28000,
+            percentage: 0,
+          },
+          {
+            type: 'CREDIT_LIMIT',
+            unit: 6,
+            number: 1,
+            usage: 140000,
+            currentValue: 140180,
+            remaining: 0,
+            percentage: 100,
+            nextResetTime: Date.now() + 4 * 3_600_000,
+          },
+        ],
+      },
+    });
+    expect(parsed.windows).toMatchObject([
+      {
+        name: '5-hour credit limit',
+        usedPercent: 0,
+        remainingPercent: 100,
+        limit: 28000,
+        used: 0,
+        remaining: 28000,
+      },
+      {
+        name: 'Weekly credit limit',
+        usedPercent: 100,
+        remainingPercent: 0,
+        limit: 140000,
+        used: 140180,
+        remaining: 0,
+      },
+    ]);
+    expect(parsed.windows[0].resetAt).toBeUndefined();
+    expect(parsed.windows[1].resetAt).toEqual(expect.any(String));
+  });
+
+  it('names multi-week Z.ai windows and keeps the provider wording for unknown units', () => {
+    const parsed = parseZaiUsage({
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 6, number: 2, percentage: 10 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 15 },
+          { type: 'CREDIT_LIMIT', unit: 3, number: 0, percentage: 20 },
+          { type: 'CREDIT_LIMIT', unit: 3, number: 1.5, percentage: 25 },
+          { type: 'CREDIT_LIMIT', percentage: 30, nextResetTime: Date.now() + 3_600_000 },
         ],
       },
     });
     expect(parsed.windows.map((w) => w.name)).toEqual([
-      '5-hour credit limit',
-      'weekly credit limit',
+      '2-week credit limit',
+      'time limit',
+      'credit limit',
+      'credit limit',
+      'credit limit',
     ]);
   });
 
-  it('leaves a single Z.ai window under the provider wording', () => {
-    const parsed = parseZaiUsage({
+  it('parses Alibaba Coding Plan request windows from the active instance', () => {
+    const parsed = parseAlibabaCodingPlanUsage({
+      code: '200',
       data: {
-        limits: [
-          { type: 'CREDIT_LIMIT', percentage: 15, nextResetTime: Date.now() + 5 * 3_600_000 },
-        ],
+        DataV2: JSON.stringify({
+          codingPlanInstanceInfos: [
+            {
+              status: 'EXPIRED',
+              planName: 'Old Lite',
+              codingPlanQuotaInfo: { per5HourUsedQuota: 1, per5HourTotalQuota: 2 },
+            },
+            {
+              status: 'valid',
+              planName: 'Coding Plan Pro',
+              codingPlanQuotaInfo: {
+                per5HourUsedQuota: 1500,
+                per5HourTotalQuota: 6000,
+                per5HourQuotaNextRefreshTime: 1795053980000,
+                perWeekUsedQuota: '50000',
+                perWeekTotalQuota: '45000',
+                perWeekQuotaNextRefreshTime: '2026-11-23T00:00:00Z',
+                perBillMonthTotalQuota: 90000,
+              },
+            },
+          ],
+        }),
       },
     });
-    expect(parsed.windows.map((w) => w.name)).toEqual(['credit limit']);
+    expect(parsed).toEqual({
+      planName: 'Coding Plan Pro',
+      windows: [
+        {
+          name: '5-hour',
+          limit: 6000,
+          used: 1500,
+          remaining: 4500,
+          usedPercent: 25,
+          remainingPercent: 75,
+          unit: 'requests',
+          resetAt: new Date(1795053980000).toISOString(),
+        },
+        {
+          name: 'Weekly',
+          limit: 45000,
+          used: 50000,
+          remaining: 0,
+          usedPercent: 100,
+          remainingPercent: 0,
+          unit: 'requests',
+          resetAt: '2026-11-23T00:00:00.000Z',
+        },
+        {
+          name: 'Monthly',
+          limit: 90000,
+          used: 0,
+          remaining: 90000,
+          usedPercent: 0,
+          remainingPercent: 100,
+          unit: 'requests',
+        },
+      ],
+    });
+  });
+
+  it('falls back to the first Alibaba instance and to a quota object outside it', () => {
+    expect(
+      parseAlibabaCodingPlanUsage({
+        successResponse: {
+          codingPlanInstanceInfos: [null, { instanceName: 'Lite' }],
+          extra: [{ codingPlanQuotaInfo: { per5HourUsedQuota: 0, per5HourTotalQuota: 1200 } }],
+        },
+      }),
+    ).toMatchObject({
+      planName: 'Lite',
+      windows: [{ name: '5-hour', limit: 1200, remaining: 1200 }],
+    });
+  });
+
+  it.each([
+    ['console login wall', { code: 'ConsoleNeedLogin', message: 'You need to log in.' }],
+    ['plan without counters', { data: { codingPlanInstanceInfos: [{ planName: 'Lite' }] } }],
+    ['zero allowance', { codingPlanQuotaInfo: { per5HourTotalQuota: 0 } }],
+    ['non-object body', 'not json'],
+    ['malformed embedded JSON', { data: '{not json' }],
+    ['non-array instances', { codingPlanInstanceInfos: { status: 'VALID' } }],
+  ])('reports no Alibaba usage for a %s', (_label, body) => {
+    expect(parseAlibabaCodingPlanUsage(body)).toEqual({ windows: [] });
+  });
+
+  it('stops searching absurdly deep Alibaba payloads', () => {
+    let nested: Record<string, unknown> = {
+      codingPlanQuotaInfo: { per5HourUsedQuota: 0, per5HourTotalQuota: 10 },
+    };
+    for (let depth = 0; depth < 12; depth += 1) nested = { wrapper: nested };
+    expect(parseAlibabaCodingPlanUsage(nested)).toEqual({ windows: [] });
   });
 
   it('normalizes the grounded Z.ai monitor envelope', () => {
@@ -369,6 +512,130 @@ describe('ProviderUsageAdapterRegistry probes', () => {
       }),
     );
     expect(result.status).toBe('live');
+  });
+
+  describe('Alibaba Cloud Coding Plan', () => {
+    const INTL =
+      'https://modelstudio.console.alibabacloud.com/data/api.json?action=zeldaEasy.broadscope-bailian.codingPlan.queryCodingPlanInstanceInfoV2&product=broadscope-bailian&api=queryCodingPlanInstanceInfoV2&currentRegionId=ap-southeast-1';
+    const CN =
+      'https://bailian.console.aliyun.com/data/api.json?action=zeldaEasy.broadscope-bailian.codingPlan.queryCodingPlanInstanceInfoV2&product=broadscope-bailian&api=queryCodingPlanInstanceInfoV2&currentRegionId=cn-beijing';
+    const loginWall = {
+      ok: true,
+      status: 200,
+      json: async () => ({ code: 'ConsoleNeedLogin', successResponse: false }),
+    };
+    const quota = {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: { codingPlanQuotaInfo: { per5HourUsedQuota: 300, per5HourTotalQuota: 1200 } },
+      }),
+    };
+
+    it('tries the international console, then mainland, sending the key and region body', async () => {
+      const fetchFn = jest.fn().mockResolvedValueOnce(loginWall).mockResolvedValueOnce(quota);
+      const report = await new ProviderUsageAdapterRegistry(fetchFn as never).probe(
+        connection({ provider: 'qwen', region: 'auto' }),
+        async () => 'sk-sp-secret',
+      );
+
+      expect(fetchFn.mock.calls.map(([url]) => url)).toEqual([INTL, CN]);
+      const [intlInit, cnInit] = fetchFn.mock.calls.map(([, init]) => init as RequestInit);
+      expect(intlInit).toMatchObject({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer sk-sp-secret',
+          'x-api-key': 'sk-sp-secret',
+          'X-DashScope-API-Key': 'sk-sp-secret',
+          'Content-Type': 'application/json',
+        }),
+      });
+      expect(JSON.parse(intlInit.body as string)).toEqual({
+        queryCodingPlanInstanceInfoRequest: { commodityCode: 'sfm_codingplan_public_intl' },
+      });
+      expect(JSON.parse(cnInit.body as string)).toEqual({
+        queryCodingPlanInstanceInfoRequest: { commodityCode: 'sfm_codingplan_public_cn' },
+      });
+      expect(report).toMatchObject({
+        status: 'live',
+        source: 'alibaba_model_studio_coding_plan_quota',
+        windows: [{ name: '5-hour', remaining: 900, remainingPercent: 75, unit: 'requests' }],
+      });
+    });
+
+    it('stops at the first console that reports usage', async () => {
+      const fetchFn = jest.fn().mockResolvedValue(quota);
+      await new ProviderUsageAdapterRegistry(fetchFn as never).probe(
+        connection({ provider: 'qwen' }),
+        async () => 'sk-sp-secret',
+      );
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      expect(fetchFn).toHaveBeenCalledWith(INTL, expect.anything());
+    });
+
+    it.each([
+      ['beijing', [CN]],
+      ['https://ws1.cn-beijing.maas.aliyuncs.com/compatible-mode', [CN]],
+      ['singapore', [INTL]],
+      ['us', [INTL]],
+      ['https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode', [INTL]],
+    ])('asks only the console matching region %s', async (region, urls) => {
+      const fetchFn = jest.fn().mockResolvedValue(loginWall);
+      await new ProviderUsageAdapterRegistry(fetchFn as never).probe(
+        connection({ provider: 'alibaba', region }),
+        async () => 'sk-sp-secret',
+      );
+      expect(fetchFn.mock.calls.map(([url]) => url)).toEqual(urls);
+      if (urls[0] === CN) {
+        expect(JSON.parse((fetchFn.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+          queryCodingPlanInstanceInfoRequest: { commodityCode: 'sfm_codingplan_public_cn' },
+        });
+      }
+    });
+
+    it('explains that Alibaba kept usage behind its console when no endpoint reports it', async () => {
+      const fetchFn = jest
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+        .mockResolvedValueOnce(loginWall);
+      await expect(
+        new ProviderUsageAdapterRegistry(fetchFn as never).probe(
+          connection({ provider: 'qwen' }),
+          async () => 'sk-sp-secret',
+        ),
+      ).resolves.toEqual({
+        status: 'unavailable',
+        source: 'alibaba_model_studio_coding_plan_quota',
+        fetchedAt: null,
+        windows: [],
+        message:
+          'Alibaba Cloud did not share plan usage for this key; it may only show it in the Model Studio console',
+      });
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not try the second console after an auth rejection', async () => {
+      const fetchFn = jest.fn().mockResolvedValue({ ok: false, status: 403 });
+      const report = await new ProviderUsageAdapterRegistry(fetchFn as never).probe(
+        connection({ provider: 'qwen' }),
+        async () => 'sk-sp-secret',
+      );
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      expect(report.message).toBe(
+        'Usage endpoint did not accept this credential; inference may still work',
+      );
+    });
+
+    it('leaves pay-as-you-go DashScope keys unsupported', async () => {
+      const loadCredential = jest.fn();
+      await expect(
+        new ProviderUsageAdapterRegistry(jest.fn() as never).probe(
+          connection({ provider: 'qwen', auth_type: 'api_key' }),
+          loadCredential,
+        ),
+      ).resolves.toMatchObject({ status: 'unsupported' });
+      expect(loadCredential).not.toHaveBeenCalled();
+    });
   });
 
   it('does not claim inference credentials are invalid when only the private usage endpoint rejects them', async () => {

@@ -85,19 +85,46 @@ function groupByProvider(rows: ProviderPlanUsage[]): ProviderGroup[] {
   return groups;
 }
 
-const GEMINI_FEATURED_WINDOW = /gemini-3\.7|gemini-pro-agent/i;
-
 function isGeminiConnection(row: ProviderPlanUsage): boolean {
   return row.provider === 'gemini' || row.provider === 'google';
-}
-
-function isFeaturedGeminiWindow(window: ProviderPlanUsageWindow): boolean {
-  return GEMINI_FEATURED_WINDOW.test(window.name);
 }
 
 function clampPercent(value: number | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.min(100, Math.max(0, value));
+}
+
+/** Antigravity reports internal completion buckets (`chat_20706`) next to real models. */
+const GEMINI_INTERNAL_BUCKET = /^(chat|tab)_/i;
+
+export const GEMINI_BLENDED_WINDOW_NAME = 'All models (blended)';
+
+/**
+ * Google reports one quota bucket per model — twenty-odd rows that mostly
+ * read 100%. Collapse them into one blended figure: the mean remaining share
+ * across the real models, resetting when the soonest partly used bucket does.
+ * Returns null when no bucket carries a percentage, so the raw rows show.
+ */
+export function blendGeminiWindows(
+  windows: ProviderPlanUsageWindow[],
+): ProviderPlanUsageWindow | null {
+  const models = windows.filter((window) => !GEMINI_INTERNAL_BUCKET.test(window.name));
+  const pool = (models.length > 0 ? models : windows).filter(
+    (window) => clampPercent(window.remainingPercent) != null,
+  );
+  if (pool.length === 0) return null;
+  const remainingPercent =
+    pool.reduce((sum, window) => sum + clampPercent(window.remainingPercent)!, 0) / pool.length;
+  const resetAt = pool
+    .filter((window) => clampPercent(window.remainingPercent)! < 100 && window.resetAt)
+    .map((window) => window.resetAt!)
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+  return {
+    name: GEMINI_BLENDED_WINDOW_NAME,
+    remainingPercent,
+    usedPercent: 100 - remainingPercent,
+    ...(resetAt ? { resetAt } : {}),
+  };
 }
 
 function formatReset(value?: string): string | null {
@@ -356,15 +383,15 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> 
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal<string | null>(null);
   const [showMoreWindows, setShowMoreWindows] = createSignal(false);
+  const blendedWindow = createMemo(() =>
+    isGeminiConnection(props.row) ? blendGeminiWindows(quota().windows) : null,
+  );
   const featuredWindows = createMemo(() => {
-    const windows = quota().windows;
-    if (!isGeminiConnection(props.row)) return windows;
-    return windows.filter(isFeaturedGeminiWindow);
+    const blended = blendedWindow();
+    return blended ? [blended] : quota().windows;
   });
-  const extraWindows = createMemo(() => {
-    if (!isGeminiConnection(props.row)) return [];
-    return quota().windows.filter((window) => !isFeaturedGeminiWindow(window));
-  });
+  // Per-model rows stay one click away behind the blended figure.
+  const extraWindows = createMemo(() => (blendedWindow() ? quota().windows : []));
   const visibleWindows = createMemo(() =>
     showMoreWindows() ? [...featuredWindows(), ...extraWindows()] : featuredWindows(),
   );
@@ -468,8 +495,8 @@ const PlanUsageCard: Component<{ row: ProviderPlanUsage; onSaved: () => void }> 
               onClick={() => setShowMoreWindows(!showMoreWindows())}
             >
               {showMoreWindows()
-                ? 'Show less'
-                : `Show ${extraWindows().length} more model${extraWindows().length === 1 ? '' : 's'}`}
+                ? 'Hide per-model usage'
+                : `Show per-model usage (${extraWindows().length})`}
             </button>
           </Show>
         </Show>

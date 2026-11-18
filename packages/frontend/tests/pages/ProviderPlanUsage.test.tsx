@@ -15,7 +15,10 @@ vi.mock('../../src/components/ProviderIcon.jsx', () => ({
   providerIcon: () => null,
 }));
 
-import PlanUsage from '../../src/pages/providers/PlanUsage';
+import PlanUsage, {
+  GEMINI_BLENDED_WINDOW_NAME,
+  blendGeminiWindows,
+} from '../../src/pages/providers/PlanUsage';
 
 const liveAnthropic = {
   tenant_provider_id: 'tp-anthropic',
@@ -308,65 +311,54 @@ describe('Plan Usage page', () => {
     ).toEqual([['Claude Max', 'Work Max'], ['Plus', 'Team'], ['Google'], ['Grok']]);
   });
 
-  it('keeps Gemini 3.7 and Pro Agent usage visible and hides the rest until expanded', async () => {
-    mocks.getProviderPlanUsage.mockResolvedValue({
-      connections: [
-        {
-          ...liveAnthropic,
-          tenant_provider_id: 'tp-gemini',
-          provider: 'gemini',
-          label: 'Google',
-          quota: {
-            status: 'live',
-            source: 'google_cloud_code_quota',
-            fetchedAt: '2026-09-06T01:00:00.000Z',
-            windows: [
-              { name: 'gemini-2.5-flash', remainingPercent: 100 },
-              { name: 'gemini-3.7-flash-tiered', remainingPercent: 100 },
-              { name: 'gemini-pro-agent', remainingPercent: 100 },
-              { name: 'gpt-oss-120b-medium', remainingPercent: 100 },
-            ],
-          },
-        },
-      ],
-    });
-    render(() => <PlanUsage />);
-    await screen.findByText('gemini-3.7-flash-tiered');
-    expect(screen.getByText('gemini-pro-agent')).toBeDefined();
-    expect(screen.queryByText('gemini-2.5-flash')).toBeNull();
-    expect(screen.queryByText('gpt-oss-120b-medium')).toBeNull();
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Show 2 more models' }));
-    expect(await screen.findByText('gemini-2.5-flash')).toBeDefined();
-    expect(screen.getByText('gpt-oss-120b-medium')).toBeDefined();
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
-    expect(screen.queryByText('gemini-2.5-flash')).toBeNull();
+  const geminiRow = (windows: Array<Record<string, unknown>>) => ({
+    ...liveAnthropic,
+    tenant_provider_id: 'tp-gemini',
+    provider: 'gemini',
+    label: 'Google',
+    quota: {
+      status: 'live',
+      source: 'google_cloud_code_quota',
+      fetchedAt: '2026-09-06T01:00:00.000Z',
+      windows,
+    },
   });
 
-  it('pluralises the hidden-model toggle for a single extra window', async () => {
+  it('shows one blended Google figure and keeps per-model rows behind a toggle', async () => {
     mocks.getProviderPlanUsage.mockResolvedValue({
       connections: [
-        {
-          ...liveAnthropic,
-          tenant_provider_id: 'tp-gemini',
-          provider: 'gemini',
-          label: 'Google',
-          quota: {
-            status: 'live',
-            source: 'google_cloud_code_quota',
-            fetchedAt: '2026-09-06T01:00:00.000Z',
-            windows: [
-              { name: 'gemini-3.7-flash-tiered', remainingPercent: 100 },
-              { name: 'gpt-oss-120b-medium', remainingPercent: 100 },
-            ],
-          },
-        },
+        geminiRow([
+          { name: 'chat_20706', remainingPercent: 100 },
+          { name: 'gemini-2.5-flash', remainingPercent: 100 },
+          { name: 'gemini-3-pro', remainingPercent: 40, resetAt: '2026-09-06T08:00:00.000Z' },
+          { name: 'claude-sonnet-4-6', remainingPercent: 70, resetAt: '2026-09-06T05:00:00.000Z' },
+          { name: 'gpt-oss-120b-medium', remainingPercent: 90 },
+        ]),
       ],
     });
     render(() => <PlanUsage />);
-    await screen.findByText('gemini-3.7-flash-tiered');
-    expect(screen.getByRole('button', { name: 'Show 1 more model' })).toBeDefined();
+    expect(await screen.findByText(GEMINI_BLENDED_WINDOW_NAME)).toBeDefined();
+    // (100 + 40 + 70 + 90) / 4 — the internal chat_ bucket stays out of the blend.
+    expect(screen.getByText('75% remaining')).toBeDefined();
+    expect(screen.queryByText('gemini-3-pro')).toBeNull();
+    expect(screen.queryByText('chat_20706')).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Show per-model usage (5)' }));
+    expect(await screen.findByText('gemini-3-pro')).toBeDefined();
+    expect(screen.getByText('chat_20706')).toBeDefined();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide per-model usage' }));
+    expect(screen.queryByText('gemini-3-pro')).toBeNull();
+  });
+
+  it('shows the raw Google rows when no bucket reports a percentage', async () => {
+    mocks.getProviderPlanUsage.mockResolvedValue({
+      connections: [geminiRow([{ name: 'gemini-2.5-pro' }])],
+    });
+    render(() => <PlanUsage />);
+    expect(await screen.findByText('gemini-2.5-pro')).toBeDefined();
+    expect(screen.queryByText(GEMINI_BLENDED_WINDOW_NAME)).toBeNull();
+    expect(screen.queryByRole('button', { name: /per-model usage/ })).toBeNull();
   });
 
   it('renders subscription credits as a quiet detail row, not a headline', async () => {
@@ -553,5 +545,43 @@ describe('Plan Usage page', () => {
     expect(row?.querySelector('.plan-usage-agent__name')?.textContent).toBe('Unknown agent');
     expect(row?.querySelector('.plan-usage-agent__platform')?.textContent).toBe('Other');
     expect(row?.querySelector<HTMLElement>('.plan-usage-agent__fill')?.style.width).toBe('0%');
+  });
+});
+
+describe('blendGeminiWindows', () => {
+  it('averages the real models and resets with the soonest partly used one', () => {
+    expect(
+      blendGeminiWindows([
+        { name: 'tab_flash', remainingPercent: 0 },
+        { name: 'gemini-3-pro', remainingPercent: 20, resetAt: '2026-09-06T08:00:00.000Z' },
+        { name: 'claude-opus', remainingPercent: 60, resetAt: '2026-09-06T05:00:00.000Z' },
+        { name: 'gemini-flash', remainingPercent: 100, resetAt: '2026-09-06T01:00:00.000Z' },
+        { name: 'unknown-bucket' },
+      ]),
+    ).toEqual({
+      name: GEMINI_BLENDED_WINDOW_NAME,
+      remainingPercent: 60,
+      usedPercent: 40,
+      resetAt: '2026-09-06T05:00:00.000Z',
+    });
+  });
+
+  it('omits the reset when nothing has been used', () => {
+    expect(
+      blendGeminiWindows([
+        { name: 'gemini-flash', remainingPercent: 100, resetAt: '2026-09-06T01:00:00.000Z' },
+      ]),
+    ).toEqual({ name: GEMINI_BLENDED_WINDOW_NAME, remainingPercent: 100, usedPercent: 0 });
+  });
+
+  it('blends internal buckets when they are all Google reports', () => {
+    expect(blendGeminiWindows([{ name: 'chat_1', remainingPercent: 50 }])).toMatchObject({
+      remainingPercent: 50,
+    });
+  });
+
+  it('returns null when no bucket has a percentage', () => {
+    expect(blendGeminiWindows([])).toBeNull();
+    expect(blendGeminiWindows([{ name: 'gemini-flash' }])).toBeNull();
   });
 });

@@ -62,14 +62,28 @@ type FetchLike = (
   json(): Promise<unknown>;
 }>;
 
+interface ProbeRequest {
+  url: string;
+  body?: string;
+}
+
 interface ProbeDefinition {
   source: string;
   authTypes?: TenantProvider['auth_type'][];
   url: (connection: TenantProvider) => string;
+  /**
+   * Further endpoints to try, in order, when the previous one answered
+   * without usable data (non-2xx other than auth/rate-limit, or a body that
+   * parses to nothing). Used where one credential may live in either of two
+   * regions.
+   */
+  fallbackRequests?: (connection: TenantProvider) => ProbeRequest[];
   method: 'GET' | 'POST';
   headers: (credential: CredentialParts) => Record<string, string>;
-  body?: (credential: CredentialParts) => string;
+  body?: (credential: CredentialParts, connection: TenantProvider) => string;
   parse: (body: unknown) => ParsedProviderUsage;
+  /** Shown when every request came back without usage data. */
+  unavailableMessage?: string;
 }
 
 interface CredentialParts {
@@ -341,31 +355,26 @@ const ZAI_LIMIT_NAMES: Record<string, string> = {
 
 /**
  * Z.ai reports its rolling and long windows under one `type`, so a coding plan
- * comes back as two identical "credit limit" rows that differ only by reset
- * time. Name them by the cadence their reset implies.
+ * comes back as two "credit limit" rows. Each row carries its own cadence as
+ * `unit` + `number` (`3`/`5` is the 5-hour window, `6`/`1` the weekly one).
+ * Only units confirmed against live responses are named; anything else keeps
+ * the provider's wording rather than guessing.
+ *
+ * The cadence must come from these fields, never from how far away the reset
+ * is: a weekly window a few hours from its reset looks exactly like a 5-hour
+ * window by that measure, which swapped the two labels.
  */
-function zaiWindowCadence(resetAt: string | undefined, now: number): string | undefined {
-  if (!resetAt) return undefined;
-  const remainingHours = (new Date(resetAt).getTime() - now) / 3_600_000;
-  if (!Number.isFinite(remainingHours) || remainingHours <= 0) return undefined;
-  if (remainingHours <= 6) return '5-hour';
-  if (remainingHours <= 24 * 8) return 'weekly';
-  return undefined;
-}
-
-/**
- * Only rename when a name actually repeats: a plan that reports a single
- * window keeps the provider's own wording.
- */
-function disambiguateZaiWindows(windows: ProviderQuotaWindow[]): ProviderQuotaWindow[] {
-  const counts = new Map<string, number>();
-  for (const window of windows) counts.set(window.name, (counts.get(window.name) ?? 0) + 1);
-  const now = Date.now();
-  return windows.map((window) => {
-    if ((counts.get(window.name) ?? 0) < 2) return window;
-    const cadence = zaiWindowCadence(window.resetAt, now);
-    return cadence ? { ...window, name: `${cadence} ${window.name}` } : window;
-  });
+function zaiWindowCadence(unit: unknown, count: unknown): string | undefined {
+  const size = finite(count);
+  if (size === undefined || size <= 0 || !Number.isInteger(size)) return undefined;
+  switch (finite(unit)) {
+    case 3:
+      return `${size}-hour`;
+    case 6:
+      return size === 1 ? 'Weekly' : `${size}-week`;
+    default:
+      return undefined;
+  }
 }
 
 export function parseZaiUsage(body: unknown): ParsedProviderUsage {
@@ -380,12 +389,20 @@ export function parseZaiUsage(body: unknown): ParsedProviderUsage {
         const remaining = finite(limit['remaining']);
         if (usedPercent === undefined && remaining === undefined) return [];
         const type = typeof limit['type'] === 'string' ? limit['type'] : 'RATE_LIMIT';
+        const typeName = ZAI_LIMIT_NAMES[type] ?? type.toLowerCase().replaceAll('_', ' ');
+        const cadence = zaiWindowCadence(limit['unit'], limit['number']);
+        // `usage` is the window's allowance and `currentValue` what has been
+        // spent against it (it can overshoot the allowance slightly).
+        const allowance = finite(limit['usage']);
+        const spent = finite(limit['currentValue']);
         return [
           {
-            name: ZAI_LIMIT_NAMES[type] ?? type.toLowerCase().replaceAll('_', ' '),
+            name: cadence ? `${cadence} ${typeName}` : typeName,
             ...(usedPercent !== undefined
               ? { usedPercent, remainingPercent: complement(usedPercent) }
               : {}),
+            ...(allowance !== undefined ? { limit: allowance } : {}),
+            ...(spent !== undefined ? { used: spent } : {}),
             ...(remaining !== undefined ? { remaining } : {}),
             ...(isoTime(limit['nextResetTime'], true)
               ? { resetAt: isoTime(limit['nextResetTime'], true) }
@@ -395,8 +412,173 @@ export function parseZaiUsage(body: unknown): ParsedProviderUsage {
       })
     : [];
   return {
-    windows: disambiguateZaiWindows(windows),
+    windows,
     ...(typeof root['level'] === 'string' ? { planName: root['level'] } : {}),
+  };
+}
+
+/**
+ * Alibaba's console wraps payloads in several envelopes (`data`,
+ * `successResponse`, `DataV2`) and sometimes ships an inner object as a JSON
+ * string, so look for a key anywhere in the tree instead of at a fixed path.
+ */
+function findDeep(value: unknown, key: string, depth = 0): unknown {
+  if (depth > 8) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return undefined;
+    try {
+      return findDeep(JSON.parse(trimmed), key, depth + 1);
+    } catch {
+      return undefined;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findDeep(item, key, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  const object = record(value);
+  if (!object) return undefined;
+  if (key in object) return object[key];
+  for (const child of Object.values(object)) {
+    const found = findDeep(child, key, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function firstString(source: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+const ALIBABA_ACTIVE_STATUSES = new Set(['VALID', 'ACTIVE']);
+
+/** Prefer the instance the console marks active; fall back to the first one. */
+function alibabaInstance(root: unknown): Record<string, unknown> | null {
+  const infos = findDeep(root, 'codingPlanInstanceInfos');
+  if (!Array.isArray(infos)) return null;
+  const instances = infos.map(record).filter((info): info is Record<string, unknown> => !!info);
+  return (
+    instances.find((info) =>
+      ALIBABA_ACTIVE_STATUSES.has(
+        (firstString(info, ['status', 'instanceStatus']) ?? '').toUpperCase(),
+      ),
+    ) ??
+    instances[0] ??
+    null
+  );
+}
+
+const ALIBABA_WINDOWS: Array<[string, string, string, string]> = [
+  ['5-hour', 'per5HourUsedQuota', 'per5HourTotalQuota', 'per5HourQuotaNextRefreshTime'],
+  ['Weekly', 'perWeekUsedQuota', 'perWeekTotalQuota', 'perWeekQuotaNextRefreshTime'],
+  [
+    'Monthly',
+    'perBillMonthUsedQuota',
+    'perBillMonthTotalQuota',
+    'perBillMonthQuotaNextRefreshTime',
+  ],
+];
+
+/**
+ * Alibaba Cloud Model Studio Coding Plan quota, as the Model Studio console
+ * reports it. Counts are requests per rolling 5-hour, weekly and billing-month
+ * window. A response without counters (including the console's
+ * `ConsoleNeedLogin` answer) parses to no data, so the probe reports the
+ * usage as unavailable rather than inventing a 0%.
+ */
+export function parseAlibabaCodingPlanUsage(body: unknown): ParsedProviderUsage {
+  const instance = alibabaInstance(body);
+  const quota =
+    record(instance?.['codingPlanQuotaInfo']) ?? record(findDeep(body, 'codingPlanQuotaInfo'));
+  const windows: ProviderQuotaWindow[] = quota
+    ? ALIBABA_WINDOWS.flatMap(([name, usedKey, totalKey, resetKey]) => {
+        const limit = finite(quota[totalKey]);
+        if (limit === undefined || limit <= 0) return [];
+        const used = Math.max(0, finite(quota[usedKey]) ?? 0);
+        const usedPercent = Math.min(100, (used / limit) * 100);
+        const resetAt = isoTime(quota[resetKey], true);
+        return [
+          {
+            name,
+            limit,
+            used,
+            remaining: Math.max(0, limit - used),
+            usedPercent,
+            remainingPercent: complement(usedPercent),
+            unit: 'requests',
+            ...(resetAt ? { resetAt } : {}),
+          },
+        ];
+      })
+    : [];
+  const planName = instance
+    ? firstString(instance, ['planName', 'instanceName', 'packageName'])
+    : undefined;
+  // A plan name alone is not usage: report data only when there are counters.
+  return windows.length > 0 ? { windows, ...(planName ? { planName } : {}) } : { windows: [] };
+}
+
+type AlibabaConsoleRegion = 'intl' | 'cn';
+
+const ALIBABA_CONSOLES: Record<
+  AlibabaConsoleRegion,
+  { origin: string; regionId: string; commodityCode: string }
+> = {
+  intl: {
+    origin: 'https://modelstudio.console.alibabacloud.com',
+    regionId: 'ap-southeast-1',
+    commodityCode: 'sfm_codingplan_public_intl',
+  },
+  cn: {
+    origin: 'https://bailian.console.aliyun.com',
+    regionId: 'cn-beijing',
+    commodityCode: 'sfm_codingplan_public_cn',
+  },
+};
+
+/**
+ * Which console(s) to ask. An explicit mainland region or endpoint only asks
+ * the mainland console, an explicit international one only the international
+ * console; `auto` (or nothing) tries international first, then mainland.
+ */
+function alibabaConsoleRegions(region: string | null | undefined): AlibabaConsoleRegion[] {
+  const value = (region ?? '').toLowerCase();
+  if (value === 'beijing' || value.includes('cn-beijing') || value.includes('dashscope.aliyuncs')) {
+    return ['cn'];
+  }
+  if (
+    value === 'singapore' ||
+    value === 'us' ||
+    value.includes('ap-southeast') ||
+    value.includes('dashscope-intl') ||
+    value.includes('dashscope-us')
+  ) {
+    return ['intl'];
+  }
+  return ['intl', 'cn'];
+}
+
+function alibabaQuotaRequest(region: AlibabaConsoleRegion): ProbeRequest {
+  const endpoint = ALIBABA_CONSOLES[region];
+  const query = new URLSearchParams({
+    action: 'zeldaEasy.broadscope-bailian.codingPlan.queryCodingPlanInstanceInfoV2',
+    product: 'broadscope-bailian',
+    api: 'queryCodingPlanInstanceInfoV2',
+    currentRegionId: endpoint.regionId,
+  });
+  return {
+    url: `${endpoint.origin}/data/api.json?${query.toString()}`,
+    body: JSON.stringify({
+      queryCodingPlanInstanceInfoRequest: { commodityCode: endpoint.commodityCode },
+    }),
   };
 }
 
@@ -527,7 +709,33 @@ const DEFINITIONS: Record<string, ProbeDefinition> = {
     headers: bearer,
     parse: parseMetaUsage,
   },
+  qwen: {
+    source: 'alibaba_model_studio_coding_plan_quota',
+    url: (connection) => alibabaQuotaRequest(alibabaConsoleRegions(connection.region)[0]).url,
+    fallbackRequests: (connection) =>
+      alibabaConsoleRegions(connection.region).slice(1).map(alibabaQuotaRequest),
+    method: 'POST',
+    headers: (credential) => ({
+      ...bearer(credential),
+      'Content-Type': 'application/json',
+      'x-api-key': credential.token,
+      'X-DashScope-API-Key': credential.token,
+    }),
+    body: (_credential, connection) =>
+      alibabaQuotaRequest(alibabaConsoleRegions(connection.region)[0]).body!,
+    parse: parseAlibabaCodingPlanUsage,
+    unavailableMessage:
+      'Alibaba Cloud did not share plan usage for this key; it may only show it in the Model Studio console',
+  },
 };
+
+/** Provider ids that share another provider's probe. */
+const DEFINITION_ALIASES: Record<string, string> = { alibaba: 'qwen' };
+
+function definitionFor(provider: string): ProbeDefinition | undefined {
+  if (isZaiProviderId(provider)) return DEFINITIONS['zai'];
+  return DEFINITIONS[DEFINITION_ALIASES[provider] ?? provider];
+}
 
 @Injectable()
 export class ProviderUsageAdapterRegistry {
@@ -541,8 +749,7 @@ export class ProviderUsageAdapterRegistry {
     connection: TenantProvider,
     loadCredential: () => Promise<string | null>,
   ): Promise<ProviderQuotaReport> {
-    const provider = connection.provider.toLowerCase();
-    const definition = DEFINITIONS[isZaiProviderId(provider) ? 'zai' : provider];
+    const definition = definitionFor(connection.provider.toLowerCase());
     const supportedAuthTypes = definition?.authTypes ?? ['subscription'];
     if (!definition || !supportedAuthTypes.includes(connection.auth_type)) {
       return {
@@ -566,13 +773,35 @@ export class ProviderUsageAdapterRegistry {
     }
 
     const credential = credentialParts(rawCredential);
+    const requests: ProbeRequest[] = [
+      {
+        url: definition.url(connection),
+        ...(definition.body ? { body: definition.body(credential, connection) } : {}),
+      },
+      ...(definition.fallbackRequests?.(connection) ?? []),
+    ];
+    for (const request of requests) {
+      const report = await this.probeOnce(definition, credential, request);
+      // Only "answered, but nothing usable" moves on to the next endpoint; an
+      // auth rejection, rate limit or timeout is the answer for this key.
+      if (report) return report;
+    }
+    return this.unavailable(definition.source, definition.unavailableMessage);
+  }
+
+  /** One request. Resolves null when the endpoint answered with no usable usage data. */
+  private async probeOnce(
+    definition: ProbeDefinition,
+    credential: CredentialParts,
+    request: ProbeRequest,
+  ): Promise<ProviderQuotaReport | null> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
-      const response = await this.fetchFn(definition.url(connection), {
+      const response = await this.fetchFn(request.url, {
         method: definition.method,
         headers: definition.headers(credential),
-        ...(definition.body ? { body: definition.body(credential) } : {}),
+        ...(request.body !== undefined ? { body: request.body } : {}),
         signal: controller.signal,
       });
       if (response.status === 401 || response.status === 403) {
@@ -593,14 +822,14 @@ export class ProviderUsageAdapterRegistry {
           message: 'Provider usage is rate limited',
         };
       }
-      if (!response.ok) return this.unavailable(definition.source);
+      if (!response.ok) return null;
       const parsed = definition.parse(await response.json());
       const hasData =
         parsed.windows.length > 0 ||
         parsed.balance !== undefined ||
         parsed.planName !== undefined ||
         parsed.overage !== undefined;
-      if (!hasData) return this.unavailable(definition.source);
+      if (!hasData) return null;
       return {
         status: 'live',
         source: definition.source,
@@ -623,13 +852,13 @@ export class ProviderUsageAdapterRegistry {
     }
   }
 
-  private unavailable(source: string): ProviderQuotaReport {
+  private unavailable(source: string, message?: string): ProviderQuotaReport {
     return {
       status: 'unavailable',
       source,
       fetchedAt: null,
       windows: [],
-      message: 'Provider usage unavailable',
+      message: message ?? 'Provider usage unavailable',
     };
   }
 }
