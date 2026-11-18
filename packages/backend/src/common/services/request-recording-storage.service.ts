@@ -51,7 +51,7 @@ export function normalizeRecordingS3Prefix(prefix: string | undefined | null): s
   // Trim before the control-character check so a trailing CR or tab from a
   // Windows .env is the same as a trailing space, not a boot failure.
   const trimmed = prefix.trim();
-  if (/[\u0000-\u001F\u007F]/.test(trimmed)) throw invalidRecordingS3Prefix(prefix);
+  if (/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/.test(trimmed)) throw invalidRecordingS3Prefix(prefix);
   const collapsed = trimmed
     .replaceAll('\\', '/')
     .replace(/\/+/g, '/')

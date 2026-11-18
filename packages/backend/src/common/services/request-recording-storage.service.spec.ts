@@ -496,6 +496,11 @@ describe('S3 recording key prefix', () => {
     'manifest/\rrecordings',
     'manifest/\trecordings',
     'foo\u0000bar',
+    'a\u0080b',
+    'a\u0085b',
+    'a\u009Fb',
+    'a\u2028b',
+    'a\u2029b',
   ])('rejects prefix %s', (prefix) => {
     expect(() => open(prefix)).toThrow(/Invalid REQUEST_RECORDING_S3_PREFIX/);
   });
