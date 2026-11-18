@@ -48,10 +48,12 @@ function invalidRecordingS3Prefix(prefix: string): Error {
  */
 export function normalizeRecordingS3Prefix(prefix: string | undefined | null): string {
   if (prefix == null) return '';
-  // Trim before the control-character check so a trailing CR or tab from a
-  // Windows .env is the same as a trailing space, not a boot failure.
+  // trim() removes U+2028/U+2029, so those line separators are checked on the
+  // raw value. CR and tab are trimmed first and only fail when they sit inside.
   const trimmed = prefix.trim();
-  if (/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/.test(trimmed)) throw invalidRecordingS3Prefix(prefix);
+  if (/[\u2028\u2029]/.test(prefix) || /[\u0000-\u001F\u007F-\u009F]/.test(trimmed)) {
+    throw invalidRecordingS3Prefix(prefix);
+  }
   const collapsed = trimmed
     .replaceAll('\\', '/')
     .replace(/\/+/g, '/')
