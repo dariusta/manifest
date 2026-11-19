@@ -1,5 +1,5 @@
 import { registerAs } from '@nestjs/config';
-import { optionalPositiveInteger } from './env.util';
+import { optionalPositiveInteger, parseRequestRecordingRetentionDays } from './env.util';
 
 function resolveDatabaseUrl(): string {
   const url = process.env['DATABASE_URL'];
@@ -56,10 +56,13 @@ export const appConfig = registerAs('app', () => ({
   // without auth. Off by default; only Manifest Cloud's marketing site uses it.
   // The variable keeps its historical name so existing deployments stay on.
   publicErrorPagesEnabled: process.env['MANIFEST_PUBLIC_STATS'] === 'true',
-  // Optional instance-wide override. When unset, request recordings follow the
-  // Cloud plan policy (Free 7 days, Pro 365 days); non-billing deployments use
-  // the 365-day default.
-  requestRecordingRetentionDays: optionalPositiveInteger(
+  // Optional instance-wide override. When unset or blank, request recordings
+  // follow the Cloud plan policy (Free 7 days, Pro 365 days); non-billing
+  // deployments use the 365-day default. 0, "none", and "forever" disable
+  // retention deletes. Any other value throws while config loads, which fails
+  // boot. Parsed separately from optionalPositiveInteger, which still treats
+  // 0 as unset for every other variable.
+  requestRecordingRetentionDays: parseRequestRecordingRetentionDays(
     process.env['REQUEST_RECORDING_RETENTION_DAYS'],
   ),
   // Recording storage uses capability detection by default: complete S3
@@ -73,6 +76,14 @@ export const appConfig = registerAs('app', () => ({
   requestRecordingS3AccessKeyId: process.env['REQUEST_RECORDING_S3_ACCESS_KEY_ID'] ?? '',
   requestRecordingS3SecretAccessKey: process.env['REQUEST_RECORDING_S3_SECRET_ACCESS_KEY'] ?? '',
   requestRecordingS3ForcePathStyle: process.env['REQUEST_RECORDING_S3_FORCE_PATH_STYLE'] === 'true',
+  // Optional key prefix inside the bucket. agent_messages.recording_key keeps
+  // the logical key (request-recordings/v1/...), so filesystem and S3 stay
+  // interchangeable. The S3 driver prepends this on put, get, and delete.
+  requestRecordingS3Prefix: process.env['REQUEST_RECORDING_S3_PREFIX'] ?? '',
+  // Read-only directory used when S3 is active and GetObject returns
+  // NoSuchKey/404. Writes and deletes never touch it.
+  requestRecordingFallbackFilesystemPath:
+    process.env['REQUEST_RECORDING_FALLBACK_FILESYSTEM_PATH'] ?? '',
   // Shared secret guarding the internal error-page push endpoint
   // (/api/v1/internal/error-pages). The Peacock CMS sends it in the
   // `x-internal-secret` header to publish/unpublish curated error pages.

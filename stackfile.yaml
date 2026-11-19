@@ -24,6 +24,17 @@ resources:
       RUN_MIGRATIONS_ON_BOOT: 'true'
       REQUEST_RECORDING_STORAGE: filesystem
       REQUEST_RECORDING_FILESYSTEM_PATH: /data/request-recordings
+      # 0 keeps every recording. This 10Gi volume is not pruned and grows until full.
+      REQUEST_RECORDING_RETENTION_DAYS: "0"
+      # Optional S3/R2 cutover. Replace REQUEST_RECORDING_STORAGE above with s3;
+      # do not add a second key. Leave the recordings volume mounted while
+      # dual-reading. Access keys belong in secrets, not this file.
+      # A prefix with "..", ".", or a control character prevents boot.
+      # REQUEST_RECORDING_S3_BUCKET:
+      # REQUEST_RECORDING_S3_ENDPOINT:
+      # REQUEST_RECORDING_S3_REGION: auto
+      # REQUEST_RECORDING_S3_PREFIX: manifest/recordings/
+      # REQUEST_RECORDING_FALLBACK_FILESYSTEM_PATH: /data/request-recordings
       SHUTDOWN_DRAIN_MS: '10000'
     secrets:
       manifest-runtime:

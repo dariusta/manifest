@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { isBillingEnabled } from '../billing/billing.config';
+import { parseRequestRecordingRetentionDays } from '../config/env.util';
 import { RequestRecordingRetentionService } from './request-recording-retention.service';
 
 jest.mock('../billing/billing.config', () => ({
@@ -78,6 +79,24 @@ describe('RequestRecordingRetentionService', () => {
       query.mock.invocationCallOrder[deleteCall]!,
     );
   });
+
+  it.each(['0', 'none', 'forever', 'NONE', 'Forever'])(
+    'does not delete recordings when retention is %s',
+    async (raw) => {
+      get.mockReturnValue(parseRequestRecordingRetentionDays(raw));
+      service = new RequestRecordingRetentionService(
+        { createQueryRunner } as never,
+        { get } as never,
+        storage as never,
+      );
+
+      await expect(service.deleteExpiredRecordings()).resolves.toBe(0);
+
+      expect(createQueryRunner).not.toHaveBeenCalled();
+      expect(query).not.toHaveBeenCalled();
+      expect(storage.delete).not.toHaveBeenCalled();
+    },
+  );
 
   it('uses one global retention override for every plan', async () => {
     get.mockReturnValue(30);

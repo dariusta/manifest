@@ -99,6 +99,10 @@ export class RequestRecordingRetentionService {
     waitForCompletion: true,
   })
   async deleteExpiredRecordings(): Promise<number> {
+    // 0 is the explicit keep-forever override (0 / none / forever). It must not
+    // reach the expiry query: a 0-day window matches every recording.
+    if (this.globalRetentionDays === 0) return 0;
+
     const queryRunner = this.dataSource.createQueryRunner();
     let acquired = false;
     try {
